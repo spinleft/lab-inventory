@@ -1,4 +1,5 @@
 use crate::helpers::spawn_app;
+use reqwest::header::{ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_ORIGIN, ORIGIN};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -38,6 +39,37 @@ async fn auth_me_requires_authentication() {
     let response = app.get_me().await;
 
     assert_eq!(response.status().as_u16(), 401);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["error"], "Authentication required");
+}
+
+#[tokio::test]
+async fn auth_me_unauthorized_response_includes_cors_headers() {
+    let app = spawn_app().await;
+
+    let response = app
+        .api_client
+        .get(format!("{}/api/v1/auth/me", &app.address))
+        .header(ORIGIN, "http://127.0.0.1:5173")
+        .send()
+        .await
+        .expect("Failed to execute request.");
+
+    assert_eq!(response.status().as_u16(), 401);
+    assert_eq!(
+        response
+            .headers()
+            .get(ACCESS_CONTROL_ALLOW_ORIGIN)
+            .and_then(|value| value.to_str().ok()),
+        Some("http://127.0.0.1:5173")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(ACCESS_CONTROL_ALLOW_CREDENTIALS)
+            .and_then(|value| value.to_str().ok()),
+        Some("true")
+    );
     let body: serde_json::Value = response.json().await.unwrap();
     assert_eq!(body["error"], "Authentication required");
 }

@@ -27,7 +27,7 @@ export function LoginPage() {
     login.mutate(
       { username: username.trim(), password },
       {
-        onSuccess: () => navigate("/", { replace: true }),
+        onSuccess: () => navigate("/dashboard", { replace: true }),
       },
     );
   }

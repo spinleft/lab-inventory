@@ -547,6 +547,13 @@ a {
   justify-content: flex-start;
 }
 
+.server-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 12px;
+}
+
 .loading-panel,
 .problem-panel {
   width: min(100%, 480px);

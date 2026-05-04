@@ -16,7 +16,7 @@ type AppShellProps = {
 };
 
 const navItems = [
-  { to: "/", label: "概览", icon: LayoutDashboard, end: true },
+  { to: "/dashboard", label: "概览", icon: LayoutDashboard },
   { to: "/assets", label: "资产", icon: PackageSearch },
   { to: "/inventory", label: "库存", icon: Boxes },
 ];

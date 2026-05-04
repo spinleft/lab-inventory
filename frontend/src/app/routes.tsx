@@ -2,12 +2,17 @@ import { Navigate, Outlet, type RouteObject } from "react-router-dom";
 import { AppShell } from "./shell";
 import { ProtectedRoute } from "./protectedRoute";
 import { LoginPage } from "../features/auth/LoginPage";
+import { ServerSettingsPage } from "../features/auth/ServerSettingsPage";
 import { AssetsPage } from "../features/assets/AssetsPage";
 import { DashboardPage } from "../features/dashboard/DashboardPage";
 import { InventoryPage } from "../features/inventory/InventoryPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 
 export const routes: RouteObject[] = [
+  {
+    path: "/",
+    element: <ServerSettingsPage />,
+  },
   {
     path: "/login",
     element: <LoginPage />,
@@ -22,7 +27,7 @@ export const routes: RouteObject[] = [
       </ProtectedRoute>
     ),
     children: [
-      { index: true, element: <DashboardPage /> },
+      { path: "dashboard", element: <DashboardPage /> },
       { path: "assets", element: <AssetsPage /> },
       { path: "inventory", element: <InventoryPage /> },
       { path: "settings", element: <Navigate to="/settings/password" replace /> },

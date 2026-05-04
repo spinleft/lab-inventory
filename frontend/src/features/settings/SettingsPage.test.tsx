@@ -8,7 +8,7 @@ import { server } from "../../shared/test/server";
 describe("SettingsPage", () => {
   it("opens from the protected shell toolbar", async () => {
     const user = userEvent.setup();
-    renderRoute(["/"]);
+    renderRoute(["/dashboard"]);
 
     expect(await screen.findByRole("heading", { name: "概览" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "用户设置" }));
