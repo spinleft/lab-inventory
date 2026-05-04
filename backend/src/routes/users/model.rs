@@ -9,15 +9,15 @@ pub(super) struct UserResponse {
     user_id: Uuid,
     username: String,
     email: Option<String>,
-    group: UserGroupResponse,
+    user_type: UserTypeResponse,
     laboratory: Option<UserLaboratoryResponse>,
     created_at: DateTime<Utc>,
     last_login_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Serialize)]
-struct UserGroupResponse {
-    group_id: Uuid,
+struct UserTypeResponse {
+    user_type_id: Uuid,
     name: String,
 }
 
@@ -32,8 +32,8 @@ pub(super) struct UserRow {
     pub(super) user_id: Uuid,
     pub(super) username: String,
     pub(super) email: Option<String>,
-    pub(super) group_id: Uuid,
-    pub(super) group_name: String,
+    pub(super) user_type_id: Uuid,
+    pub(super) user_type_name: String,
     pub(super) laboratory_id: Option<Uuid>,
     pub(super) laboratory_name: Option<String>,
     pub(super) created_at: DateTime<Utc>,
@@ -46,9 +46,9 @@ impl From<UserRow> for UserResponse {
             user_id: row.user_id,
             username: row.username,
             email: row.email,
-            group: UserGroupResponse {
-                group_id: row.group_id,
-                name: row.group_name,
+            user_type: UserTypeResponse {
+                user_type_id: row.user_type_id,
+                name: row.user_type_name,
             },
             laboratory: row
                 .laboratory_id
@@ -68,14 +68,14 @@ pub(super) const USER_SELECT: &str = r#"
         users.user_id,
         users.username,
         users.email,
-        user_groups.group_id,
-        user_groups.name AS group_name,
+        user_types.user_type_id,
+        user_types.name AS user_type_name,
         laboratories.laboratory_id,
         laboratories.name AS laboratory_name,
         users.created_at,
         users.last_login_at
     FROM users
-    INNER JOIN user_groups USING (group_id)
+    INNER JOIN user_types USING (user_type_id)
     LEFT JOIN laboratories USING (laboratory_id)
 "#;
 

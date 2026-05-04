@@ -47,7 +47,7 @@ pub(super) struct StockAlertResponse {
 
 impl StockAlertResponse {
     pub fn from_row(row: StockAlertRow, actor: &Actor) -> Self {
-        let show_sensitive = actor.is_system_admin() || actor.is_same_laboratory(row.laboratory_id);
+        let show_sensitive = actor.is_owner() || actor.is_same_laboratory(row.laboratory_id);
         Self {
             asset_id: row.asset_id,
             laboratory_id: row.laboratory_id,
@@ -133,7 +133,7 @@ pub(super) struct MaintenanceAlertResponse {
 
 impl MaintenanceAlertResponse {
     pub fn from_row(row: MaintenanceAlertRow, actor: &crate::authentication::Actor) -> Self {
-        let show_sensitive = actor.is_system_admin() || actor.is_same_laboratory(row.laboratory_id);
+        let show_sensitive = actor.is_owner() || actor.is_same_laboratory(row.laboratory_id);
         Self {
             maintenance_schedule_id: row.maintenance_schedule_id,
             alert_kind: row.alert_kind,

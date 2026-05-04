@@ -18,7 +18,7 @@ pub async fn delete_laboratory(
     laboratory_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, ApiError> {
     let actor = get_actor(pool.get_ref(), user_id).await?;
-    if !actor.is_system_admin() {
+    if !actor.is_owner() {
         return Err(ApiError::Forbidden);
     }
 

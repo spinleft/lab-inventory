@@ -29,7 +29,7 @@ pub async fn update_laboratory(
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, ApiError> {
     let actor = get_actor(pool.get_ref(), user_id).await?;
-    if !actor.is_system_admin() {
+    if !actor.is_owner() {
         return Err(ApiError::Forbidden);
     }
 

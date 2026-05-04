@@ -96,7 +96,7 @@ fn push_inventory_filters(
         builder.push_bind(pattern.clone());
         builder.push(" OR COALESCE(asset_inventory_items.public_notes, '') ILIKE ");
         builder.push_bind(pattern.clone());
-        if actor.is_system_admin() {
+        if actor.is_owner() {
             builder.push(" OR COALESCE(asset_inventory_items.serial_number, '') ILIKE ");
             builder.push_bind(pattern.clone());
             builder.push(" OR COALESCE(asset_inventory_items.batch_number, '') ILIKE ");

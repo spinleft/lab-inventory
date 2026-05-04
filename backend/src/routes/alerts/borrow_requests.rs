@@ -69,7 +69,7 @@ pub async fn list_borrow_request_alerts(
             borrow_requests.created_at DESC
         "#,
     )
-    .bind(actor.is_system_admin())
+    .bind(actor.is_owner())
     .bind(laboratory_id)
     .fetch_all(pool.get_ref())
     .await

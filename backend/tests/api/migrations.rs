@@ -1,27 +1,27 @@
 use crate::helpers::spawn_app;
 
 #[tokio::test]
-async fn migrations_seed_default_user_groups_and_audit_log_table() {
+async fn migrations_seed_default_user_types_and_audit_log_table() {
     let app = spawn_app().await;
 
-    let groups: Vec<String> = sqlx::query_scalar("SELECT name FROM user_groups ORDER BY name")
+    let user_types: Vec<String> = sqlx::query_scalar("SELECT name FROM user_types ORDER BY name")
         .fetch_all(&app.db_pool)
         .await
         .unwrap();
-    assert_eq!(groups, vec!["guest", "lab_admin", "system_admin", "user"]);
+    assert_eq!(user_types, vec!["guest", "maintainer", "owner", "user"]);
 
     let admin: (String, Option<uuid::Uuid>) = sqlx::query_as(
         r#"
-        SELECT user_groups.name, users.laboratory_id
+        SELECT user_types.name, users.laboratory_id
         FROM users
-        INNER JOIN user_groups USING (group_id)
+        INNER JOIN user_types USING (user_type_id)
         WHERE users.username = 'admin'
         "#,
     )
     .fetch_one(&app.db_pool)
     .await
     .unwrap();
-    assert_eq!(admin.0, "system_admin");
+    assert_eq!(admin.0, "owner");
     assert!(admin.1.is_none());
 
     let audit_log_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_logs")

@@ -117,7 +117,7 @@ pub(super) async fn resolve_resource_laboratory(
             .map_err(|e| ApiError::UnexpectedError(e.into()))?;
             match row {
                 Some((requester_laboratory_id, owner_laboratory_id)) => {
-                    if actor.is_system_admin() {
+                    if actor.is_owner() {
                         Ok(owner_laboratory_id)
                     } else if actor.laboratory_id == Some(requester_laboratory_id) {
                         Ok(requester_laboratory_id)

@@ -1,7 +1,7 @@
 use crate::helpers::{TestUser, spawn_app};
 
 #[tokio::test]
-async fn system_admin_can_create_users_in_any_laboratory() {
+async fn owner_can_create_users_in_any_laboratory() {
     let app = spawn_app().await;
     app.test_user.login(&app).await;
     let laboratory_id = app.create_laboratory("Physics Lab").await;
@@ -10,7 +10,7 @@ async fn system_admin_can_create_users_in_any_laboratory() {
         .post_user(&serde_json::json!({
             "username": "physics-admin",
             "password": "password",
-            "group": "lab_admin",
+            "user_type": "maintainer",
             "laboratory_id": laboratory_id,
             "email": "physics-admin@example.com"
         }))
@@ -19,7 +19,7 @@ async fn system_admin_can_create_users_in_any_laboratory() {
     assert_eq!(response.status().as_u16(), 201);
     let body: serde_json::Value = response.json().await.unwrap();
     assert_eq!(body["username"], "physics-admin");
-    assert_eq!(body["group"]["name"], "lab_admin");
+    assert_eq!(body["user_type"]["name"], "maintainer");
     assert_eq!(
         body["laboratory"]["laboratory_id"],
         laboratory_id.to_string()
@@ -36,7 +36,7 @@ async fn creating_a_user_records_an_audit_log() {
         .post_user(&serde_json::json!({
             "username": "audited-user",
             "password": "password",
-            "group": "user",
+            "user_type": "user",
             "laboratory_id": laboratory_id
         }))
         .await;
@@ -66,23 +66,23 @@ async fn creating_a_user_records_an_audit_log() {
 }
 
 #[tokio::test]
-async fn lab_admin_can_create_and_delete_own_lab_user_and_guest() {
+async fn maintainer_can_create_and_delete_own_lab_user_and_guest() {
     let app = spawn_app().await;
     let laboratory_id = app.create_laboratory("Materials Lab").await;
-    let lab_admin = TestUser::generate_with_group("lab_admin", Some(laboratory_id));
-    app.store_user(&lab_admin).await;
-    lab_admin.login(&app).await;
+    let maintainer = TestUser::generate_with_user_type("maintainer", Some(laboratory_id));
+    app.store_user(&maintainer).await;
+    maintainer.login(&app).await;
 
     let response = app
         .post_user(&serde_json::json!({
             "username": "materials-user",
             "password": "password",
-            "group": "user"
+            "user_type": "user"
         }))
         .await;
     assert_eq!(response.status().as_u16(), 201);
     let body: serde_json::Value = response.json().await.unwrap();
-    assert_eq!(body["group"]["name"], "user");
+    assert_eq!(body["user_type"]["name"], "user");
     assert_eq!(
         body["laboratory"]["laboratory_id"],
         laboratory_id.to_string()
@@ -102,21 +102,21 @@ async fn lab_admin_can_create_and_delete_own_lab_user_and_guest() {
 }
 
 #[tokio::test]
-async fn lab_admin_cannot_create_system_admin_or_manage_other_laboratory_users() {
+async fn maintainer_cannot_create_owner_or_manage_other_laboratory_users() {
     let app = spawn_app().await;
     let own_laboratory_id = app.create_laboratory("Own Lab").await;
     let other_laboratory_id = app.create_laboratory("Other Lab").await;
-    let lab_admin = TestUser::generate_with_group("lab_admin", Some(own_laboratory_id));
-    let other_user = TestUser::generate_with_group("user", Some(other_laboratory_id));
-    app.store_user(&lab_admin).await;
+    let maintainer = TestUser::generate_with_user_type("maintainer", Some(own_laboratory_id));
+    let other_user = TestUser::generate_with_user_type("user", Some(other_laboratory_id));
+    app.store_user(&maintainer).await;
     app.store_user(&other_user).await;
-    lab_admin.login(&app).await;
+    maintainer.login(&app).await;
 
     let response = app
         .post_user(&serde_json::json!({
             "username": "bad-admin",
             "password": "password",
-            "group": "system_admin"
+            "user_type": "owner"
         }))
         .await;
     assert_eq!(response.status().as_u16(), 403);
@@ -125,7 +125,7 @@ async fn lab_admin_cannot_create_system_admin_or_manage_other_laboratory_users()
         .post_user(&serde_json::json!({
             "username": "other-lab-user",
             "password": "password",
-            "group": "user",
+            "user_type": "user",
             "laboratory_id": other_laboratory_id
         }))
         .await;
@@ -139,7 +139,7 @@ async fn lab_admin_cannot_create_system_admin_or_manage_other_laboratory_users()
 async fn regular_user_cannot_manage_users() {
     let app = spawn_app().await;
     let laboratory_id = app.create_laboratory("Biology Lab").await;
-    let user = TestUser::generate_with_group("user", Some(laboratory_id));
+    let user = TestUser::generate_with_user_type("user", Some(laboratory_id));
     app.store_user(&user).await;
     user.login(&app).await;
 
@@ -147,7 +147,7 @@ async fn regular_user_cannot_manage_users() {
         .post_user(&serde_json::json!({
             "username": "biology-guest",
             "password": "password",
-            "group": "guest",
+            "user_type": "guest",
             "laboratory_id": laboratory_id
         }))
         .await;

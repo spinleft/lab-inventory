@@ -1,6 +1,6 @@
 use super::model::UserRow;
 use crate::authentication::{
-    Actor, GUEST, LAB_ADMIN, SYSTEM_ADMIN, USER, group_exists, requires_laboratory,
+    Actor, GUEST, MAINTAINER, OWNER, USER, requires_laboratory, user_type_exists,
 };
 use crate::utils::ApiError;
 use sqlx::PgPool;
@@ -9,16 +9,16 @@ use uuid::Uuid;
 pub(super) async fn validate_user_management(
     pool: &PgPool,
     actor: &Actor,
-    target_group: &str,
+    target_user_type: &str,
     target_laboratory_id: Option<Uuid>,
 ) -> Result<(), ApiError> {
-    if !group_exists(pool, target_group).await? {
-        return Err(ApiError::BadRequest("Unknown user group".into()));
+    if !user_type_exists(pool, target_user_type).await? {
+        return Err(ApiError::BadRequest("Unknown user type".into()));
     }
-    if requires_laboratory(target_group) && target_laboratory_id.is_none() {
+    if requires_laboratory(target_user_type) && target_laboratory_id.is_none() {
         return Err(ApiError::BadRequest("laboratory_id is required".into()));
     }
-    if !actor.can_manage_user(target_group, target_laboratory_id) {
+    if !actor.can_manage_user(target_user_type, target_laboratory_id) {
         return Err(ApiError::Forbidden);
     }
     if let Some(laboratory_id) = target_laboratory_id {
@@ -29,10 +29,10 @@ pub(super) async fn validate_user_management(
 
 pub(super) fn resolve_target_laboratory(
     actor: &Actor,
-    target_group: &str,
+    target_user_type: &str,
     requested_laboratory_id: Option<Uuid>,
 ) -> Result<Option<Uuid>, ApiError> {
-    if actor.is_lab_admin() && matches!(target_group, USER | GUEST) {
+    if actor.is_maintainer() && matches!(target_user_type, USER | GUEST) {
         if requested_laboratory_id.is_some() && requested_laboratory_id != actor.laboratory_id {
             return Err(ApiError::Forbidden);
         }
@@ -42,9 +42,9 @@ pub(super) fn resolve_target_laboratory(
 }
 
 pub(super) fn ensure_can_view_user(actor: &Actor, target: &UserRow) -> Result<(), ApiError> {
-    if actor.is_system_admin()
+    if actor.is_owner()
         || actor.user_id == target.user_id
-        || (actor.is_lab_admin()
+        || (actor.is_maintainer()
             && actor.laboratory_id.is_some()
             && actor.laboratory_id == target.laboratory_id)
     {
@@ -75,12 +75,12 @@ pub(super) fn required_text<'a>(value: &'a str, field: &str) -> Result<&'a str, 
     Ok(trimmed)
 }
 
-pub(super) fn normalize_group(group: &str) -> Result<String, ApiError> {
-    let group = required_text(group, "group")?;
-    if matches!(group, SYSTEM_ADMIN | LAB_ADMIN | USER | GUEST) {
-        Ok(group.to_string())
+pub(super) fn normalize_user_type(user_type: &str) -> Result<String, ApiError> {
+    let user_type = required_text(user_type, "user_type")?;
+    if matches!(user_type, OWNER | MAINTAINER | USER | GUEST) {
+        Ok(user_type.to_string())
     } else {
-        Err(ApiError::BadRequest("Unknown user group".into()))
+        Err(ApiError::BadRequest("Unknown user type".into()))
     }
 }
 

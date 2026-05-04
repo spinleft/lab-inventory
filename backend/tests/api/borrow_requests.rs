@@ -89,19 +89,19 @@ async fn creating_borrow_request_enforces_permissions_and_availability() {
     let response = app.post_borrow_request(&body, "borrow-unauth").await;
     assert_eq!(response.status().as_u16(), 401);
 
-    let guest = TestUser::generate_with_group("guest", Some(requester_lab));
+    let guest = TestUser::generate_with_user_type("guest", Some(requester_lab));
     app.store_user(&guest).await;
     guest.login(&app).await;
     let response = app.post_borrow_request(&body, "borrow-guest").await;
     assert_eq!(response.status().as_u16(), 403);
 
-    let owner_user = TestUser::generate_with_group("user", Some(owner_lab));
+    let owner_user = TestUser::generate_with_user_type("user", Some(owner_lab));
     app.store_user(&owner_user).await;
     owner_user.login(&app).await;
     let response = app.post_borrow_request(&body, "borrow-same-lab").await;
     assert_eq!(response.status().as_u16(), 400);
 
-    let requester = TestUser::generate_with_group("user", Some(requester_lab));
+    let requester = TestUser::generate_with_user_type("user", Some(requester_lab));
     app.store_user(&requester).await;
     requester.login(&app).await;
     let response = app
@@ -161,8 +161,8 @@ async fn owner_lab_can_approve_and_idempotency_prevents_double_allocation() {
     let owner_lab = app.create_laboratory("Approve Owner Lab").await;
     let requester_lab = app.create_laboratory("Approve Requester Lab").await;
     let item_id = create_quantity_item(&app, owner_lab, "Approval Cable", 5.0, true).await;
-    let requester = TestUser::generate_with_group("user", Some(requester_lab));
-    let owner = TestUser::generate_with_group("user", Some(owner_lab));
+    let requester = TestUser::generate_with_user_type("user", Some(requester_lab));
+    let owner = TestUser::generate_with_user_type("user", Some(owner_lab));
     app.store_user(&requester).await;
     app.store_user(&owner).await;
 
@@ -250,8 +250,8 @@ async fn owner_lab_can_reject_pending_request_idempotently() {
     let owner_lab = app.create_laboratory("Reject Owner Lab").await;
     let requester_lab = app.create_laboratory("Reject Requester Lab").await;
     let item_id = create_quantity_item(&app, owner_lab, "Rejectable Lens", 3.0, true).await;
-    let requester = TestUser::generate_with_group("user", Some(requester_lab));
-    let owner = TestUser::generate_with_group("user", Some(owner_lab));
+    let requester = TestUser::generate_with_user_type("user", Some(requester_lab));
+    let owner = TestUser::generate_with_user_type("user", Some(owner_lab));
     app.store_user(&requester).await;
     app.store_user(&owner).await;
 
@@ -333,8 +333,8 @@ async fn serialized_borrow_out_and_return_update_status_and_release_allocation()
     let owner_lab = app.create_laboratory("Serialized Owner Lab").await;
     let requester_lab = app.create_laboratory("Serialized Requester Lab").await;
     let item_id = create_serialized_item(&app, owner_lab).await;
-    let requester = TestUser::generate_with_group("user", Some(requester_lab));
-    let owner = TestUser::generate_with_group("lab_admin", Some(owner_lab));
+    let requester = TestUser::generate_with_user_type("user", Some(requester_lab));
+    let owner = TestUser::generate_with_user_type("maintainer", Some(owner_lab));
     app.store_user(&requester).await;
     app.store_user(&owner).await;
 
@@ -440,8 +440,8 @@ async fn cancelling_an_approved_request_releases_allocated_quantity() {
     let owner_lab = app.create_laboratory("Cancel Owner Lab").await;
     let requester_lab = app.create_laboratory("Cancel Requester Lab").await;
     let item_id = create_quantity_item(&app, owner_lab, "Cancelable Cable", 5.0, true).await;
-    let requester = TestUser::generate_with_group("user", Some(requester_lab));
-    let owner = TestUser::generate_with_group("user", Some(owner_lab));
+    let requester = TestUser::generate_with_user_type("user", Some(requester_lab));
+    let owner = TestUser::generate_with_user_type("user", Some(owner_lab));
     app.store_user(&requester).await;
     app.store_user(&owner).await;
 

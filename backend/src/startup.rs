@@ -2,7 +2,7 @@ use crate::authentication::reject_anonymous_users;
 use crate::configuration::{ApplicationSettings, DatabaseSettings, Settings};
 use crate::routes::{
     adjust_inventory_item, allocate_inventory_item, approve_borrow_request, cancel_borrow_request,
-    create_asset, create_asset_category, create_attachment, create_borrow_request,
+    change_password, create_asset, create_asset_category, create_attachment, create_borrow_request,
     create_inventory_item, create_laboratory, create_location, create_maintenance_record,
     create_maintenance_schedule, create_user, delete_asset, delete_asset_category,
     delete_attachment, delete_inventory_item, delete_laboratory, delete_location,
@@ -169,6 +169,7 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                 web::scope("")
                     .wrap(from_fn(reject_anonymous_users))
                     .route("/auth/me", web::get().to(me))
+                    .route("/auth/password", web::patch().to(change_password))
                     .route("/audit-logs", web::get().to(list_audit_logs))
                     .route("/units", web::get().to(list_units))
                     .route("/laboratories", web::post().to(create_laboratory))

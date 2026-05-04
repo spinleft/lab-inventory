@@ -1,4 +1,5 @@
 use crate::helpers::{TestUser, spawn_app};
+use chrono::{Duration, Utc};
 use uuid::Uuid;
 
 async fn create_quantity_asset(
@@ -74,13 +75,13 @@ async fn maintenance_records_are_permissioned_and_hide_internal_fields_cross_lab
     let response = app.post_maintenance_record(&body).await;
     assert_eq!(response.status().as_u16(), 401);
 
-    let guest = TestUser::generate_with_group("guest", Some(owner_lab));
+    let guest = TestUser::generate_with_user_type("guest", Some(owner_lab));
     app.store_user(&guest).await;
     guest.login(&app).await;
     let response = app.post_maintenance_record(&body).await;
     assert_eq!(response.status().as_u16(), 403);
 
-    let owner = TestUser::generate_with_group("user", Some(owner_lab));
+    let owner = TestUser::generate_with_user_type("user", Some(owner_lab));
     app.store_user(&owner).await;
     owner.login(&app).await;
     let response = app
@@ -117,7 +118,7 @@ async fn maintenance_records_are_permissioned_and_hide_internal_fields_cross_lab
         .unwrap();
     assert_eq!(updated["description"], "checked and cleaned optics");
 
-    let viewer = TestUser::generate_with_group("user", Some(other_lab));
+    let viewer = TestUser::generate_with_user_type("user", Some(other_lab));
     app.store_user(&viewer).await;
     viewer.login(&app).await;
     let fetched: serde_json::Value = app
@@ -152,9 +153,9 @@ async fn attachments_are_metadata_only_and_respect_visibility() {
     let asset = create_quantity_asset(&app, owner_lab, "Attachment Asset").await;
     let asset_id: Uuid = asset["asset_id"].as_str().unwrap().parse().unwrap();
 
-    let owner = TestUser::generate_with_group("user", Some(owner_lab));
-    let viewer = TestUser::generate_with_group("user", Some(other_lab));
-    let guest = TestUser::generate_with_group("guest", Some(owner_lab));
+    let owner = TestUser::generate_with_user_type("user", Some(owner_lab));
+    let viewer = TestUser::generate_with_user_type("user", Some(other_lab));
+    let guest = TestUser::generate_with_user_type("guest", Some(owner_lab));
     app.store_user(&owner).await;
     app.store_user(&viewer).await;
     app.store_user(&guest).await;
@@ -245,9 +246,9 @@ async fn maintenance_schedules_generate_due_and_overdue_alerts() {
     let asset_id: Uuid = asset["asset_id"].as_str().unwrap().parse().unwrap();
     let inventory_item_id = create_serialized_inventory(&app, owner_lab).await;
 
-    let owner = TestUser::generate_with_group("lab_admin", Some(owner_lab));
-    let viewer = TestUser::generate_with_group("user", Some(other_lab));
-    let guest = TestUser::generate_with_group("guest", Some(owner_lab));
+    let owner = TestUser::generate_with_user_type("maintainer", Some(owner_lab));
+    let viewer = TestUser::generate_with_user_type("user", Some(other_lab));
+    let guest = TestUser::generate_with_user_type("guest", Some(owner_lab));
     app.store_user(&owner).await;
     app.store_user(&viewer).await;
     app.store_user(&guest).await;
@@ -265,12 +266,13 @@ async fn maintenance_schedules_generate_due_and_overdue_alerts() {
     assert_eq!(response.status().as_u16(), 403);
 
     owner.login(&app).await;
+    let due_soon_at = (Utc::now() + Duration::days(3)).to_rfc3339();
     let due: serde_json::Value = app
         .post_maintenance_schedule(&serde_json::json!({
             "asset_id": asset_id,
             "schedule_name": "oil check",
             "interval_days": 30,
-            "next_maintenance_at": "2026-05-03T00:00:00Z",
+            "next_maintenance_at": due_soon_at,
             "remind_before_days": 7,
             "public_notes": "public schedule",
             "internal_notes": "private schedule"

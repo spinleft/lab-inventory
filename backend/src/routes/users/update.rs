@@ -1,6 +1,6 @@
 use super::model::{UserResponse, UserRow, fetch_user};
 use super::validation::{
-    map_database_error, normalize_group, required_text, resolve_target_laboratory,
+    map_database_error, normalize_user_type, required_text, resolve_target_laboratory,
     validate_user_management,
 };
 use crate::audit::{AuditAction, AuditResource, record_audit};
@@ -18,7 +18,7 @@ use uuid::Uuid;
 pub struct JsonData {
     username: Option<String>,
     password: Option<Secret<String>>,
-    group: Option<String>,
+    user_type: Option<String>,
     laboratory_id: Option<Uuid>,
     email: Option<String>,
 }
@@ -36,16 +36,16 @@ pub async fn update_user(
 ) -> Result<HttpResponse, ApiError> {
     let actor = get_actor(pool.get_ref(), user_id).await?;
     let target = fetch_user(pool.get_ref(), *target_user_id).await?;
-    let group_name = match payload.group.as_deref() {
-        Some(group) => normalize_group(group)?,
-        None => target.group_name.clone(),
+    let user_type_name = match payload.user_type.as_deref() {
+        Some(user_type) => normalize_user_type(user_type)?,
+        None => target.user_type_name.clone(),
     };
     let laboratory_id = resolve_target_laboratory(
         &actor,
-        &group_name,
+        &user_type_name,
         payload.laboratory_id.or(target.laboratory_id),
     )?;
-    validate_user_management(pool.get_ref(), &actor, &group_name, laboratory_id).await?;
+    validate_user_management(pool.get_ref(), &actor, &user_type_name, laboratory_id).await?;
 
     let username = payload
         .username
@@ -71,7 +71,7 @@ pub async fn update_user(
         SET
             username = COALESCE($2, username),
             password_hash = COALESCE($3, password_hash),
-            group_id = (SELECT group_id FROM user_groups WHERE name = $4),
+            user_type_id = (SELECT user_type_id FROM user_types WHERE name = $4),
             laboratory_id = $5,
             email = COALESCE($6, email)
         WHERE user_id = $1
@@ -79,8 +79,8 @@ pub async fn update_user(
             users.user_id,
             users.username,
             users.email,
-            (SELECT group_id FROM user_groups WHERE name = $4) AS group_id,
-            $4 AS group_name,
+            (SELECT user_type_id FROM user_types WHERE name = $4) AS user_type_id,
+            $4 AS user_type_name,
             users.laboratory_id,
             (SELECT name FROM laboratories WHERE laboratory_id = users.laboratory_id) AS laboratory_name,
             users.created_at,
@@ -90,7 +90,7 @@ pub async fn update_user(
     .bind(target.user_id)
     .bind(username)
     .bind(password_hash.as_ref().map(|hash| hash.expose_secret()))
-    .bind(&group_name)
+    .bind(&user_type_name)
     .bind(laboratory_id)
     .bind(payload.email.as_deref())
     .fetch_one(transaction.as_mut())
@@ -104,7 +104,7 @@ pub async fn update_user(
         AuditAction::Update,
         AuditResource::User,
         Some(user.user_id),
-        json!({ "username": user.username, "group": user.group_name }),
+        json!({ "username": user.username, "user_type": user.user_type_name }),
     )
     .await?;
     transaction

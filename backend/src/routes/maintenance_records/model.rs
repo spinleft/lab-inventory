@@ -47,7 +47,7 @@ pub(crate) struct MaintenanceRecordResponse {
 
 impl MaintenanceRecordResponse {
     pub fn from_row(row: MaintenanceRecordRow, actor: &Actor) -> Self {
-        let show_sensitive = actor.is_system_admin() || actor.is_same_laboratory(row.laboratory_id);
+        let show_sensitive = actor.is_owner() || actor.is_same_laboratory(row.laboratory_id);
         Self {
             maintenance_record_id: row.maintenance_record_id,
             asset_id: row.asset_id,

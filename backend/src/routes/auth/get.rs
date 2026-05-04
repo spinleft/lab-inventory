@@ -11,13 +11,13 @@ struct CurrentUser {
     user_id: Uuid,
     username: String,
     email: Option<String>,
-    group: CurrentUserGroup,
+    user_type: CurrentUserType,
     laboratory: Option<CurrentUserLaboratory>,
 }
 
 #[derive(Serialize)]
-struct CurrentUserGroup {
-    group_id: Uuid,
+struct CurrentUserType {
+    user_type_id: Uuid,
     name: String,
 }
 
@@ -32,8 +32,8 @@ struct CurrentUserRow {
     user_id: Uuid,
     username: String,
     email: Option<String>,
-    group_id: Uuid,
-    group_name: String,
+    user_type_id: Uuid,
+    user_type_name: String,
     laboratory_id: Option<Uuid>,
     laboratory_name: Option<String>,
 }
@@ -75,12 +75,12 @@ pub async fn me(user_id: UserId, pool: web::Data<PgPool>) -> Result<HttpResponse
             users.user_id,
             users.username,
             users.email,
-            user_groups.group_id,
-            user_groups.name AS group_name,
+            user_types.user_type_id,
+            user_types.name AS user_type_name,
             laboratories.laboratory_id,
             laboratories.name AS laboratory_name
         FROM users
-        INNER JOIN user_groups USING (group_id)
+        INNER JOIN user_types USING (user_type_id)
         LEFT JOIN laboratories USING (laboratory_id)
         WHERE users.user_id = $1
         "#,
@@ -95,9 +95,9 @@ pub async fn me(user_id: UserId, pool: web::Data<PgPool>) -> Result<HttpResponse
         user_id: row.user_id,
         username: row.username,
         email: row.email,
-        group: CurrentUserGroup {
-            group_id: row.group_id,
-            name: row.group_name,
+        user_type: CurrentUserType {
+            user_type_id: row.user_type_id,
+            name: row.user_type_name,
         },
         laboratory: row
             .laboratory_id

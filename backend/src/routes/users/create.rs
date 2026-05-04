@@ -1,6 +1,6 @@
 use super::model::{UserResponse, UserRow};
 use super::validation::{
-    map_database_error, normalize_group, required_text, resolve_target_laboratory,
+    map_database_error, normalize_user_type, required_text, resolve_target_laboratory,
     validate_user_management,
 };
 use crate::audit::{AuditAction, AuditResource, record_audit};
@@ -18,7 +18,7 @@ use uuid::Uuid;
 pub struct JsonData {
     username: String,
     password: Secret<String>,
-    group: String,
+    user_type: String,
     laboratory_id: Option<Uuid>,
     email: Option<String>,
 }
@@ -36,9 +36,9 @@ pub async fn create_user(
     let actor = get_actor(pool.get_ref(), user_id).await?;
     let username = required_text(&payload.username, "username")?;
     tracing::Span::current().record("username", tracing::field::display(username));
-    let group_name = normalize_group(&payload.group)?;
-    let laboratory_id = resolve_target_laboratory(&actor, &group_name, payload.laboratory_id)?;
-    validate_user_management(pool.get_ref(), &actor, &group_name, laboratory_id).await?;
+    let user_type_name = normalize_user_type(&payload.user_type)?;
+    let laboratory_id = resolve_target_laboratory(&actor, &user_type_name, payload.laboratory_id)?;
+    validate_user_management(pool.get_ref(), &actor, &user_type_name, laboratory_id).await?;
 
     let password_hash = hash_password(payload.password.clone())
         .await
@@ -50,16 +50,16 @@ pub async fn create_user(
         .map_err(|e| ApiError::UnexpectedError(e.into()))?;
     let user = sqlx::query_as::<_, UserRow>(
         r#"
-        INSERT INTO users (user_id, username, password_hash, group_id, laboratory_id, email)
-        SELECT $1, $2, $3, user_groups.group_id, $4, $5
-        FROM user_groups
-        WHERE user_groups.name = $6
+        INSERT INTO users (user_id, username, password_hash, user_type_id, laboratory_id, email)
+        SELECT $1, $2, $3, user_types.user_type_id, $4, $5
+        FROM user_types
+        WHERE user_types.name = $6
         RETURNING
             users.user_id,
             users.username,
             users.email,
-            (SELECT group_id FROM user_groups WHERE name = $6) AS group_id,
-            $6 AS group_name,
+            (SELECT user_type_id FROM user_types WHERE name = $6) AS user_type_id,
+            $6 AS user_type_name,
             users.laboratory_id,
             (SELECT name FROM laboratories WHERE laboratory_id = users.laboratory_id) AS laboratory_name,
             users.created_at,
@@ -71,7 +71,7 @@ pub async fn create_user(
     .bind(password_hash.expose_secret())
     .bind(laboratory_id)
     .bind(payload.email.as_deref())
-    .bind(&group_name)
+    .bind(&user_type_name)
     .fetch_one(transaction.as_mut())
     .await
     .map_err(map_database_error)?;
@@ -83,7 +83,7 @@ pub async fn create_user(
         AuditAction::Create,
         AuditResource::User,
         Some(user.user_id),
-        json!({ "username": user.username, "group": user.group_name }),
+        json!({ "username": user.username, "user_type": user.user_type_name }),
     )
     .await?;
     transaction

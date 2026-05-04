@@ -8,8 +8,8 @@ async fn list_endpoints_support_pagination_search_filters_and_sensitive_search_b
     let owner_lab = app.create_laboratory("Query Owner Lab").await;
     let other_lab = app.create_laboratory("Query Other Lab").await;
     let pcs = app.unit_id("pcs").await;
-    let owner = TestUser::generate_with_group("user", Some(owner_lab));
-    let viewer = TestUser::generate_with_group("user", Some(other_lab));
+    let owner = TestUser::generate_with_user_type("user", Some(owner_lab));
+    let viewer = TestUser::generate_with_user_type("user", Some(other_lab));
     app.store_user(&owner).await;
     app.store_user(&viewer).await;
 
@@ -111,12 +111,12 @@ async fn audit_logs_are_permissioned_and_filterable() {
 
     let laboratory_id = app.create_laboratory("Audit Lab").await;
     let pcs = app.unit_id("pcs").await;
-    let lab_admin = TestUser::generate_with_group("lab_admin", Some(laboratory_id));
-    let user = TestUser::generate_with_group("user", Some(laboratory_id));
-    app.store_user(&lab_admin).await;
+    let maintainer = TestUser::generate_with_user_type("maintainer", Some(laboratory_id));
+    let user = TestUser::generate_with_user_type("user", Some(laboratory_id));
+    app.store_user(&maintainer).await;
     app.store_user(&user).await;
 
-    lab_admin.login(&app).await;
+    maintainer.login(&app).await;
     let asset: serde_json::Value = app
         .post_asset(&serde_json::json!({
             "asset_kind": "equipment",
@@ -165,8 +165,8 @@ async fn csv_exports_reuse_filters_and_hide_cross_laboratory_sensitive_fields() 
     let owner_lab = app.create_laboratory("CSV Owner Lab").await;
     let other_lab = app.create_laboratory("CSV Other Lab").await;
     let pcs = app.unit_id("pcs").await;
-    let owner = TestUser::generate_with_group("user", Some(owner_lab));
-    let viewer = TestUser::generate_with_group("user", Some(other_lab));
+    let owner = TestUser::generate_with_user_type("user", Some(owner_lab));
+    let viewer = TestUser::generate_with_user_type("user", Some(other_lab));
     app.store_user(&owner).await;
     app.store_user(&viewer).await;
 

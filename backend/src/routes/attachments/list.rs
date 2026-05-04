@@ -86,7 +86,7 @@ fn push_attachment_filters(
     query: &AttachmentListQuery,
 ) {
     builder.push(" WHERE TRUE");
-    if !actor.is_system_admin() {
+    if !actor.is_owner() {
         builder.push(" AND (attachments.visibility = 'public'");
         if let Some(laboratory_id) = actor.laboratory_id {
             builder.push(" OR attachments.laboratory_id = ");

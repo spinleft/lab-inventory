@@ -29,7 +29,7 @@ pub async fn list_audit_logs(
     query: web::Query<AuditLogListQuery>,
 ) -> Result<HttpResponse, ApiError> {
     let actor = get_actor(pool.get_ref(), user_id).await?;
-    if !actor.is_system_admin() && !actor.is_lab_admin() {
+    if !actor.is_owner() && !actor.is_maintainer() {
         return Err(ApiError::Forbidden);
     }
     let total = fetch_audit_log_count(pool.get_ref(), &actor, &query).await?;
@@ -103,7 +103,7 @@ fn push_audit_log_filters(
     query: &AuditLogListQuery,
 ) {
     builder.push(" WHERE TRUE");
-    if !actor.is_system_admin() {
+    if !actor.is_owner() {
         if let Some(laboratory_id) = actor.laboratory_id {
             builder.push(" AND (audit_logs.actor_laboratory_id = ");
             builder.push_bind(laboratory_id);

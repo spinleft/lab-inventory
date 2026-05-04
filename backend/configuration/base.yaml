@@ -11,8 +11,8 @@ application:
 database:
   host: "127.0.0.1"
   port: 5432
-  username: "app"
-  password: "secret"
+  username: "postgres"
+  password: "password"
   database_name: "lab_inventory"
   require_ssl: false
 redis_uri: "redis://127.0.0.1:6379"

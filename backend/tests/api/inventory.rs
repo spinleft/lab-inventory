@@ -19,7 +19,7 @@ async fn inventory_writes_require_an_authorized_laboratory_member() {
         .await;
     assert_eq!(response.status().as_u16(), 401);
 
-    let guest = TestUser::generate_with_group("guest", Some(own_lab));
+    let guest = TestUser::generate_with_user_type("guest", Some(own_lab));
     app.store_user(&guest).await;
     guest.login(&app).await;
     let response = app
@@ -29,7 +29,7 @@ async fn inventory_writes_require_an_authorized_laboratory_member() {
         .await;
     assert_eq!(response.status().as_u16(), 403);
 
-    let lab_user = TestUser::generate_with_group("user", Some(own_lab));
+    let lab_user = TestUser::generate_with_user_type("user", Some(own_lab));
     app.store_user(&lab_user).await;
     lab_user.login(&app).await;
     let response = app
@@ -309,7 +309,7 @@ async fn idempotency_is_scoped_to_users_and_replays_saved_response_headers() {
     let app = spawn_app().await;
     let lab_id = app.create_laboratory("Idempotency Lab").await;
     let meter = app.unit_id("m").await;
-    let lab_user = TestUser::generate_with_group("user", Some(lab_id));
+    let lab_user = TestUser::generate_with_user_type("user", Some(lab_id));
     app.store_user(&lab_user).await;
 
     app.test_user.login(&app).await;
@@ -371,7 +371,7 @@ async fn other_laboratory_members_only_see_public_inventory_fields() {
     let owner_lab = app.create_laboratory("Owner Lab").await;
     let viewer_lab = app.create_laboratory("Viewer Lab").await;
     let pcs = app.unit_id("pcs").await;
-    let viewer = TestUser::generate_with_group("user", Some(viewer_lab));
+    let viewer = TestUser::generate_with_user_type("user", Some(viewer_lab));
     app.store_user(&viewer).await;
 
     let location: serde_json::Value = app

@@ -57,7 +57,7 @@ pub struct InventoryItemResponse {
 
 impl InventoryItemResponse {
     pub fn from_row(row: InventoryItemRow, actor: &Actor) -> Self {
-        let show_sensitive = actor.is_system_admin() || actor.is_same_laboratory(row.laboratory_id);
+        let show_sensitive = actor.is_owner() || actor.is_same_laboratory(row.laboratory_id);
         Self {
             inventory_item_id: row.inventory_item_id,
             asset_id: row.asset_id,

@@ -28,7 +28,7 @@ pub async fn delete_user(
     validate_user_management(
         pool.get_ref(),
         &actor,
-        &target.group_name,
+        &target.user_type_name,
         target.laboratory_id,
     )
     .await?;
@@ -50,7 +50,7 @@ pub async fn delete_user(
         AuditAction::Delete,
         AuditResource::User,
         Some(target.user_id),
-        json!({ "username": target.username, "group": target.group_name }),
+        json!({ "username": target.username, "user_type": target.user_type_name }),
     )
     .await?;
     transaction

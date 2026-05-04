@@ -33,7 +33,7 @@ pub(super) fn resolve_target_laboratory(
     actor: &Actor,
     laboratory_id: Option<Uuid>,
 ) -> Result<Uuid, ApiError> {
-    if actor.is_system_admin() {
+    if actor.is_owner() {
         return laboratory_id
             .ok_or_else(|| ApiError::BadRequest("laboratory_id is required".into()));
     }

@@ -34,6 +34,10 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+playwright-report
+test-results
+**/src-tauri/gen
 
 # Editor directories and files
 .vscode/*

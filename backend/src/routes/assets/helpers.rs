@@ -78,7 +78,7 @@ pub(super) fn resolve_target_laboratory(
     actor: &Actor,
     laboratory_id: Option<Uuid>,
 ) -> Result<Uuid, ApiError> {
-    if actor.is_system_admin() {
+    if actor.is_owner() {
         return laboratory_id
             .ok_or_else(|| ApiError::BadRequest("laboratory_id is required".into()));
     }
@@ -183,9 +183,7 @@ pub(super) fn ensure_can_manage_threshold(
     actor: &Actor,
     laboratory_id: Uuid,
 ) -> Result<(), ApiError> {
-    if actor.is_system_admin()
-        || (actor.is_lab_admin() && actor.laboratory_id == Some(laboratory_id))
-    {
+    if actor.is_owner() || (actor.is_maintainer() && actor.laboratory_id == Some(laboratory_id)) {
         Ok(())
     } else {
         Err(ApiError::Forbidden)

@@ -93,6 +93,18 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
+    pub async fn patch_auth_password<Body>(&self, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .patch(format!("{}/api/v1/auth/password", &self.address))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
     pub async fn get_me(&self) -> reqwest::Response {
         self.api_client
             .get(format!("{}/api/v1/auth/me", &self.address))

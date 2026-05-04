@@ -89,7 +89,7 @@ fn push_borrow_request_filters(
     query: &BorrowRequestListQuery,
 ) {
     builder.push(" WHERE TRUE");
-    if !actor.is_system_admin() {
+    if !actor.is_owner() {
         if let Some(laboratory_id) = actor.laboratory_id {
             builder.push(" AND (borrow_requests.requester_laboratory_id = ");
             builder.push_bind(laboratory_id);

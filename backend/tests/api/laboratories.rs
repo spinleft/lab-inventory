@@ -1,7 +1,7 @@
 use crate::helpers::{TestUser, spawn_app};
 
 #[tokio::test]
-async fn system_admin_can_manage_laboratories() {
+async fn owner_can_manage_laboratories() {
     let app = spawn_app().await;
     app.test_user.login(&app).await;
 
@@ -104,10 +104,10 @@ async fn duplicate_laboratory_name_returns_409() {
 }
 
 #[tokio::test]
-async fn laboratories_write_requires_system_admin() {
+async fn laboratories_write_requires_owner() {
     let app = spawn_app().await;
     let lab_id = app.create_laboratory("Chemistry Lab").await;
-    let lab_user = TestUser::generate_with_group("user", Some(lab_id));
+    let lab_user = TestUser::generate_with_user_type("user", Some(lab_id));
     app.store_user(&lab_user).await;
 
     let response = app

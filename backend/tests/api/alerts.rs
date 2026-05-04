@@ -124,7 +124,7 @@ async fn asset_thresholds_are_permissioned_and_validated() {
     let other_asset = create_quantity_asset(&app, other_laboratory_id, "Other Fiber", meter).await;
     let other_asset_id: Uuid = other_asset["asset_id"].as_str().unwrap().parse().unwrap();
 
-    let lab_user = TestUser::generate_with_group("user", Some(laboratory_id));
+    let lab_user = TestUser::generate_with_user_type("user", Some(laboratory_id));
     app.store_user(&lab_user).await;
     lab_user.login(&app).await;
     let response = app
@@ -138,9 +138,9 @@ async fn asset_thresholds_are_permissioned_and_validated() {
         .await;
     assert_eq!(response.status().as_u16(), 403);
 
-    let lab_admin = TestUser::generate_with_group("lab_admin", Some(laboratory_id));
-    app.store_user(&lab_admin).await;
-    lab_admin.login(&app).await;
+    let maintainer = TestUser::generate_with_user_type("maintainer", Some(laboratory_id));
+    app.store_user(&maintainer).await;
+    maintainer.login(&app).await;
     let response = app
         .patch_asset(
             asset_id,
@@ -219,7 +219,7 @@ async fn stock_alerts_follow_available_quantity_and_visibility_rules() {
     assert_eq!(alerts[0]["quantity_available"], 2.0);
     assert_eq!(alerts[0]["internal_notes"], "private stock note");
 
-    let viewer = TestUser::generate_with_group("user", Some(viewer_lab));
+    let viewer = TestUser::generate_with_user_type("user", Some(viewer_lab));
     app.store_user(&viewer).await;
     viewer.login(&app).await;
     let alerts: serde_json::Value = app.get_stock_alerts().await.json().await.unwrap();
@@ -251,9 +251,9 @@ async fn borrow_request_alerts_are_scoped_to_related_laboratories() {
     let asset = create_quantity_asset(&app, owner_lab, "Borrow Alert Fiber", meter).await;
     let item_id = create_quantity_inventory(&app, &asset, meter, 10.0, "borrow-alert-item").await;
 
-    let requester = TestUser::generate_with_group("user", Some(requester_lab));
-    let owner = TestUser::generate_with_group("user", Some(owner_lab));
-    let unrelated = TestUser::generate_with_group("user", Some(unrelated_lab));
+    let requester = TestUser::generate_with_user_type("user", Some(requester_lab));
+    let owner = TestUser::generate_with_user_type("user", Some(owner_lab));
+    let unrelated = TestUser::generate_with_user_type("user", Some(unrelated_lab));
     app.store_user(&requester).await;
     app.store_user(&owner).await;
     app.store_user(&unrelated).await;

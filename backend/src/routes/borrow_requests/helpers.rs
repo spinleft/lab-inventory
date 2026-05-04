@@ -1,6 +1,6 @@
 use super::model::{BorrowRequest, BorrowRequestForUpdate, InventoryItemForBorrow};
 use crate::audit::AuditAction;
-use crate::authentication::{Actor, LAB_ADMIN, USER};
+use crate::authentication::{Actor, MAINTAINER, USER};
 use crate::utils::ApiError;
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
@@ -136,7 +136,7 @@ pub(super) async fn fetch_inventory_item_for_update(
 }
 
 pub(super) fn ensure_can_create(actor: &Actor) -> Result<Uuid, ApiError> {
-    if matches!(actor.group_name.as_str(), LAB_ADMIN | USER) {
+    if matches!(actor.user_type_name.as_str(), MAINTAINER | USER) {
         actor.laboratory_id.ok_or(ApiError::Forbidden)
     } else {
         Err(ApiError::Forbidden)
@@ -144,7 +144,7 @@ pub(super) fn ensure_can_create(actor: &Actor) -> Result<Uuid, ApiError> {
 }
 
 pub(super) fn ensure_can_view(actor: &Actor, request: &BorrowRequest) -> Result<(), ApiError> {
-    if actor.is_system_admin()
+    if actor.is_owner()
         || actor.laboratory_id == Some(request.requester_laboratory_id)
         || actor.laboratory_id == Some(request.owner_laboratory_id)
     {
@@ -158,8 +158,8 @@ pub(super) fn ensure_can_owner_operate(
     actor: &Actor,
     owner_laboratory_id: Uuid,
 ) -> Result<(), ApiError> {
-    if actor.is_system_admin()
-        || (matches!(actor.group_name.as_str(), LAB_ADMIN | USER)
+    if actor.is_owner()
+        || (matches!(actor.user_type_name.as_str(), MAINTAINER | USER)
             && actor.laboratory_id == Some(owner_laboratory_id))
     {
         Ok(())
@@ -172,8 +172,8 @@ pub(super) fn ensure_can_cancel(
     actor: &Actor,
     request: &BorrowRequestForUpdate,
 ) -> Result<(), ApiError> {
-    if actor.is_system_admin()
-        || (matches!(actor.group_name.as_str(), LAB_ADMIN | USER)
+    if actor.is_owner()
+        || (matches!(actor.user_type_name.as_str(), MAINTAINER | USER)
             && (actor.laboratory_id == Some(request.requester_laboratory_id)
                 || actor.laboratory_id == Some(request.owner_laboratory_id)))
     {

@@ -8,21 +8,21 @@ pub struct TestUser {
     pub user_id: Uuid,
     pub username: String,
     pub password: String,
-    pub group: String,
+    pub user_type: String,
     pub laboratory_id: Option<Uuid>,
 }
 
 impl TestUser {
     pub fn generate() -> Self {
-        Self::generate_with_group("system_admin", None)
+        Self::generate_with_user_type("owner", None)
     }
 
-    pub fn generate_with_group(group: &str, laboratory_id: Option<Uuid>) -> Self {
+    pub fn generate_with_user_type(user_type: &str, laboratory_id: Option<Uuid>) -> Self {
         Self {
             user_id: Uuid::new_v4(),
             username: Uuid::new_v4().to_string(),
             password: Uuid::new_v4().to_string(),
-            group: group.to_string(),
+            user_type: user_type.to_string(),
             laboratory_id,
         }
     }
@@ -50,9 +50,9 @@ impl TestUser {
 
         sqlx::query(
             r#"
-            INSERT INTO users (user_id, username, password_hash, group_id, laboratory_id)
-            SELECT $1, $2, $3, group_id, $4
-            FROM user_groups
+            INSERT INTO users (user_id, username, password_hash, user_type_id, laboratory_id)
+            SELECT $1, $2, $3, user_type_id, $4
+            FROM user_types
             WHERE name = $5
             "#,
         )
@@ -60,7 +60,7 @@ impl TestUser {
         .bind(&self.username)
         .bind(password_hash)
         .bind(self.laboratory_id)
-        .bind(&self.group)
+        .bind(&self.user_type)
         .execute(pool)
         .await
         .expect("Failed to store test user.");
