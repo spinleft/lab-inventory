@@ -5,17 +5,26 @@ import {
   PackageSearch,
   ServerCog,
   Settings,
+  ShieldCheck,
 } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { ServerSettingsDialog } from "../features/auth/ServerSettingsDialog";
 import { useCurrentUser, useLogout } from "../features/auth/api";
+import { canAccessAdminArea } from "../features/auth/permissions";
 import { IconButton } from "../shared/ui/IconButton";
 
 type AppShellProps = {
   children: React.ReactNode;
 };
 
-const navItems = [
+type NavItem = {
+  to: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  end?: boolean;
+};
+
+const baseNavItems: NavItem[] = [
   { to: "/dashboard", label: "概览", icon: LayoutDashboard },
   { to: "/assets", label: "资产", icon: PackageSearch },
   { to: "/inventory", label: "库存", icon: Boxes },
@@ -26,6 +35,12 @@ export function AppShell({ children }: AppShellProps) {
   const currentUser = useCurrentUser();
   const logout = useLogout();
   const user = currentUser.data;
+  const navItems = canAccessAdminArea(user)
+    ? [
+        ...baseNavItems,
+        { to: "/admin/users", label: "管理区", icon: ShieldCheck },
+      ]
+    : baseNavItems;
 
   return (
     <div className="app-layout">
