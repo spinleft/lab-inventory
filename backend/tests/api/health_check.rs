@@ -2,18 +2,11 @@ use crate::helpers::spawn_app;
 
 #[tokio::test]
 async fn health_check_works() {
-    // Arrange
     let app = spawn_app().await;
-    let client = reqwest::Client::new();
 
-    // Act
-    let response = client
-        .get(&format!("{}/api/v1/health_check", &app.address))
-        .send()
-        .await
-        .expect("Failed to execute request.");
+    let response = app.get_health_check().await;
 
-    // Assert
     assert!(response.status().is_success());
-    assert_eq!(Some(0), response.content_length());
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["status"], "ok");
 }

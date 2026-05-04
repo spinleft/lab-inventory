@@ -1,9 +1,5 @@
 application:
-  host: 0.0.0.0
+  host: "0.0.0.0"
+  cookie_secure: true
 database:
   require_ssl: true
-email_client:
-  # Value retrieved from Postmark's API documentation
-  base_url: "https://api.postmarkapp.com"
-  # Use the single sender email you authorised on Postmark!
-  sender_email: "csycsy@mail.ustc.edu.cn"

@@ -2,7 +2,18 @@
 set -x
 set -eo pipefail
 
-# if a redis container is running, print instructions to kill it and exit
+if ! [ -x "$(command -v docker)" ]; then
+  echo >&2 "Error: docker is not installed."
+  echo >&2 "Install Docker Desktop, then retry this script."
+  exit 1
+fi
+
+if ! docker info >/dev/null 2>&1; then
+  echo >&2 "Error: Docker daemon is not running or is not reachable."
+  echo >&2 "Start Docker Desktop, wait until it is ready, then retry this script."
+  exit 1
+fi
+
 RUNNING_CONTAINER=$(docker ps --filter 'name=redis' --format '{{.ID}}')
 if [[ -n $RUNNING_CONTAINER ]]; then
   echo >&2 "there is a redis container already running, kill it with"
@@ -10,7 +21,6 @@ if [[ -n $RUNNING_CONTAINER ]]; then
   exit 1
 fi
 
-# Launch Redis using Docker
 docker run \
   -p "6379:6379" \
   -d \

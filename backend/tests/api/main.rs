@@ -1,3 +1,12 @@
+mod alerts;
 mod auth;
+mod borrow_requests;
 mod health_check;
 mod helpers;
+mod inventory;
+mod laboratories;
+mod maintenance;
+mod migrations;
+mod query_export_audit;
+mod test_user;
+mod users;

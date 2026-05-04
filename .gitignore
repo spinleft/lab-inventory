@@ -45,3 +45,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Reference:
+referrence

@@ -1,48 +1,110 @@
-/*
- * @Author: spinleft spinleftgit@gmail.com
- * @Date: 2025-10-19 22:01:15
- * @LastEditors: spinleft spinleftgit@gmail.com
- * @LastEditTime: 2025-10-20 01:08:51
- * @FilePath: \lab-inventory\backend\src\routes\auth\get.rs
- * @Description:
- *
- * Copyright (c) 2025 by ${git_name_email}, All Rights Reserved.
- */
-use crate::session_state::TypedSession;
-use crate::utils::e500;
-use actix_web::HttpResponse;
-use actix_web::web;
-use anyhow::Context;
+use crate::authentication::UserId;
+use crate::utils::error_chain_fmt;
+use actix_web::http::StatusCode;
+use actix_web::{HttpResponse, ResponseError, web};
+use serde::Serialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-pub async fn me(
-    session: TypedSession,
-    pool: web::Data<PgPool>,
-) -> Result<HttpResponse, actix_web::Error> {
-    let user_id = session.get_user_id().map_err(e500)?;
-    if user_id.is_none() {
-        return Ok(HttpResponse::Unauthorized().finish());
-    }
-    let username = get_username(user_id.unwrap(), &pool).await.map_err(e500)?;
-    Ok(HttpResponse::Ok().json(serde_json::json!({
-        "user_id": user_id.unwrap(),
-        "username": username
-    })))
+#[derive(Serialize)]
+struct CurrentUser {
+    user_id: Uuid,
+    username: String,
+    email: Option<String>,
+    group: CurrentUserGroup,
+    laboratory: Option<CurrentUserLaboratory>,
 }
 
-#[tracing::instrument(name = "Get username", skip(pool))]
-async fn get_username(user_id: Uuid, pool: &PgPool) -> Result<String, anyhow::Error> {
-    let row = sqlx::query!(
+#[derive(Serialize)]
+struct CurrentUserGroup {
+    group_id: Uuid,
+    name: String,
+}
+
+#[derive(Serialize)]
+struct CurrentUserLaboratory {
+    laboratory_id: Uuid,
+    name: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct CurrentUserRow {
+    user_id: Uuid,
+    username: String,
+    email: Option<String>,
+    group_id: Uuid,
+    group_name: String,
+    laboratory_id: Option<Uuid>,
+    laboratory_name: Option<String>,
+}
+
+#[derive(thiserror::Error)]
+pub enum MeError {
+    #[error("Authentication required")]
+    UnknownUser,
+    #[error("Something went wrong")]
+    UnexpectedError(#[from] anyhow::Error),
+}
+
+impl std::fmt::Debug for MeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+impl ResponseError for MeError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            MeError::UnknownUser => StatusCode::UNAUTHORIZED,
+            MeError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    fn error_response(&self) -> HttpResponse {
+        HttpResponse::build(self.status_code()).json(serde_json::json!({
+            "error": self.to_string()
+        }))
+    }
+}
+
+#[tracing::instrument(name = "Get current user", skip(pool), fields(user_id=%user_id))]
+pub async fn me(user_id: UserId, pool: web::Data<PgPool>) -> Result<HttpResponse, MeError> {
+    let row = sqlx::query_as::<_, CurrentUserRow>(
         r#"
-        SELECT username
+        SELECT
+            users.user_id,
+            users.username,
+            users.email,
+            user_groups.group_id,
+            user_groups.name AS group_name,
+            laboratories.laboratory_id,
+            laboratories.name AS laboratory_name
         FROM users
-        WHERE user_id = $1
+        INNER JOIN user_groups USING (group_id)
+        LEFT JOIN laboratories USING (laboratory_id)
+        WHERE users.user_id = $1
         "#,
-        user_id,
     )
-    .fetch_one(pool)
+    .bind(*user_id)
+    .fetch_optional(pool.get_ref())
     .await
-    .context("Failed to perform a query to retrieve a username.")?;
-    Ok(row.username)
+    .map_err(|e| MeError::UnexpectedError(e.into()))?
+    .ok_or(MeError::UnknownUser)?;
+
+    Ok(HttpResponse::Ok().json(CurrentUser {
+        user_id: row.user_id,
+        username: row.username,
+        email: row.email,
+        group: CurrentUserGroup {
+            group_id: row.group_id,
+            name: row.group_name,
+        },
+        laboratory: row
+            .laboratory_id
+            .zip(row.laboratory_name)
+            .map(|(laboratory_id, name)| CurrentUserLaboratory {
+                laboratory_id,
+                name,
+            }),
+    }))
 }

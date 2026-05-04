@@ -1,26 +1,21 @@
-/*
- * @Author: spinleft spinleftgit@gmail.com
- * @Date: 2025-10-19 20:28:36
- * @LastEditors: spinleft spinleftgit@gmail.com
- * @LastEditTime: 2025-10-20 00:35:24
- * @FilePath: \lab-inventory\backend\src\routes\auth\post.rs
- * @Description:
- *
- * Copyright (c) 2025 by ${git_name_email}, All Rights Reserved.
- */
 use crate::authentication::{AuthError, Credentials, validate_credentials};
 use crate::session_state::TypedSession;
-use crate::utils::{e500, error_chain_fmt};
+use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
-use actix_web::web;
-use actix_web::{HttpResponse, ResponseError};
+use actix_web::{HttpResponse, ResponseError, web};
 use secrecy::Secret;
+use serde::Serialize;
 use sqlx::PgPool;
 
 #[derive(serde::Deserialize)]
 pub struct JsonData {
     username: String,
     password: Secret<String>,
+}
+
+#[derive(Serialize)]
+struct MessageResponse {
+    message: &'static str,
 }
 
 #[derive(thiserror::Error)]
@@ -53,6 +48,7 @@ impl ResponseError for LoginError {
 }
 
 #[tracing::instrument(
+    name = "Log in user",
     skip(json, pool, session),
     fields(username=tracing::field::Empty, user_id=tracing::field::Empty)
 )]
@@ -70,12 +66,19 @@ pub async fn login(
     match validate_credentials(credentials, &pool).await {
         Ok(user_id) => {
             tracing::Span::current().record("user_id", tracing::field::display(&user_id));
+            sqlx::query("UPDATE users SET last_login_at = now() WHERE user_id = $1")
+                .bind(user_id)
+                .execute(pool.get_ref())
+                .await
+                .map_err(|e| LoginError::UnexpectedError(e.into()))?;
             session.renew();
             session
                 .insert_user_id(user_id)
                 .map_err(|e| LoginError::UnexpectedError(e.into()))?;
 
-            Ok(HttpResponse::Ok().finish())
+            Ok(HttpResponse::Ok().json(MessageResponse {
+                message: "Login successful",
+            }))
         }
         Err(e) => {
             let e = match e {
@@ -87,11 +90,9 @@ pub async fn login(
     }
 }
 
-pub async fn logout(session: TypedSession) -> Result<HttpResponse, actix_web::Error> {
-    if session.get_user_id().map_err(e500)?.is_none() {
-        Ok(HttpResponse::Ok().finish())
-    } else {
-        session.log_out();
-        Ok(HttpResponse::Ok().finish())
-    }
+pub async fn logout(session: TypedSession) -> HttpResponse {
+    session.log_out();
+    HttpResponse::Ok().json(MessageResponse {
+        message: "Logout successful",
+    })
 }

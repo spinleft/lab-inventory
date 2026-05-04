@@ -1,11 +1,11 @@
 use crate::session_state::TypedSession;
-use crate::utils::{e500, see_other};
-use actix_web::FromRequest;
-use actix_web::HttpMessage;
+use crate::utils::{e500, json_unauthorized};
 use actix_web::body::MessageBody;
-use actix_web::dev::{ServiceRequest, ServiceResponse};
+use actix_web::dev::{Payload, ServiceRequest, ServiceResponse};
 use actix_web::error::InternalError;
 use actix_web::middleware::Next;
+use actix_web::{FromRequest, HttpMessage, HttpRequest};
+use std::future::{Ready, ready};
 use std::ops::Deref;
 use uuid::Uuid;
 
@@ -26,6 +26,25 @@ impl Deref for UserId {
     }
 }
 
+impl FromRequest for UserId {
+    type Error = actix_web::Error;
+    type Future = Ready<Result<Self, Self::Error>>;
+
+    fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
+        match req.extensions().get::<UserId>() {
+            Some(user_id) => ready(Ok(*user_id)),
+            None => {
+                let e = anyhow::anyhow!("User id was not found in request extensions");
+                ready(Err(InternalError::from_response(
+                    e,
+                    json_unauthorized("Authentication required"),
+                )
+                .into()))
+            }
+        }
+    }
+}
+
 pub async fn reject_anonymous_users(
     mut req: ServiceRequest,
     next: Next<impl MessageBody>,
@@ -41,9 +60,11 @@ pub async fn reject_anonymous_users(
             next.call(req).await
         }
         None => {
-            let response = see_other("/login");
-            let e = anyhow::anyhow!("The user has not logged in.");
-            Err(InternalError::from_response(e, response).into())
+            let e = anyhow::anyhow!("The user has not logged in");
+            Err(
+                InternalError::from_response(e, json_unauthorized("Authentication required"))
+                    .into(),
+            )
         }
     }
 }

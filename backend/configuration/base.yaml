@@ -1,16 +1,18 @@
 application:
   port: 8000
-  hmac_secret: "long-and-very-secret-random-key-needed-to-verify-message-integrity"
+  host: "0.0.0.0"
+  base_url: "http://127.0.0.1:8000"
+  hmac_secret: "super-long-and-secret-random-key-needed-to-verify-message-integrity"
+  cookie_secure: false
+  cors_allowed_origins:
+    - "http://localhost:5173"
+    - "http://127.0.0.1:5173"
+    - "http://localhost:3000"
 database:
   host: "127.0.0.1"
   port: 5432
-  username: "postgres"
-  password: "password"
-  database_name: "inventory"
+  username: "app"
+  password: "secret"
+  database_name: "lab_inventory"
   require_ssl: false
-email_client:
-  base_url: "localhost"
-  sender_email: "test@gmail.com"
-  authorization_token: "my-secret-token"
-  timeout_milliseconds: 10000
 redis_uri: "redis://127.0.0.1:6379"
