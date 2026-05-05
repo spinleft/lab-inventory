@@ -10,25 +10,50 @@ async fn migrations_seed_default_user_types_and_audit_log_table() {
         .unwrap();
     assert_eq!(user_types, vec!["guest", "maintainer", "owner", "user"]);
 
-    let admin: (String, Option<uuid::Uuid>) = sqlx::query_as(
+    let user_type_ids: Vec<String> =
+        sqlx::query_scalar("SELECT user_type_id::text FROM user_types ORDER BY name")
+            .fetch_all(&app.db_pool)
+            .await
+            .unwrap();
+    for user_type_id in user_type_ids {
+        assert!(
+            looks_like_versioned_uuid(&user_type_id),
+            "{user_type_id} should include UUID version and variant bits"
+        );
+    }
+
+    let root: (String, Option<uuid::Uuid>) = sqlx::query_as(
         r#"
         SELECT user_types.name, users.laboratory_id
         FROM users
         INNER JOIN user_types USING (user_type_id)
-        WHERE users.username = 'admin'
+        WHERE users.username = 'root'
         "#,
     )
     .fetch_one(&app.db_pool)
     .await
     .unwrap();
-    assert_eq!(admin.0, "owner");
-    assert!(admin.1.is_none());
+    assert_eq!(root.0, "owner");
+    assert!(root.1.is_none());
 
     let audit_log_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_logs")
         .fetch_one(&app.db_pool)
         .await
         .unwrap();
     assert_eq!(audit_log_count, 0);
+}
+
+fn looks_like_versioned_uuid(value: &str) -> bool {
+    let parts: Vec<&str> = value.split('-').collect();
+    parts.len() == 5
+        && parts[2]
+            .chars()
+            .next()
+            .is_some_and(|version| ('1'..='8').contains(&version))
+        && parts[3]
+            .chars()
+            .next()
+            .is_some_and(|variant| matches!(variant, '8' | '9' | 'a' | 'b'))
 }
 
 #[tokio::test]

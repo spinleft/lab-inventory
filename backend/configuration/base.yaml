@@ -8,6 +8,8 @@ application:
     - "http://localhost:5173"
     - "http://127.0.0.1:5173"
     - "http://localhost:3000"
+    - "tauri://localhost"
+    - "https://tauri.localhost"
 database:
   host: "127.0.0.1"
   port: 5432

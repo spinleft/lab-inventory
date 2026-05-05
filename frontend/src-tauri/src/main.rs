@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    frontend_lib::run()
+    lab_inventory_client_lib::run()
 }
