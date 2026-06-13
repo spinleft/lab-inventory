@@ -1,5 +1,6 @@
 import {
   ApartmentOutlined,
+  ApiOutlined,
   AuditOutlined,
   DashboardOutlined,
   DatabaseOutlined,
@@ -42,6 +43,7 @@ const pageTitles: Record<string, string> = {
   "/settings/preference": "偏好设置",
   "/admin": "管理中心",
   "/admin/laboratories": "实验室",
+  "/admin/remotes": "远端实验室",
   "/admin/users": "用户",
 };
 
@@ -229,6 +231,9 @@ function normalizePath(pathname: string) {
   if (pathname.startsWith("/admin/laboratories")) {
     return "/admin/laboratories";
   }
+  if (pathname.startsWith("/admin/remotes")) {
+    return "/admin/remotes";
+  }
   if (pathname.startsWith("/admin/users")) {
     return "/admin/users";
   }
@@ -298,6 +303,11 @@ function getSidebarItems(
         key: "/admin/users",
         icon: <UserOutlined />,
         label: "用户",
+      },
+      {
+        key: "/admin/remotes",
+        icon: <ApiOutlined />,
+        label: "远端实验室",
       },
     ];
   }

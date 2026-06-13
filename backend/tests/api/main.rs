@@ -1,6 +1,7 @@
 mod alerts;
 mod auth;
 mod borrow_requests;
+mod federation;
 mod health_check;
 mod helpers;
 mod inventory;

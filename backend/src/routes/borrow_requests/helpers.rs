@@ -1,6 +1,6 @@
 use super::model::{BorrowRequest, BorrowRequestForUpdate, InventoryItemForBorrow};
 use crate::audit::AuditAction;
-use crate::authentication::{Actor, MAINTAINER, USER};
+use crate::authentication::{ADMIN, Actor, USER};
 use crate::utils::ApiError;
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
@@ -136,7 +136,7 @@ pub(super) async fn fetch_inventory_item_for_update(
 }
 
 pub(super) fn ensure_can_create(actor: &Actor) -> Result<Uuid, ApiError> {
-    if matches!(actor.user_type_name.as_str(), MAINTAINER | USER) {
+    if matches!(actor.user_type_name.as_str(), ADMIN | USER) {
         actor.laboratory_id.ok_or(ApiError::Forbidden)
     } else {
         Err(ApiError::Forbidden)
@@ -159,7 +159,7 @@ pub(super) fn ensure_can_owner_operate(
     owner_laboratory_id: Uuid,
 ) -> Result<(), ApiError> {
     if actor.is_owner()
-        || (matches!(actor.user_type_name.as_str(), MAINTAINER | USER)
+        || (matches!(actor.user_type_name.as_str(), ADMIN | USER)
             && actor.laboratory_id == Some(owner_laboratory_id))
     {
         Ok(())
@@ -173,7 +173,7 @@ pub(super) fn ensure_can_cancel(
     request: &BorrowRequestForUpdate,
 ) -> Result<(), ApiError> {
     if actor.is_owner()
-        || (matches!(actor.user_type_name.as_str(), MAINTAINER | USER)
+        || (matches!(actor.user_type_name.as_str(), ADMIN | USER)
             && (actor.laboratory_id == Some(request.requester_laboratory_id)
                 || actor.laboratory_id == Some(request.owner_laboratory_id)))
     {

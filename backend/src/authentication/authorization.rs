@@ -3,10 +3,8 @@ use crate::utils::ApiError;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-pub const OWNER: &str = "owner";
-pub const MAINTAINER: &str = "maintainer";
+pub const ADMIN: &str = "admin";
 pub const USER: &str = "user";
-pub const GUEST: &str = "guest";
 
 #[derive(Clone, Debug, sqlx::FromRow)]
 pub struct Actor {
@@ -17,11 +15,15 @@ pub struct Actor {
 
 impl Actor {
     pub fn is_owner(&self) -> bool {
-        self.user_type_name == OWNER
+        self.user_type_name == ADMIN
     }
 
     pub fn is_maintainer(&self) -> bool {
-        self.user_type_name == MAINTAINER
+        self.user_type_name == ADMIN
+    }
+
+    pub fn is_admin(&self) -> bool {
+        self.user_type_name == ADMIN
     }
 
     pub fn can_manage_user(
@@ -33,15 +35,14 @@ impl Actor {
             return true;
         }
 
-        self.is_maintainer()
-            && matches!(target_user_type, MAINTAINER | USER | GUEST)
-            && self.laboratory_id.is_some()
-            && self.laboratory_id == target_laboratory_id
+        self.is_admin()
+            && matches!(target_user_type, ADMIN | USER)
+            && target_laboratory_id.is_some()
     }
 
     pub fn can_write_laboratory_resource(&self, laboratory_id: Uuid) -> bool {
         self.is_owner()
-            || (matches!(self.user_type_name.as_str(), MAINTAINER | USER)
+            || (matches!(self.user_type_name.as_str(), ADMIN | USER)
                 && self.laboratory_id == Some(laboratory_id))
     }
 
@@ -79,5 +80,5 @@ pub async fn user_type_exists(pool: &PgPool, user_type_name: &str) -> Result<boo
 }
 
 pub fn requires_laboratory(user_type_name: &str) -> bool {
-    matches!(user_type_name, MAINTAINER | USER | GUEST)
+    matches!(user_type_name, ADMIN | USER)
 }

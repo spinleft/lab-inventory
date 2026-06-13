@@ -27,6 +27,7 @@ export function App() {
         <Route path="/settings/preference" element={<PreferenceSettingsPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/admin/laboratories" element={<AdminPage section="laboratories" />} />
+        <Route path="/admin/remotes" element={<AdminPage section="remotes" />} />
         <Route path="/admin/user" element={<Navigate to="/admin/users" replace />} />
         <Route path="/admin/users" element={<AdminPage section="users" />} />
       </Route>

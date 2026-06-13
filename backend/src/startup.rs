@@ -3,21 +3,23 @@ use crate::configuration::{ApplicationSettings, DatabaseSettings, Settings};
 use crate::routes::{
     adjust_inventory_item, allocate_inventory_item, approve_borrow_request, cancel_borrow_request,
     change_password, create_asset, create_asset_category, create_attachment, create_borrow_request,
-    create_inventory_item, create_laboratory, create_location, create_maintenance_record,
-    create_maintenance_schedule, create_user, delete_asset, delete_asset_category,
-    delete_attachment, delete_inventory_item, delete_laboratory, delete_location,
-    delete_maintenance_record, delete_maintenance_schedule, delete_user, export_assets_csv,
+    create_federation_borrow_request, create_inventory_item, create_laboratory, create_location,
+    create_maintenance_record, create_maintenance_schedule, create_remote_borrow_request,
+    create_remote_laboratory, create_user, delete_asset, delete_asset_category, delete_attachment,
+    delete_inventory_item, delete_laboratory, delete_location, delete_maintenance_record,
+    delete_maintenance_schedule, delete_remote_laboratory, delete_user, export_assets_csv,
     export_borrow_requests_csv, export_inventory_items_csv, export_maintenance_records_csv,
-    get_asset, get_asset_category, get_borrow_request, get_inventory_item, get_laboratory,
-    get_location, get_maintenance_record, get_user, health_check, list_asset_categories,
-    list_assets, list_attachments, list_audit_logs, list_borrow_request_alerts,
-    list_borrow_requests, list_inventory_items, list_laboratories, list_locations,
-    list_maintenance_alerts, list_maintenance_records, list_maintenance_schedules,
-    list_stock_alerts, list_units, list_users, login, logout, mark_borrow_request_borrowed, me,
-    move_inventory_item, reject_borrow_request, release_inventory_item_allocation,
-    return_borrow_request, stocktake_inventory_item, update_asset, update_asset_category,
-    update_inventory_item, update_laboratory, update_location, update_maintenance_record,
-    update_maintenance_schedule, update_user,
+    get_asset, get_asset_category, get_borrow_request, get_federation_inventory_item,
+    get_inventory_item, get_laboratory, get_location, get_maintenance_record, get_user,
+    health_check, list_asset_categories, list_assets, list_attachments, list_audit_logs,
+    list_borrow_request_alerts, list_borrow_requests, list_federation_inventory_items,
+    list_inventory_items, list_laboratories, list_locations, list_maintenance_alerts,
+    list_maintenance_records, list_maintenance_schedules, list_remote_inventory_items,
+    list_remote_laboratories, list_stock_alerts, list_units, list_users, login, logout,
+    mark_borrow_request_borrowed, me, move_inventory_item, reject_borrow_request,
+    release_inventory_item_allocation, return_borrow_request, stocktake_inventory_item,
+    update_asset, update_asset_category, update_inventory_item, update_laboratory, update_location,
+    update_maintenance_record, update_maintenance_schedule, update_remote_laboratory, update_user,
 };
 use actix_cors::Cors;
 use actix_session::SessionMiddleware;
@@ -76,6 +78,7 @@ pub fn get_connection_pool(configuration: &DatabaseSettings) -> PgPool {
 }
 
 pub struct ApplicationBaseUrl(pub String);
+pub struct ApplicationLocalLaboratoryId(pub uuid::Uuid);
 
 async fn run(
     listener: TcpListener,
@@ -85,6 +88,9 @@ async fn run(
 ) -> Result<Server, anyhow::Error> {
     let db_pool = Data::new(db_pool);
     let base_url = Data::new(ApplicationBaseUrl(application.base_url));
+    let local_laboratory_id = Data::new(ApplicationLocalLaboratoryId(
+        application.local_laboratory_id,
+    ));
     let secret_key = Key::derive_from(application.hmac_secret.expose_secret().as_bytes());
     let redis_store = RedisSessionStore::new(redis_uri.expose_secret()).await?;
 
@@ -92,6 +98,7 @@ async fn run(
         listener,
         db_pool,
         base_url,
+        local_laboratory_id,
         secret_key,
         application.cookie_secure,
         application.cors_allowed_origins,
@@ -105,6 +112,7 @@ fn build_server(
     listener: TcpListener,
     db_pool: Data<PgPool>,
     base_url: Data<ApplicationBaseUrl>,
+    local_laboratory_id: Data<ApplicationLocalLaboratoryId>,
     secret_key: Key,
     cookie_secure: bool,
     cors_allowed_origins: Vec<String>,
@@ -122,6 +130,7 @@ fn build_server(
             .configure(api_routes)
             .app_data(db_pool.clone())
             .app_data(base_url.clone())
+            .app_data(local_laboratory_id.clone())
     })
     .listen(listener)?
     .run();
@@ -165,6 +174,18 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
             .route("/health_check", web::get().to(health_check))
             .route("/auth/login", web::post().to(login))
             .route("/auth/logout", web::post().to(logout))
+            .route(
+                "/federation/inventory-items",
+                web::get().to(list_federation_inventory_items),
+            )
+            .route(
+                "/federation/inventory-items/{inventory_item_id}",
+                web::get().to(get_federation_inventory_item),
+            )
+            .route(
+                "/federation/borrow-requests",
+                web::post().to(create_federation_borrow_request),
+            )
             .service(
                 web::scope("")
                     .wrap(from_fn(reject_anonymous_users))
@@ -172,6 +193,30 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                     .route("/auth/password", web::patch().to(change_password))
                     .route("/audit-logs", web::get().to(list_audit_logs))
                     .route("/units", web::get().to(list_units))
+                    .route(
+                        "/remote-laboratories",
+                        web::post().to(create_remote_laboratory),
+                    )
+                    .route(
+                        "/remote-laboratories",
+                        web::get().to(list_remote_laboratories),
+                    )
+                    .route(
+                        "/remote-laboratories/{remote_laboratory_id}",
+                        web::patch().to(update_remote_laboratory),
+                    )
+                    .route(
+                        "/remote-laboratories/{remote_laboratory_id}",
+                        web::delete().to(delete_remote_laboratory),
+                    )
+                    .route(
+                        "/remote-laboratories/{remote_laboratory_id}/inventory-items",
+                        web::get().to(list_remote_inventory_items),
+                    )
+                    .route(
+                        "/remote-laboratories/{remote_laboratory_id}/borrow-requests",
+                        web::post().to(create_remote_borrow_request),
+                    )
                     .route("/laboratories", web::post().to(create_laboratory))
                     .route("/laboratories", web::get().to(list_laboratories))
                     .route(

@@ -2,6 +2,7 @@ use secrecy::{ExposeSecret, Secret};
 use serde_aux::field_attributes::deserialize_number_from_string;
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use std::convert::{TryFrom, TryInto};
+use uuid::Uuid;
 
 #[derive(serde::Deserialize, Clone)]
 pub struct Settings {
@@ -16,6 +17,7 @@ pub struct ApplicationSettings {
     pub port: u16,
     pub host: String,
     pub base_url: String,
+    pub local_laboratory_id: Uuid,
     pub hmac_secret: Secret<String>,
     pub cookie_secure: bool,
     pub cors_allowed_origins: Vec<String>,

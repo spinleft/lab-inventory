@@ -4,18 +4,18 @@ export const testCurrentUser = {
   email: "admin@example.com",
   user_type: {
     user_type_id: "00000000-0000-4000-8000-000000000002",
-    name: "owner",
+    name: "admin",
   },
   laboratory: null,
 };
 
 export const testMaintainerUser = {
   user_id: "00000000-0000-4000-8000-000000000011",
-  username: "maintainer",
-  email: "maintainer@example.com",
+  username: "admin-user",
+  email: "admin-user@example.com",
   user_type: {
     user_type_id: "00000000-0000-4000-8000-000000000012",
-    name: "maintainer",
+    name: "admin",
   },
   laboratory: {
     laboratory_id: "00000000-0000-4000-8000-000000000013",

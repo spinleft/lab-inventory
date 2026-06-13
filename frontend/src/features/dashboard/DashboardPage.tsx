@@ -45,10 +45,7 @@ export function DashboardPage() {
           {
             icon: <ApartmentOutlined />,
             title: "管理中心",
-            description:
-              currentUser.user_type.name === "maintainer"
-                ? "管理自己实验室的用户和数据。"
-                : "管理实验室、用户和系统数据。",
+            description: "管理本地节点、用户和远端实验室。",
             to: "/admin",
           },
         ]

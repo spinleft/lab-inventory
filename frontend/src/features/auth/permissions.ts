@@ -9,30 +9,27 @@ export function canAccessUserSettings(_user: CurrentUser) {
 }
 
 export function canAccessSystemSettings(user: CurrentUser) {
-  return getUserTypeName(user) === "owner";
+  return getUserTypeName(user) === "admin";
 }
 
 export function canAccessAdminSettings(user: CurrentUser) {
-  return ["owner", "maintainer"].includes(getUserTypeName(user));
+  return getUserTypeName(user) === "admin";
 }
 
 export function describeRole(user: CurrentUser) {
   const roleName = getUserTypeName(user);
-  if (roleName === "owner") {
-    return "系统所有者";
-  }
-  if (roleName === "maintainer") {
-    return "实验室维护者";
+  if (roleName === "admin") {
+    return "管理员";
   }
   if (roleName === "user") {
-    return "实验室用户";
+    return "用户";
   }
   return roleName;
 }
 
 export function describeScope(user: CurrentUser) {
-  if (getUserTypeName(user) === "owner") {
-    return "全部实验室";
+  if (getUserTypeName(user) === "admin") {
+    return "本地节点";
   }
   return user.laboratory?.name ?? "未绑定实验室";
 }

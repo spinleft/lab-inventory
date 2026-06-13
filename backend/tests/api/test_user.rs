@@ -14,7 +14,7 @@ pub struct TestUser {
 
 impl TestUser {
     pub fn generate() -> Self {
-        Self::generate_with_user_type("owner", None)
+        Self::generate_with_user_type("admin", None)
     }
 
     pub fn generate_with_user_type(user_type: &str, laboratory_id: Option<Uuid>) -> Self {

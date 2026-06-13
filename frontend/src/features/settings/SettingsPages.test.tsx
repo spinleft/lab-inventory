@@ -13,7 +13,7 @@ describe("SettingsPages", () => {
 
     expect(await screen.findByText("账号信息")).toBeInTheDocument();
     expect(screen.getByText("admin@example.com")).toBeInTheDocument();
-    expect(screen.getByText("系统所有者")).toBeInTheDocument();
+    expect(screen.getByText("管理员")).toBeInTheDocument();
   });
 
   it("changes the current user's password", async () => {

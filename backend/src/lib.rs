@@ -1,6 +1,7 @@
 pub mod audit;
 pub mod authentication;
 pub mod configuration;
+pub mod federation;
 pub mod idempotency;
 pub mod routes;
 pub mod session_state;

@@ -57,7 +57,7 @@ describe("AppShell", () => {
     expect(within(sideNavigation as HTMLElement).queryByText("库存")).not.toBeInTheDocument();
   });
 
-  it("renders admin navigation for maintainers", async () => {
+  it("renders admin navigation for admins", async () => {
     renderAuthenticatedRoute("/admin", testMaintainerUser);
 
     expect(
@@ -67,6 +67,7 @@ describe("AppShell", () => {
     expect(sideNavigation).not.toBeNull();
     expect(within(sideNavigation as HTMLElement).getByText("实验室")).toBeInTheDocument();
     expect(within(sideNavigation as HTMLElement).getByText("用户")).toBeInTheDocument();
+    expect(within(sideNavigation as HTMLElement).getByText("远端实验室")).toBeInTheDocument();
     expect(within(sideNavigation as HTMLElement).queryByText("用户资料")).not.toBeInTheDocument();
   });
 
@@ -78,6 +79,7 @@ describe("AppShell", () => {
     expect(sideNavigation).not.toBeNull();
     expect(within(sideNavigation as HTMLElement).queryByText("实验室")).not.toBeInTheDocument();
     expect(within(sideNavigation as HTMLElement).queryByText("用户")).not.toBeInTheDocument();
+    expect(within(sideNavigation as HTMLElement).queryByText("远端实验室")).not.toBeInTheDocument();
   });
 
   it("shows owner settings entries in the user menu", async () => {
@@ -92,11 +94,11 @@ describe("AppShell", () => {
     expect(screen.getByText("登出")).toBeInTheDocument();
   });
 
-  it("shows admin center for maintainers", async () => {
+  it("shows admin center for admins", async () => {
     const user = userEvent.setup();
     renderAuthenticatedRoute("/dashboard", testMaintainerUser);
 
-    await user.click(await screen.findByRole("button", { name: /maintainer/ }));
+    await user.click(await screen.findByRole("button", { name: /admin-user/ }));
     expect((await screen.findAllByText("用户设置")).length).toBeGreaterThan(0);
     expect(screen.queryByText("系统设置")).not.toBeInTheDocument();
     expect(screen.getAllByText("管理中心").length).toBeGreaterThan(0);

@@ -35,8 +35,48 @@ const userSchema = z.object({
 
 const usersSchema = z.array(userSchema);
 
+const remoteLaboratorySchema = z.object({
+  remote_laboratory_id: z.string().uuid(),
+  name: z.string(),
+  api_base_url: z.string(),
+  is_enabled: z.boolean(),
+  key_id: z.string(),
+  last_seen_at: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+const remoteLaboratoriesSchema = z.array(remoteLaboratorySchema);
+
+const remoteInventoryItemSchema = z.object({
+  inventory_item_id: z.string().uuid(),
+  asset_id: z.string().uuid(),
+  asset_name: z.string(),
+  asset_model: z.string().nullable(),
+  laboratory_id: z.string().uuid(),
+  laboratory_name: z.string(),
+  status: z.string(),
+  is_cross_lab_borrowable: z.boolean(),
+  quantity_available: z.number(),
+  unit_id: z.string().uuid(),
+  unit_code: z.string(),
+  public_notes: z.string().nullable(),
+});
+
+const remoteInventoryResponseSchema = z.object({
+  items: z.array(remoteInventoryItemSchema),
+});
+
+const remoteBorrowResponseSchema = z.object({
+  borrow_request_id: z.string().uuid(),
+  correlation_id: z.string().uuid(),
+  status: z.string(),
+});
+
 export type Laboratory = z.infer<typeof laboratorySchema>;
 export type AdminUser = z.infer<typeof userSchema>;
+export type RemoteLaboratory = z.infer<typeof remoteLaboratorySchema>;
+export type RemoteInventoryItem = z.infer<typeof remoteInventoryItemSchema>;
 
 export type LaboratoryPayload = {
   name: string;
@@ -61,8 +101,27 @@ export type UpdateUserPayload = {
   email?: string | null;
 };
 
+export type RemoteLaboratoryPayload = {
+  remote_laboratory_id: string;
+  name: string;
+  api_base_url: string;
+  is_enabled: boolean;
+  key_id: string;
+  shared_secret: string;
+};
+
+export type RemoteBorrowPayload = {
+  inventory_item_id: string;
+  requested_quantity: number;
+  purpose: string;
+};
+
 export const adminQueryKeys = {
   laboratories: (apiBaseUrl: string) => ["admin", "laboratories", apiBaseUrl] as const,
+  remoteInventory: (apiBaseUrl: string, remoteLaboratoryId: string | null) =>
+    ["admin", "remote-inventory", apiBaseUrl, remoteLaboratoryId] as const,
+  remoteLaboratories: (apiBaseUrl: string) =>
+    ["admin", "remote-laboratories", apiBaseUrl] as const,
   users: (apiBaseUrl: string) => ["admin", "users", apiBaseUrl] as const,
 };
 
@@ -167,6 +226,66 @@ export function useDeleteLaboratory() {
     mutationFn: async (laboratoryId: string) => {
       const client = createApiClient(apiBaseUrl);
       await client.delete(`/laboratories/${laboratoryId}`);
+    },
+  });
+}
+
+export function useRemoteLaboratories() {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useQuery({
+    queryKey: adminQueryKeys.remoteLaboratories(apiBaseUrl),
+    queryFn: async () => {
+      const client = createApiClient(apiBaseUrl);
+      return remoteLaboratoriesSchema.parse(await client.get("/remote-laboratories"));
+    },
+  });
+}
+
+export function useCreateRemoteLaboratory() {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useMutation({
+    mutationFn: async (payload: RemoteLaboratoryPayload) => {
+      const client = createApiClient(apiBaseUrl);
+      return remoteLaboratorySchema.parse(await client.post("/remote-laboratories", payload));
+    },
+  });
+}
+
+export function useRemoteInventory(remoteLaboratoryId: string | null) {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useQuery({
+    enabled: Boolean(remoteLaboratoryId),
+    queryKey: adminQueryKeys.remoteInventory(apiBaseUrl, remoteLaboratoryId),
+    queryFn: async () => {
+      const client = createApiClient(apiBaseUrl);
+      return remoteInventoryResponseSchema.parse(
+        await client.get(`/remote-laboratories/${remoteLaboratoryId}/inventory-items`),
+      );
+    },
+  });
+}
+
+export function useCreateRemoteBorrowRequest() {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useMutation({
+    mutationFn: async ({
+      payload,
+      remoteLaboratoryId,
+    }: {
+      payload: RemoteBorrowPayload;
+      remoteLaboratoryId: string;
+    }) => {
+      const client = createApiClient(apiBaseUrl);
+      return remoteBorrowResponseSchema.parse(
+        await client.post(
+          `/remote-laboratories/${remoteLaboratoryId}/borrow-requests`,
+          payload,
+        ),
+      );
     },
   });
 }

@@ -1,5 +1,6 @@
 import {
   ApartmentOutlined,
+  ApiOutlined,
   DeleteOutlined,
   EditOutlined,
   PlusOutlined,
@@ -20,6 +21,7 @@ import {
   Result,
   Select,
   Space,
+  Switch,
   Table,
   Tag,
   Typography,
@@ -37,12 +39,19 @@ import {
   type CreateUserPayload,
   type Laboratory,
   type LaboratoryPayload,
+  type RemoteInventoryItem,
+  type RemoteLaboratory,
+  type RemoteLaboratoryPayload,
   type UpdateUserPayload,
   useCreateLaboratory,
+  useCreateRemoteBorrowRequest,
+  useCreateRemoteLaboratory,
   useCreateUser,
   useDeleteLaboratory,
   useDeleteUser,
   useLaboratories,
+  useRemoteInventory,
+  useRemoteLaboratories,
   useUpdateLaboratory,
   useUpdateUser,
   useUsers,
@@ -50,7 +59,14 @@ import {
 
 const { Paragraph, Text, Title } = Typography;
 
-type AdminSection = "overview" | "laboratories" | "users";
+type AdminSection = "overview" | "laboratories" | "users" | "remotes";
+type RemoteSectionFormValues = {
+  name: string;
+  api_base_url: string;
+  key_id: string;
+  shared_secret: string;
+  is_enabled: boolean;
+};
 type LaboratoryFormValues = {
   name: string;
   address: string;
@@ -75,22 +91,16 @@ export function AdminPage({ section = "overview" }: { section?: AdminSection }) 
     return <AdminAccessDenied />;
   }
 
-  const isMaintainer = currentUser.user_type.name === "maintainer";
   const sectionContent = getAdminSectionContent(section, currentUser);
 
   return (
     <Space orientation="vertical" size="large" className="full-width">
-      {isMaintainer ? (
-        <Alert
-          showIcon
-          type="info"
-          title="你只能管理自己实验室范围内的数据。"
-        />
-      ) : null}
       {section === "laboratories" ? (
         <LaboratoriesSection currentUser={currentUser} />
       ) : section === "users" ? (
         <UsersSection currentUser={currentUser} />
+      ) : section === "remotes" ? (
+        <RemoteLaboratoriesSection />
       ) : (
         <Card className="settings-card">
           <Space align="start">
@@ -108,8 +118,7 @@ export function AdminPage({ section = "overview" }: { section?: AdminSection }) 
 }
 
 function getAdminSectionContent(section: AdminSection, currentUser: CurrentUser) {
-  const scope =
-    currentUser.user_type.name === "maintainer" ? describeScope(currentUser) : "全部实验室";
+  const scope = currentUser.user_type.name === "admin" ? "本地节点" : describeScope(currentUser);
 
   if (section === "laboratories") {
     return {
@@ -129,12 +138,235 @@ function getAdminSectionContent(section: AdminSection, currentUser: CurrentUser)
     };
   }
 
+  if (section === "remotes") {
+    return {
+      description: "维护可信远端实验室节点，并通过本地节点查询、借用远端公开库存。",
+      icon: <ApiOutlined className="settings-placeholder-icon" aria-hidden="true" />,
+      meta: `当前范围：${scope}`,
+      title: "远端实验室",
+    };
+  }
+
   return {
     description: "管理中心已经从设置页迁移到独立 /admin 路由。本轮仅调整后台布局和路由结构。",
     icon: <ApartmentOutlined className="settings-placeholder-icon" aria-hidden="true" />,
     meta: `当前范围：${scope}`,
     title: "管理中心",
   };
+}
+
+function RemoteLaboratoriesSection() {
+  const { apiBaseUrl } = useBackendConfig();
+  const queryClient = useQueryClient();
+  const { message } = AntApp.useApp();
+  const [form] = Form.useForm<RemoteSectionFormValues>();
+  const remoteLabsQuery = useRemoteLaboratories();
+  const createRemoteLab = useCreateRemoteLaboratory();
+  const createBorrowRequest = useCreateRemoteBorrowRequest();
+  const remotes = remoteLabsQuery.data ?? [];
+  const [selectedRemoteId, setSelectedRemoteId] = useState<string | null>(null);
+  const remoteInventoryQuery = useRemoteInventory(selectedRemoteId);
+
+  function submitRemote(values: RemoteSectionFormValues) {
+    const payload: RemoteLaboratoryPayload = {
+      remote_laboratory_id: crypto.randomUUID(),
+      name: values.name.trim(),
+      api_base_url: values.api_base_url.trim(),
+      is_enabled: values.is_enabled,
+      key_id: values.key_id.trim(),
+      shared_secret: values.shared_secret.trim(),
+    };
+    createRemoteLab.mutate(payload, {
+      onError: (error) => message.error(toMessage(error)),
+      onSuccess: (remote) => {
+        form.resetFields();
+        setSelectedRemoteId(remote.remote_laboratory_id);
+        queryClient.invalidateQueries({
+          queryKey: adminQueryKeys.remoteLaboratories(apiBaseUrl),
+        });
+        message.success("远端实验室已保存。");
+      },
+    });
+  }
+
+  function submitBorrow(item: RemoteInventoryItem) {
+    if (!selectedRemoteId) {
+      return;
+    }
+    createBorrowRequest.mutate(
+      {
+        remoteLaboratoryId: selectedRemoteId,
+        payload: {
+          inventory_item_id: item.inventory_item_id,
+          requested_quantity: 1,
+          purpose: "demo borrow",
+        },
+      },
+      {
+        onError: (error) => message.error(toMessage(error)),
+        onSuccess: () => message.success("远端借用申请已提交。"),
+      },
+    );
+  }
+
+  const remoteColumns: TableProps<RemoteLaboratory>["columns"] = [
+    {
+      title: "名称",
+      dataIndex: "name",
+      key: "name",
+      render: (name: string) => <Text strong>{name}</Text>,
+    },
+    {
+      title: "API 地址",
+      dataIndex: "api_base_url",
+      key: "api_base_url",
+      render: (url: string) => <Text code>{url}</Text>,
+    },
+    {
+      title: "Key ID",
+      dataIndex: "key_id",
+      key: "key_id",
+    },
+    {
+      title: "状态",
+      dataIndex: "is_enabled",
+      key: "is_enabled",
+      render: (enabled: boolean) => (
+        <Tag color={enabled ? "green" : "default"}>{enabled ? "启用" : "停用"}</Tag>
+      ),
+    },
+  ];
+
+  const inventoryColumns: TableProps<RemoteInventoryItem>["columns"] = [
+    {
+      title: "资产",
+      dataIndex: "asset_name",
+      key: "asset_name",
+      render: (name: string, item) => (
+        <Space orientation="vertical" size={0}>
+          <Text strong>{name}</Text>
+          <Text type="secondary">{item.asset_model ?? "无型号"}</Text>
+        </Space>
+      ),
+    },
+    {
+      title: "远端实验室",
+      dataIndex: "laboratory_name",
+      key: "laboratory_name",
+    },
+    {
+      title: "可用数量",
+      key: "quantity_available",
+      render: (_, item) => `${item.quantity_available} ${item.unit_code}`,
+    },
+    {
+      title: "状态",
+      dataIndex: "status",
+      key: "status",
+    },
+    {
+      title: "操作",
+      key: "actions",
+      render: (_, item) => (
+        <Button
+          type="primary"
+          size="small"
+          loading={createBorrowRequest.isPending}
+          onClick={() => submitBorrow(item)}
+        >
+          借用 1
+        </Button>
+      ),
+    },
+  ];
+
+  return (
+    <Space orientation="vertical" size="large" className="full-width">
+      <Card className="settings-card" title="登记远端实验室">
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{ is_enabled: true }}
+          onFinish={submitRemote}
+        >
+          <Form.Item
+            label="名称"
+            name="name"
+            rules={[{ required: true, message: "请输入远端实验室名称。" }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item
+            label="API 地址"
+            name="api_base_url"
+            rules={[{ required: true, message: "请输入远端 API 地址。" }]}
+          >
+            <Input placeholder="http://127.0.0.1:8001/api/v1" />
+          </Form.Item>
+          <Form.Item
+            label="Key ID"
+            name="key_id"
+            rules={[{ required: true, message: "请输入 Key ID。" }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item
+            label="Shared Secret"
+            name="shared_secret"
+            rules={[{ required: true, message: "请输入共享密钥。" }]}
+          >
+            <Input.Password autoComplete="new-password" />
+          </Form.Item>
+          <Form.Item label="启用" name="is_enabled" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" loading={createRemoteLab.isPending}>
+            保存远端实验室
+          </Button>
+        </Form>
+      </Card>
+
+      <Card className="settings-card" title="远端节点">
+        <Table
+          columns={remoteColumns}
+          dataSource={remotes}
+          loading={remoteLabsQuery.isLoading}
+          pagination={false}
+          rowKey="remote_laboratory_id"
+        />
+      </Card>
+
+      <Card className="settings-card" title="远端公开库存">
+        <Space orientation="vertical" size="middle" className="full-width">
+          <Select
+            aria-label="选择远端实验室"
+            className="full-width"
+            placeholder="选择远端实验室"
+            value={selectedRemoteId ?? undefined}
+            onChange={setSelectedRemoteId}
+            options={remotes.map((remote) => ({
+              label: remote.name,
+              value: remote.remote_laboratory_id,
+            }))}
+          />
+          {remoteInventoryQuery.isError ? (
+            <Alert
+              showIcon
+              type="error"
+              title={toMessage(remoteInventoryQuery.error)}
+            />
+          ) : null}
+          <Table
+            columns={inventoryColumns}
+            dataSource={remoteInventoryQuery.data?.items ?? []}
+            loading={remoteInventoryQuery.isFetching}
+            pagination={false}
+            rowKey="inventory_item_id"
+          />
+        </Space>
+      </Card>
+    </Space>
+  );
 }
 
 function LaboratoriesSection({ currentUser }: { currentUser: CurrentUser }) {
@@ -156,8 +388,8 @@ function LaboratoriesSection({ currentUser }: { currentUser: CurrentUser }) {
   const [formErrors, setFormErrors] = useState<LaboratoryFormErrors>({});
   const [deletingLaboratoryId, setDeletingLaboratoryId] = useState<string | null>(null);
   const userTypeName = currentUser.user_type.name;
-  const isOwner = userTypeName === "owner";
-  const isMaintainer = userTypeName === "maintainer";
+  const isOwner = userTypeName === "admin";
+  const isMaintainer = false;
   const laboratories = laboratoriesQuery.data ?? [];
   const isDrawerOpen = drawerMode !== null;
   const isSaving = createLaboratory.isPending || updateLaboratory.isPending;
@@ -486,8 +718,8 @@ function UsersSection({ currentUser }: { currentUser: CurrentUser }) {
   const { message } = AntApp.useApp();
   const usersQuery = useUsers();
   const userTypeName = currentUser.user_type.name;
-  const isOwner = userTypeName === "owner";
-  const isMaintainer = userTypeName === "maintainer";
+  const isOwner = userTypeName === "admin";
+  const isMaintainer = false;
   const laboratoriesQuery = useLaboratories({ enabled: isOwner });
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
@@ -692,11 +924,7 @@ function UsersSection({ currentUser }: { currentUser: CurrentUser }) {
     if (isOwner) {
       return true;
     }
-    return (
-      isMaintainer &&
-      user.laboratory?.laboratory_id === currentUser.laboratory?.laboratory_id &&
-      ["maintainer", "user", "guest"].includes(user.user_type.name)
-    );
+    return isMaintainer && user.laboratory?.laboratory_id === currentUser.laboratory?.laboratory_id;
   }
 
   function canDeleteUser(user: AdminUser) {
@@ -964,34 +1192,25 @@ function toLaboratoryPayload(values: LaboratoryFormValues): LaboratoryPayload {
 }
 
 function getRoleOptions(currentUserType: string) {
-  if (currentUserType === "maintainer") {
-    return ["maintainer", "user", "guest"];
+  if (currentUserType === "admin") {
+    return ["admin", "user"];
   }
-  return ["owner", "maintainer", "user", "guest"];
+  return ["user"];
 }
 
 function getRoleLabel(roleName: string) {
-  if (roleName === "owner") {
-    return "系统所有者";
-  }
-  if (roleName === "maintainer") {
-    return "实验室维护者";
+  if (roleName === "admin") {
+    return "管理员";
   }
   if (roleName === "user") {
-    return "实验室用户";
-  }
-  if (roleName === "guest") {
-    return "访客";
+    return "用户";
   }
   return roleName;
 }
 
 function getRoleColor(roleName: string) {
-  if (roleName === "owner") {
+  if (roleName === "admin") {
     return "red";
-  }
-  if (roleName === "maintainer") {
-    return "blue";
   }
   if (roleName === "user") {
     return "green";
@@ -1000,7 +1219,7 @@ function getRoleColor(roleName: string) {
 }
 
 function requiresLaboratory(roleName: string) {
-  return ["maintainer", "user", "guest"].includes(roleName);
+  return ["admin", "user"].includes(roleName);
 }
 
 function formatDate(value: string) {

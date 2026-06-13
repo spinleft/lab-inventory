@@ -19,11 +19,18 @@ anyhow = "1"
 argon2 = { version = "0.5", features = ["std"] }
 chrono = { version = "0.4.22", default-features = false, features = ["clock", "serde"] }
 config = { version = "0.15", default-features = false, features = ["yaml"] }
+hex = "0.4"
+hmac = "0.12"
 rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+] }
 secrecy = { version = "0.8", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde-aux = "4"
 serde_json = "1"
+sha2 = "0.10"
 sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio-rustls",
     "macros",

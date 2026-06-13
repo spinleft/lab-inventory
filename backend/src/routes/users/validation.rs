@@ -1,7 +1,5 @@
 use super::model::UserRow;
-use crate::authentication::{
-    Actor, GUEST, MAINTAINER, OWNER, USER, requires_laboratory, user_type_exists,
-};
+use crate::authentication::{ADMIN, Actor, USER, requires_laboratory, user_type_exists};
 use crate::utils::ApiError;
 use secrecy::{ExposeSecret, Secret};
 use sqlx::PgPool;
@@ -33,11 +31,8 @@ pub(super) fn resolve_target_laboratory(
     target_user_type: &str,
     requested_laboratory_id: Option<Uuid>,
 ) -> Result<Option<Uuid>, ApiError> {
-    if actor.is_maintainer() && matches!(target_user_type, MAINTAINER | USER | GUEST) {
-        if requested_laboratory_id.is_some() && requested_laboratory_id != actor.laboratory_id {
-            return Err(ApiError::Forbidden);
-        }
-        return Ok(actor.laboratory_id);
+    if matches!(target_user_type, ADMIN | USER) {
+        return Ok(requested_laboratory_id.or(actor.laboratory_id));
     }
     Ok(requested_laboratory_id)
 }
@@ -85,7 +80,7 @@ pub(super) fn required_secret_text(value: &Secret<String>, field: &str) -> Resul
 
 pub(super) fn normalize_user_type(user_type: &str) -> Result<String, ApiError> {
     let user_type = required_text(user_type, "user_type")?;
-    if matches!(user_type, OWNER | MAINTAINER | USER | GUEST) {
+    if matches!(user_type, ADMIN | USER) {
         Ok(user_type.to_string())
     } else {
         Err(ApiError::BadRequest("Unknown user type".into()))

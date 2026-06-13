@@ -24,6 +24,7 @@ pub struct TestApp {
     pub db_pool: PgPool,
     pub test_user: TestUser,
     pub api_client: reqwest::Client,
+    pub local_laboratory_id: Uuid,
 }
 
 pub async fn spawn_app() -> TestApp {
@@ -36,10 +37,12 @@ pub async fn spawn_app() -> TestApp {
         c.database.password = Secret::new("password".to_string());
         c.application.port = 0;
         c.application.cookie_secure = false;
+        c.application.local_laboratory_id = Uuid::new_v4();
         c
     };
 
-    configure_database(&configuration.database).await;
+    let setup_pool = configure_database(&configuration.database).await;
+    seed_local_laboratory(&setup_pool, configuration.application.local_laboratory_id).await;
 
     let application = Application::build(configuration.clone())
         .await
@@ -56,8 +59,12 @@ pub async fn spawn_app() -> TestApp {
     let test_app = TestApp {
         address: format!("http://localhost:{application_port}"),
         db_pool: get_connection_pool(&configuration.database),
-        test_user: TestUser::generate(),
+        test_user: TestUser {
+            laboratory_id: Some(configuration.application.local_laboratory_id),
+            ..TestUser::generate()
+        },
         api_client: client,
+        local_laboratory_id: configuration.application.local_laboratory_id,
     };
 
     test_app.test_user.store(&test_app.db_pool).await;
@@ -217,6 +224,45 @@ impl TestApp {
     pub async fn get_units(&self) -> reqwest::Response {
         self.api_client
             .get(format!("{}/api/v1/units", &self.address))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn post_remote_laboratory<Body>(&self, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(format!("{}/api/v1/remote-laboratories", &self.address))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_remote_laboratories(&self) -> reqwest::Response {
+        self.api_client
+            .get(format!("{}/api/v1/remote-laboratories", &self.address))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn post_remote_borrow_request<Body>(
+        &self,
+        remote_laboratory_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(format!(
+                "{}/api/v1/remote-laboratories/{remote_laboratory_id}/borrow-requests",
+                &self.address
+            ))
+            .json(body)
             .send()
             .await
             .expect("Failed to execute request.")
@@ -601,6 +647,53 @@ impl TestApp {
             .await
             .expect("Failed to fetch unit id.")
     }
+
+    pub async fn insert_remote_laboratory(
+        &self,
+        remote_laboratory_id: Uuid,
+        name: &str,
+        address: &str,
+        key_id: &str,
+        shared_secret: &str,
+    ) {
+        sqlx::query(
+            r#"
+            INSERT INTO remote_laboratories (
+                remote_laboratory_id,
+                name,
+                api_base_url,
+                is_enabled,
+                key_id,
+                shared_secret
+            )
+            VALUES ($1, $2, $3, true, $4, $5)
+            "#,
+        )
+        .bind(remote_laboratory_id)
+        .bind(name)
+        .bind(format!("{}/api/v1", address.trim_end_matches('/')))
+        .bind(key_id)
+        .bind(shared_secret)
+        .execute(&self.db_pool)
+        .await
+        .expect("Failed to insert remote laboratory.");
+    }
+}
+
+async fn seed_local_laboratory(pool: &PgPool, laboratory_id: Uuid) {
+    sqlx::query(
+        r#"
+        INSERT INTO laboratories (laboratory_id, name, address)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (laboratory_id) DO NOTHING
+        "#,
+    )
+    .bind(laboratory_id)
+    .bind(format!("Local Lab {laboratory_id}"))
+    .bind("Local test node")
+    .execute(pool)
+    .await
+    .expect("Failed to seed local laboratory.");
 }
 
 async fn configure_database(config: &DatabaseSettings) -> PgPool {
