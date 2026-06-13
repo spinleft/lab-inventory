@@ -1,20 +1,8 @@
-import {
-  ApartmentOutlined,
-  LockOutlined,
-  SafetyCertificateOutlined,
-  SettingOutlined,
-  UserOutlined,
-} from "@ant-design/icons";
-import { Alert, Button, Card, Form, Input, Result, Space, Typography } from "antd";
-import { Link } from "react-router-dom";
+import { LockOutlined, SettingOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Form, Input, Space, Typography } from "antd";
 import { useAppShell } from "../../app/AppShell";
 import { useChangePassword } from "../auth/api";
-import { type CurrentUser } from "../auth/types";
-import {
-  canAccessAdminSettings,
-  describeRole,
-  describeScope,
-} from "../auth/permissions";
+import { describeRole, describeScope } from "../auth/permissions";
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -127,88 +115,6 @@ export function PreferenceSettingsPage() {
           <Text type="secondary">当前仅调整路由和页面框架，不新增配置项。</Text>
         </div>
       </Space>
-    </Card>
-  );
-}
-
-type AdminSection = "overview" | "laboratories" | "users";
-
-export function AdminPage({ section = "overview" }: { section?: AdminSection }) {
-  const { currentUser } = useAppShell();
-  if (!canAccessAdminSettings(currentUser)) {
-    return <SettingsAccessDenied />;
-  }
-
-  const isMaintainer = currentUser.user_type.name === "maintainer";
-  const sectionContent = getAdminSectionContent(section, currentUser);
-
-  return (
-    <Space orientation="vertical" size="large" className="full-width">
-      {isMaintainer ? (
-        <Alert
-          showIcon
-          type="info"
-          title="你只能管理自己实验室范围内的数据。"
-        />
-      ) : null}
-      <Card className="settings-card">
-        <Space align="start">
-          {sectionContent.icon}
-          <div>
-            <Title level={3}>{sectionContent.title}</Title>
-            <Paragraph type="secondary">{sectionContent.description}</Paragraph>
-            <Text type="secondary">{sectionContent.meta}</Text>
-          </div>
-        </Space>
-      </Card>
-    </Space>
-  );
-}
-
-function getAdminSectionContent(section: AdminSection, currentUser: CurrentUser) {
-  const scope =
-    currentUser.user_type.name === "maintainer" ? describeScope(currentUser) : "全部实验室";
-
-  if (section === "laboratories") {
-    return {
-      description: "实验室管理入口已经接入新的管理导航。实验室 CRUD 将在后续切片实现。",
-      icon: <ApartmentOutlined className="settings-placeholder-icon" aria-hidden="true" />,
-      meta: `当前范围：${scope}`,
-      title: "实验室",
-    };
-  }
-
-  if (section === "users") {
-    return {
-      description: "用户管理入口已经接入新的管理导航。用户列表和权限管理将在后续切片实现。",
-      icon: <UserOutlined className="settings-placeholder-icon" aria-hidden="true" />,
-      meta: `当前范围：${scope}`,
-      title: "用户",
-    };
-  }
-
-  return {
-    description: "管理中心已经从设置页迁移到独立 /admin 路由。本轮仅调整后台布局和路由结构。",
-    icon: <ApartmentOutlined className="settings-placeholder-icon" aria-hidden="true" />,
-    meta: `当前范围：${scope}`,
-    title: "管理中心",
-  };
-}
-
-function SettingsAccessDenied() {
-  return (
-    <Card className="settings-card">
-      <Result
-        status="403"
-        icon={<SafetyCertificateOutlined />}
-        title="无权限访问"
-        subTitle="当前账号没有访问该设置页面的权限。"
-        extra={
-          <Link to="/dashboard">
-            <Button type="primary">返回概览</Button>
-          </Link>
-        }
-      />
     </Card>
   );
 }

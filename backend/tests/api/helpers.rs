@@ -234,6 +234,25 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
+    pub async fn patch_asset_category<Body>(
+        &self,
+        category_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .patch(format!(
+                "{}/api/v1/asset-categories/{category_id}",
+                &self.address
+            ))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
     pub async fn post_location<Body>(&self, body: &Body) -> reqwest::Response
     where
         Body: serde::Serialize,

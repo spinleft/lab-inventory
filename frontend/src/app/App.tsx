@@ -1,11 +1,11 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { RootRoute } from "./RootRoute";
+import { AdminPage } from "../features/admin/AdminPages";
 import { DashboardPage } from "../features/dashboard/DashboardPage";
 import { LoginPage } from "../features/auth/LoginPage";
 import { ServerSettingsPage } from "../features/server-settings/ServerSettingsPage";
 import {
-  AdminPage,
   PasswordSettingsPage,
   PreferenceSettingsPage,
   ProfileSettingsPage,
@@ -27,6 +27,7 @@ export function App() {
         <Route path="/settings/preference" element={<PreferenceSettingsPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/admin/laboratories" element={<AdminPage section="laboratories" />} />
+        <Route path="/admin/user" element={<Navigate to="/admin/users" replace />} />
         <Route path="/admin/users" element={<AdminPage section="users" />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

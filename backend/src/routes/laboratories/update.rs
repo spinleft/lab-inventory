@@ -13,8 +13,8 @@ use uuid::Uuid;
 pub struct JsonData {
     name: Option<String>,
     address: Option<String>,
-    description: Option<String>,
-    contact: Option<String>,
+    description: Option<Option<String>>,
+    contact: Option<Option<String>>,
 }
 
 #[tracing::instrument(
@@ -29,11 +29,15 @@ pub async fn update_laboratory(
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, ApiError> {
     let actor = get_actor(pool.get_ref(), user_id).await?;
-    if !actor.is_owner() {
+    if !actor.is_owner() && !actor.is_maintainer() {
         return Err(ApiError::Forbidden);
     }
 
     let existing = fetch_laboratory(pool.get_ref(), *laboratory_id).await?;
+    if actor.is_maintainer() && actor.laboratory_id != Some(existing.laboratory_id) {
+        return Err(ApiError::Forbidden);
+    }
+
     let name = payload
         .name
         .as_deref()
@@ -44,6 +48,13 @@ pub async fn update_laboratory(
         .as_deref()
         .map(|address| required_text(address, "address"))
         .transpose()?;
+    let should_update_description = payload.description.is_some();
+    let description = payload
+        .description
+        .as_ref()
+        .and_then(|value| value.as_deref());
+    let should_update_contact = payload.contact.is_some();
+    let contact = payload.contact.as_ref().and_then(|value| value.as_deref());
 
     let mut transaction = pool
         .begin()
@@ -55,8 +66,8 @@ pub async fn update_laboratory(
         SET
             name = COALESCE($2, name),
             address = COALESCE($3, address),
-            description = COALESCE($4, description),
-            contact = COALESCE($5, contact),
+            description = CASE WHEN $4 THEN $5 ELSE description END,
+            contact = CASE WHEN $6 THEN $7 ELSE contact END,
             updated_at = now()
         WHERE laboratory_id = $1
         RETURNING laboratory_id, name, address, description, contact, created_at, updated_at
@@ -65,8 +76,10 @@ pub async fn update_laboratory(
     .bind(existing.laboratory_id)
     .bind(name)
     .bind(address)
-    .bind(payload.description.as_deref())
-    .bind(payload.contact.as_deref())
+    .bind(should_update_description)
+    .bind(description)
+    .bind(should_update_contact)
+    .bind(contact)
     .fetch_one(transaction.as_mut())
     .await
     .map_err(map_database_error)?;

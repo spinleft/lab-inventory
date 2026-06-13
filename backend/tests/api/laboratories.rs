@@ -41,6 +41,109 @@ async fn owner_can_manage_laboratories() {
 }
 
 #[tokio::test]
+async fn maintainer_can_read_and_update_own_laboratory() {
+    let app = spawn_app().await;
+    let own_lab_id = app.create_laboratory("Chemistry Lab").await;
+    let other_lab_id = app.create_laboratory("Physics Lab").await;
+    let maintainer = TestUser::generate_with_user_type("maintainer", Some(own_lab_id));
+    app.store_user(&maintainer).await;
+    maintainer.login(&app).await;
+
+    let response = app.get_laboratories().await;
+    assert_eq!(response.status().as_u16(), 200);
+    let list: serde_json::Value = response.json().await.unwrap();
+    let laboratories = list.as_array().unwrap();
+    assert_eq!(laboratories.len(), 1);
+    assert_eq!(laboratories[0]["laboratory_id"], own_lab_id.to_string());
+    assert_eq!(laboratories[0]["name"], "Chemistry Lab");
+
+    let response = app.get_laboratory(own_lab_id).await;
+    assert_eq!(response.status().as_u16(), 200);
+
+    let response = app.get_laboratory(other_lab_id).await;
+    assert_eq!(response.status().as_u16(), 403);
+
+    let response = app
+        .patch_laboratory(
+            own_lab_id,
+            &serde_json::json!({
+                "name": "Updated Chemistry Lab",
+                "description": null,
+                "contact": null
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let updated: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(updated["name"], "Updated Chemistry Lab");
+    assert!(updated["description"].is_null());
+    assert!(updated["contact"].is_null());
+
+    let audit_log_count: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM audit_logs
+        WHERE actor_user_id = $1
+          AND target_laboratory_id = $2
+          AND action = 'update'
+          AND resource_type = 'laboratory'
+          AND resource_id = $2
+          AND details->>'name' = 'Updated Chemistry Lab'
+        "#,
+    )
+    .bind(maintainer.user_id)
+    .bind(own_lab_id)
+    .fetch_one(&app.db_pool)
+    .await
+    .unwrap();
+    assert_eq!(audit_log_count, 1);
+}
+
+#[tokio::test]
+async fn maintainer_cannot_manage_other_laboratories_or_delete() {
+    let app = spawn_app().await;
+    let own_lab_id = app.create_laboratory("Chemistry Lab").await;
+    let other_lab_id = app.create_laboratory("Physics Lab").await;
+    let maintainer = TestUser::generate_with_user_type("maintainer", Some(own_lab_id));
+    app.store_user(&maintainer).await;
+    maintainer.login(&app).await;
+
+    let response = app
+        .post_laboratory(&serde_json::json!({
+            "name": "Forbidden Lab",
+            "address": "Building Z"
+        }))
+        .await;
+    assert_eq!(response.status().as_u16(), 403);
+
+    let response = app
+        .patch_laboratory(
+            other_lab_id,
+            &serde_json::json!({ "name": "Forbidden Physics Lab" }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 403);
+
+    let response = app.delete_laboratory(own_lab_id).await;
+    assert_eq!(response.status().as_u16(), 403);
+}
+
+#[tokio::test]
+async fn regular_user_cannot_read_laboratory_management_endpoints() {
+    let app = spawn_app().await;
+    let lab_id = app.create_laboratory("Chemistry Lab").await;
+    let lab_user = TestUser::generate_with_user_type("user", Some(lab_id));
+    app.store_user(&lab_user).await;
+    lab_user.login(&app).await;
+
+    let response = app.get_laboratories().await;
+    assert_eq!(response.status().as_u16(), 403);
+
+    let response = app.get_laboratory(lab_id).await;
+    assert_eq!(response.status().as_u16(), 403);
+}
+
+#[tokio::test]
 async fn creating_a_laboratory_records_an_audit_log() {
     let app = spawn_app().await;
     app.test_user.login(&app).await;

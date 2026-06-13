@@ -3,6 +3,7 @@ use crate::authentication::{
     Actor, GUEST, MAINTAINER, OWNER, USER, requires_laboratory, user_type_exists,
 };
 use crate::utils::ApiError;
+use secrecy::{ExposeSecret, Secret};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -32,7 +33,7 @@ pub(super) fn resolve_target_laboratory(
     target_user_type: &str,
     requested_laboratory_id: Option<Uuid>,
 ) -> Result<Option<Uuid>, ApiError> {
-    if actor.is_maintainer() && matches!(target_user_type, USER | GUEST) {
+    if actor.is_maintainer() && matches!(target_user_type, MAINTAINER | USER | GUEST) {
         if requested_laboratory_id.is_some() && requested_laboratory_id != actor.laboratory_id {
             return Err(ApiError::Forbidden);
         }
@@ -73,6 +74,13 @@ pub(super) fn required_text<'a>(value: &'a str, field: &str) -> Result<&'a str, 
         return Err(ApiError::BadRequest(format!("{field} is required")));
     }
     Ok(trimmed)
+}
+
+pub(super) fn required_secret_text(value: &Secret<String>, field: &str) -> Result<(), ApiError> {
+    if value.expose_secret().trim().is_empty() {
+        return Err(ApiError::BadRequest(format!("{field} is required")));
+    }
+    Ok(())
 }
 
 pub(super) fn normalize_user_type(user_type: &str) -> Result<String, ApiError> {

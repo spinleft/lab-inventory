@@ -38,6 +38,7 @@ export function createApiClient(apiBaseUrl: string) {
   }
 
   return {
+    delete: <T = unknown>(path: string) => request<T>(path, { method: "DELETE" }),
     get: <T = unknown>(path: string) => request<T>(path),
     patch: <T = unknown>(path: string, body: unknown) =>
       request<T>(path, { body, method: "PATCH" }),

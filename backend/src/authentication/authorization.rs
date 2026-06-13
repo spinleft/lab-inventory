@@ -34,7 +34,7 @@ impl Actor {
         }
 
         self.is_maintainer()
-            && matches!(target_user_type, USER | GUEST)
+            && matches!(target_user_type, MAINTAINER | USER | GUEST)
             && self.laboratory_id.is_some()
             && self.laboratory_id == target_laboratory_id
     }

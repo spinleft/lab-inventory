@@ -1,5 +1,7 @@
-use super::helpers::{map_database_error, required_text, resolve_target_laboratory};
-use super::model::AssetCategory;
+use super::helpers::{
+    fetch_asset_category, map_database_error, required_text, resolve_target_laboratory,
+    validate_parent_category,
+};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::authentication::{UserId, get_actor};
 use crate::utils::ApiError;
@@ -12,6 +14,7 @@ use uuid::Uuid;
 #[derive(Deserialize)]
 pub struct JsonData {
     laboratory_id: Option<Uuid>,
+    parent_category_id: Option<Uuid>,
     name: String,
     description: Option<String>,
 }
@@ -24,42 +27,49 @@ pub async fn create_asset_category(
 ) -> Result<HttpResponse, ApiError> {
     let actor = get_actor(pool.get_ref(), user_id).await?;
     let laboratory_id = resolve_target_laboratory(&actor, payload.laboratory_id)?;
+    validate_parent_category(
+        pool.get_ref(),
+        laboratory_id,
+        None,
+        payload.parent_category_id,
+    )
+    .await?;
     let name = required_text(&payload.name, "name")?;
 
     let mut transaction = pool
         .begin()
         .await
         .map_err(|e| ApiError::UnexpectedError(e.into()))?;
-    let category = sqlx::query_as::<_, AssetCategory>(
+    let category_id = Uuid::new_v4();
+    sqlx::query(
         r#"
-        INSERT INTO asset_categories (category_id, laboratory_id, name, description)
-        VALUES ($1, $2, $3, $4)
-        RETURNING
+        INSERT INTO asset_categories (
             category_id,
             laboratory_id,
-            (SELECT name FROM laboratories WHERE laboratory_id = $2) AS laboratory_name,
+            parent_category_id,
             name,
-            description,
-            created_at,
-            updated_at
+            description
+        )
+        VALUES ($1, $2, $3, $4, $5)
         "#,
     )
-    .bind(Uuid::new_v4())
+    .bind(category_id)
     .bind(laboratory_id)
+    .bind(payload.parent_category_id)
     .bind(name)
     .bind(payload.description.as_deref())
-    .fetch_one(transaction.as_mut())
+    .execute(transaction.as_mut())
     .await
     .map_err(map_database_error)?;
 
     record_audit(
         &mut transaction,
         &actor,
-        Some(category.laboratory_id),
+        Some(laboratory_id),
         AuditAction::Create,
         AuditResource::AssetCategory,
-        Some(category.category_id),
-        json!({ "name": category.name }),
+        Some(category_id),
+        json!({ "name": name }),
     )
     .await?;
     transaction
@@ -67,5 +77,6 @@ pub async fn create_asset_category(
         .await
         .map_err(|e| ApiError::UnexpectedError(e.into()))?;
 
+    let category = fetch_asset_category(pool.get_ref(), category_id).await?;
     Ok(HttpResponse::Created().json(category))
 }

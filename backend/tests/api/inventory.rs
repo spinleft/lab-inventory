@@ -1,5 +1,6 @@
 use crate::helpers::{TestUser, spawn_app};
 use reqwest::header::CONTENT_TYPE;
+use uuid::Uuid;
 
 #[tokio::test]
 async fn inventory_writes_require_an_authorized_laboratory_member() {
@@ -66,6 +67,223 @@ async fn inventory_writes_require_an_authorized_laboratory_member() {
             .iter()
             .any(|unit| unit["code"] == "pcs")
     );
+}
+
+#[tokio::test]
+async fn asset_categories_support_parent_child_queries() {
+    let app = spawn_app().await;
+    app.test_user.login(&app).await;
+    let lab_id = app.create_laboratory("Category Tree Lab").await;
+
+    let parent = app
+        .post_asset_category(&serde_json::json!({
+            "laboratory_id": lab_id,
+            "name": "Optics"
+        }))
+        .await;
+    let status = parent.status();
+    let body = parent.text().await.unwrap();
+    assert_eq!(status.as_u16(), 201, "{body}");
+    let parent: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let parent_id: Uuid = parent["category_id"].as_str().unwrap().parse().unwrap();
+
+    let child: serde_json::Value = app
+        .post_asset_category(&serde_json::json!({
+            "laboratory_id": lab_id,
+            "parent_category_id": parent_id,
+            "name": "Lenses"
+        }))
+        .await
+        .json()
+        .await
+        .unwrap();
+    let child_id: Uuid = child["category_id"].as_str().unwrap().parse().unwrap();
+
+    let grandchild: serde_json::Value = app
+        .post_asset_category(&serde_json::json!({
+            "laboratory_id": lab_id,
+            "parent_category_id": child_id,
+            "name": "Aspheric Lenses"
+        }))
+        .await
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(child["parent_category_id"], parent_id.to_string());
+    assert_eq!(child["level"], 1);
+    assert_eq!(child["path_name"], "Optics / Lenses");
+    assert_eq!(child["path"][0]["category_id"], parent_id.to_string());
+    assert_eq!(child["path"][1]["category_id"], child_id.to_string());
+    assert_eq!(child["children_count"], 0);
+    assert_eq!(child["asset_count"], 0);
+
+    let response = app
+        .get_api_path(&format!("/asset-categories?parent_category_id={parent_id}"))
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let direct_children: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(direct_children.as_array().unwrap().len(), 1);
+    assert_eq!(direct_children[0]["category_id"], child["category_id"]);
+
+    let response = app
+        .get_api_path(&format!(
+            "/asset-categories?parent_category_id={parent_id}&cascade=true"
+        ))
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let descendants: serde_json::Value = response.json().await.unwrap();
+    let descendant_ids = descendants
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|category| category["category_id"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        descendant_ids,
+        vec![
+            child["category_id"].as_str().unwrap(),
+            grandchild["category_id"].as_str().unwrap()
+        ]
+    );
+}
+
+#[tokio::test]
+async fn asset_category_parent_validation_rejects_cross_lab_cycles_and_duplicate_siblings() {
+    let app = spawn_app().await;
+    app.test_user.login(&app).await;
+    let lab_id = app.create_laboratory("Category Validation Lab").await;
+    let other_lab_id = app.create_laboratory("Other Category Validation Lab").await;
+
+    let parent = app
+        .post_asset_category(&serde_json::json!({
+            "laboratory_id": lab_id,
+            "name": "Chemicals"
+        }))
+        .await;
+    let status = parent.status();
+    let body = parent.text().await.unwrap();
+    assert_eq!(status.as_u16(), 201, "{body}");
+    let parent: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let parent_id: Uuid = parent["category_id"].as_str().unwrap().parse().unwrap();
+
+    let child: serde_json::Value = app
+        .post_asset_category(&serde_json::json!({
+            "laboratory_id": lab_id,
+            "parent_category_id": parent_id,
+            "name": "Solvents"
+        }))
+        .await
+        .json()
+        .await
+        .unwrap();
+    let child_id: Uuid = child["category_id"].as_str().unwrap().parse().unwrap();
+
+    let other_parent: serde_json::Value = app
+        .post_asset_category(&serde_json::json!({
+            "laboratory_id": other_lab_id,
+            "name": "Other Lab Parent"
+        }))
+        .await
+        .json()
+        .await
+        .unwrap();
+    let other_parent_id: Uuid = other_parent["category_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    let response = app
+        .post_asset_category(&serde_json::json!({
+            "laboratory_id": lab_id,
+            "parent_category_id": other_parent_id,
+            "name": "Cross Lab Child"
+        }))
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+
+    let response = app
+        .patch_asset_category(
+            parent_id,
+            &serde_json::json!({ "parent_category_id": child_id }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+
+    let response = app
+        .post_asset_category(&serde_json::json!({
+            "laboratory_id": lab_id,
+            "parent_category_id": parent_id,
+            "name": "Solvents"
+        }))
+        .await;
+    assert_eq!(response.status().as_u16(), 409);
+}
+
+#[tokio::test]
+async fn asset_category_filter_can_include_subcategories() {
+    let app = spawn_app().await;
+    app.test_user.login(&app).await;
+    let lab_id = app.create_laboratory("Category Filter Lab").await;
+    let pcs = app.unit_id("pcs").await;
+
+    let parent = app
+        .post_asset_category(&serde_json::json!({
+            "laboratory_id": lab_id,
+            "name": "Electronics"
+        }))
+        .await;
+    let status = parent.status();
+    let body = parent.text().await.unwrap();
+    assert_eq!(status.as_u16(), 201, "{body}");
+    let parent: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let parent_id: Uuid = parent["category_id"].as_str().unwrap().parse().unwrap();
+    let child: serde_json::Value = app
+        .post_asset_category(&serde_json::json!({
+            "laboratory_id": lab_id,
+            "parent_category_id": parent_id,
+            "name": "Sensors"
+        }))
+        .await
+        .json()
+        .await
+        .unwrap();
+    let child_id: Uuid = child["category_id"].as_str().unwrap().parse().unwrap();
+
+    app.post_asset(&serde_json::json!({
+        "laboratory_id": lab_id,
+        "category_id": parent_id,
+        "asset_kind": "equipment",
+        "tracking_mode": "serialized",
+        "name": "Parent Category Meter",
+        "default_unit_id": pcs
+    }))
+    .await;
+    app.post_asset(&serde_json::json!({
+        "laboratory_id": lab_id,
+        "category_id": child_id,
+        "asset_kind": "equipment",
+        "tracking_mode": "serialized",
+        "name": "Child Category Sensor",
+        "default_unit_id": pcs
+    }))
+    .await;
+
+    let response = app
+        .get_api_path(&format!("/assets?category_id={parent_id}"))
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let exact: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(exact["total"], 1);
+    assert_eq!(exact["items"][0]["name"], "Parent Category Meter");
+
+    let response = app
+        .get_api_path(&format!("/assets?category_id={parent_id}&cascade=true"))
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let cascaded: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(cascaded["total"], 2);
 }
 
 #[tokio::test]

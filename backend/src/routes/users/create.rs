@@ -1,7 +1,7 @@
 use super::model::{UserResponse, UserRow};
 use super::validation::{
-    map_database_error, normalize_user_type, required_text, resolve_target_laboratory,
-    validate_user_management,
+    map_database_error, normalize_user_type, required_secret_text, required_text,
+    resolve_target_laboratory, validate_user_management,
 };
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::authentication::{UserId, get_actor, hash_password};
@@ -39,6 +39,7 @@ pub async fn create_user(
     let user_type_name = normalize_user_type(&payload.user_type)?;
     let laboratory_id = resolve_target_laboratory(&actor, &user_type_name, payload.laboratory_id)?;
     validate_user_management(pool.get_ref(), &actor, &user_type_name, laboratory_id).await?;
+    required_secret_text(&payload.password, "password")?;
 
     let password_hash = hash_password(payload.password.clone())
         .await

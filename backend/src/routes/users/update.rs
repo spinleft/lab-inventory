@@ -1,7 +1,7 @@
 use super::model::{UserResponse, UserRow, fetch_user};
 use super::validation::{
-    map_database_error, normalize_user_type, required_text, resolve_target_laboratory,
-    validate_user_management,
+    map_database_error, normalize_user_type, required_secret_text, required_text,
+    resolve_target_laboratory, validate_user_management,
 };
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::authentication::{UserId, get_actor, hash_password};
@@ -9,7 +9,7 @@ use crate::utils::ApiError;
 use actix_web::{HttpResponse, web};
 use secrecy::ExposeSecret;
 use secrecy::Secret;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -19,8 +19,18 @@ pub struct JsonData {
     username: Option<String>,
     password: Option<Secret<String>>,
     user_type: Option<String>,
-    laboratory_id: Option<Uuid>,
-    email: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_nullable")]
+    laboratory_id: Option<Option<Uuid>>,
+    #[serde(default, deserialize_with = "deserialize_nullable")]
+    email: Option<Option<String>>,
+}
+
+fn deserialize_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 #[tracing::instrument(
@@ -36,6 +46,13 @@ pub async fn update_user(
 ) -> Result<HttpResponse, ApiError> {
     let actor = get_actor(pool.get_ref(), user_id).await?;
     let target = fetch_user(pool.get_ref(), *target_user_id).await?;
+    if actor.user_id == target.user_id
+        && (payload.user_type.is_some() || payload.laboratory_id.is_some())
+    {
+        return Err(ApiError::BadRequest(
+            "Users cannot change their own role or laboratory".into(),
+        ));
+    }
     let user_type_name = match payload.user_type.as_deref() {
         Some(user_type) => normalize_user_type(user_type)?,
         None => target.user_type_name.clone(),
@@ -43,7 +60,7 @@ pub async fn update_user(
     let laboratory_id = resolve_target_laboratory(
         &actor,
         &user_type_name,
-        payload.laboratory_id.or(target.laboratory_id),
+        payload.laboratory_id.unwrap_or(target.laboratory_id),
     )?;
     validate_user_management(pool.get_ref(), &actor, &user_type_name, laboratory_id).await?;
 
@@ -53,13 +70,20 @@ pub async fn update_user(
         .map(|username| required_text(username, "username"))
         .transpose()?;
     let password_hash = match payload.password.clone() {
-        Some(password) => Some(
-            hash_password(password)
-                .await
-                .map_err(ApiError::UnexpectedError)?,
-        ),
+        Some(password) => {
+            required_secret_text(&password, "password")?;
+            Some(
+                hash_password(password)
+                    .await
+                    .map_err(ApiError::UnexpectedError)?,
+            )
+        }
         None => None,
     };
+    let email = payload
+        .email
+        .clone()
+        .unwrap_or_else(|| target.email.clone());
 
     let mut transaction = pool
         .begin()
@@ -73,7 +97,7 @@ pub async fn update_user(
             password_hash = COALESCE($3, password_hash),
             user_type_id = (SELECT user_type_id FROM user_types WHERE name = $4),
             laboratory_id = $5,
-            email = COALESCE($6, email)
+            email = $6
         WHERE user_id = $1
         RETURNING
             users.user_id,
@@ -92,7 +116,7 @@ pub async fn update_user(
     .bind(password_hash.as_ref().map(|hash| hash.expose_secret()))
     .bind(&user_type_name)
     .bind(laboratory_id)
-    .bind(payload.email.as_deref())
+    .bind(email.as_deref())
     .fetch_one(transaction.as_mut())
     .await
     .map_err(map_database_error)?;

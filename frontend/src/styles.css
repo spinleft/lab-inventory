@@ -446,6 +446,46 @@ body {
   font-size: 28px;
 }
 
+.admin-drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.admin-action-button {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #fff;
+  color: #1f2328;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.admin-action-button:hover {
+  border-color: #0969da;
+  color: #0969da;
+}
+
+.admin-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.admin-action-button-danger {
+  color: #cf222e;
+}
+
+.admin-action-button-danger:hover {
+  border-color: #cf222e;
+  color: #cf222e;
+}
+
 @media (max-width: 900px) {
   .entry-content {
     place-items: start center;
