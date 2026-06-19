@@ -24,7 +24,6 @@ pub struct TestApp {
     pub db_pool: PgPool,
     pub test_user: TestUser,
     pub api_client: reqwest::Client,
-    pub local_laboratory_id: Uuid,
 }
 
 pub async fn spawn_app() -> TestApp {
@@ -33,16 +32,13 @@ pub async fn spawn_app() -> TestApp {
     let configuration = {
         let mut c = get_configuration().expect("Failed to read configuration.");
         c.database.database_name = Uuid::new_v4().to_string();
-        c.database.username = "postgres".to_string();
-        c.database.password = Secret::new("password".to_string());
         c.application.port = 0;
         c.application.cookie_secure = false;
-        c.application.local_laboratory_id = Uuid::new_v4();
         c
     };
 
-    let setup_pool = configure_database(&configuration.database).await;
-    seed_local_laboratory(&setup_pool, configuration.application.local_laboratory_id).await;
+    // Create and migrate the database
+    configure_database(&configuration.database).await;
 
     let application = Application::build(configuration.clone())
         .await
@@ -60,11 +56,11 @@ pub async fn spawn_app() -> TestApp {
         address: format!("http://localhost:{application_port}"),
         db_pool: get_connection_pool(&configuration.database),
         test_user: TestUser {
-            laboratory_id: Some(configuration.application.local_laboratory_id),
+            user_type: "super_admin".to_string(),
+            laboratory_id: None,
             ..TestUser::generate()
         },
         api_client: client,
-        local_laboratory_id: configuration.application.local_laboratory_id,
     };
 
     test_app.test_user.store(&test_app.db_pool).await;
@@ -189,6 +185,92 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
+    pub async fn post_asset_category<Body>(
+        &self,
+        laboratory_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/asset-categories",
+                &self.address
+            ))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_asset_categories(&self, laboratory_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/asset-categories",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_asset_categories_under(
+        &self,
+        laboratory_id: Uuid,
+        root_category_id: Uuid,
+    ) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/asset-categories?root_category_id={root_category_id}",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_asset_category(&self, category_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/asset-categories/{category_id}",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn patch_asset_category<Body>(
+        &self,
+        category_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .patch(format!(
+                "{}/api/v1/asset-categories/{category_id}",
+                &self.address
+            ))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn delete_asset_category(&self, category_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .delete(format!(
+                "{}/api/v1/asset-categories/{category_id}",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
     pub async fn post_user<Body>(&self, body: &Body) -> reqwest::Response
     where
         Body: serde::Serialize,
@@ -221,405 +303,6 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
-    pub async fn get_units(&self) -> reqwest::Response {
-        self.api_client
-            .get(format!("{}/api/v1/units", &self.address))
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn post_remote_laboratory<Body>(&self, body: &Body) -> reqwest::Response
-    where
-        Body: serde::Serialize,
-    {
-        self.api_client
-            .post(format!("{}/api/v1/remote-laboratories", &self.address))
-            .json(body)
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn get_remote_laboratories(&self) -> reqwest::Response {
-        self.api_client
-            .get(format!("{}/api/v1/remote-laboratories", &self.address))
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn post_remote_borrow_request<Body>(
-        &self,
-        remote_laboratory_id: Uuid,
-        body: &Body,
-    ) -> reqwest::Response
-    where
-        Body: serde::Serialize,
-    {
-        self.api_client
-            .post(format!(
-                "{}/api/v1/remote-laboratories/{remote_laboratory_id}/borrow-requests",
-                &self.address
-            ))
-            .json(body)
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn post_asset_category<Body>(&self, body: &Body) -> reqwest::Response
-    where
-        Body: serde::Serialize,
-    {
-        self.api_client
-            .post(format!("{}/api/v1/asset-categories", &self.address))
-            .json(body)
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn patch_asset_category<Body>(
-        &self,
-        category_id: Uuid,
-        body: &Body,
-    ) -> reqwest::Response
-    where
-        Body: serde::Serialize,
-    {
-        self.api_client
-            .patch(format!(
-                "{}/api/v1/asset-categories/{category_id}",
-                &self.address
-            ))
-            .json(body)
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn post_location<Body>(&self, body: &Body) -> reqwest::Response
-    where
-        Body: serde::Serialize,
-    {
-        self.api_client
-            .post(format!("{}/api/v1/locations", &self.address))
-            .json(body)
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn post_asset<Body>(&self, body: &Body) -> reqwest::Response
-    where
-        Body: serde::Serialize,
-    {
-        self.api_client
-            .post(format!("{}/api/v1/assets", &self.address))
-            .json(body)
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn get_assets(&self) -> reqwest::Response {
-        self.api_client
-            .get(format!("{}/api/v1/assets", &self.address))
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn patch_asset<Body>(&self, asset_id: Uuid, body: &Body) -> reqwest::Response
-    where
-        Body: serde::Serialize,
-    {
-        self.api_client
-            .patch(format!("{}/api/v1/assets/{asset_id}", &self.address))
-            .json(body)
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn post_inventory_item<Body>(
-        &self,
-        body: &Body,
-        idempotency_key: &str,
-    ) -> reqwest::Response
-    where
-        Body: serde::Serialize,
-    {
-        self.api_client
-            .post(format!("{}/api/v1/inventory-items", &self.address))
-            .header("Idempotency-Key", idempotency_key)
-            .json(body)
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn post_inventory_operation<Body>(
-        &self,
-        inventory_item_id: Uuid,
-        operation: &str,
-        body: &Body,
-        idempotency_key: &str,
-    ) -> reqwest::Response
-    where
-        Body: serde::Serialize,
-    {
-        self.api_client
-            .post(format!(
-                "{}/api/v1/inventory-items/{inventory_item_id}/{operation}",
-                &self.address
-            ))
-            .header("Idempotency-Key", idempotency_key)
-            .json(body)
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn get_inventory_items(&self) -> reqwest::Response {
-        self.api_client
-            .get(format!("{}/api/v1/inventory-items", &self.address))
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn get_stock_alerts(&self) -> reqwest::Response {
-        self.api_client
-            .get(format!("{}/api/v1/stock-alerts", &self.address))
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn get_borrow_request_alerts(&self) -> reqwest::Response {
-        self.api_client
-            .get(format!("{}/api/v1/borrow-request-alerts", &self.address))
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn post_maintenance_record<Body>(&self, body: &Body) -> reqwest::Response
-    where
-        Body: serde::Serialize,
-    {
-        self.api_client
-            .post(format!("{}/api/v1/maintenance-records", &self.address))
-            .json(body)
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn get_maintenance_records(&self) -> reqwest::Response {
-        self.api_client
-            .get(format!("{}/api/v1/maintenance-records", &self.address))
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn get_maintenance_record(&self, maintenance_record_id: Uuid) -> reqwest::Response {
-        self.api_client
-            .get(format!(
-                "{}/api/v1/maintenance-records/{maintenance_record_id}",
-                &self.address
-            ))
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn patch_maintenance_record<Body>(
-        &self,
-        maintenance_record_id: Uuid,
-        body: &Body,
-    ) -> reqwest::Response
-    where
-        Body: serde::Serialize,
-    {
-        self.api_client
-            .patch(format!(
-                "{}/api/v1/maintenance-records/{maintenance_record_id}",
-                &self.address
-            ))
-            .json(body)
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn delete_maintenance_record(
-        &self,
-        maintenance_record_id: Uuid,
-    ) -> reqwest::Response {
-        self.api_client
-            .delete(format!(
-                "{}/api/v1/maintenance-records/{maintenance_record_id}",
-                &self.address
-            ))
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn post_maintenance_schedule<Body>(&self, body: &Body) -> reqwest::Response
-    where
-        Body: serde::Serialize,
-    {
-        self.api_client
-            .post(format!("{}/api/v1/maintenance-schedules", &self.address))
-            .json(body)
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn get_maintenance_schedules(&self) -> reqwest::Response {
-        self.api_client
-            .get(format!("{}/api/v1/maintenance-schedules", &self.address))
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn patch_maintenance_schedule<Body>(
-        &self,
-        maintenance_schedule_id: Uuid,
-        body: &Body,
-    ) -> reqwest::Response
-    where
-        Body: serde::Serialize,
-    {
-        self.api_client
-            .patch(format!(
-                "{}/api/v1/maintenance-schedules/{maintenance_schedule_id}",
-                &self.address
-            ))
-            .json(body)
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn delete_maintenance_schedule(
-        &self,
-        maintenance_schedule_id: Uuid,
-    ) -> reqwest::Response {
-        self.api_client
-            .delete(format!(
-                "{}/api/v1/maintenance-schedules/{maintenance_schedule_id}",
-                &self.address
-            ))
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn get_maintenance_alerts(&self) -> reqwest::Response {
-        self.api_client
-            .get(format!("{}/api/v1/maintenance-alerts", &self.address))
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn post_attachment<Body>(&self, body: &Body) -> reqwest::Response
-    where
-        Body: serde::Serialize,
-    {
-        self.api_client
-            .post(format!("{}/api/v1/attachments", &self.address))
-            .json(body)
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn get_attachments(&self) -> reqwest::Response {
-        self.api_client
-            .get(format!("{}/api/v1/attachments", &self.address))
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn delete_attachment(&self, attachment_id: Uuid) -> reqwest::Response {
-        self.api_client
-            .delete(format!(
-                "{}/api/v1/attachments/{attachment_id}",
-                &self.address
-            ))
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn post_borrow_request<Body>(
-        &self,
-        body: &Body,
-        idempotency_key: &str,
-    ) -> reqwest::Response
-    where
-        Body: serde::Serialize,
-    {
-        self.api_client
-            .post(format!("{}/api/v1/borrow-requests", &self.address))
-            .header("Idempotency-Key", idempotency_key)
-            .json(body)
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn get_borrow_requests(&self) -> reqwest::Response {
-        self.api_client
-            .get(format!("{}/api/v1/borrow-requests", &self.address))
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn get_borrow_request(&self, borrow_request_id: Uuid) -> reqwest::Response {
-        self.api_client
-            .get(format!(
-                "{}/api/v1/borrow-requests/{borrow_request_id}",
-                &self.address
-            ))
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
-    pub async fn post_borrow_request_operation<Body>(
-        &self,
-        borrow_request_id: Uuid,
-        operation: &str,
-        body: &Body,
-        idempotency_key: &str,
-    ) -> reqwest::Response
-    where
-        Body: serde::Serialize,
-    {
-        self.api_client
-            .post(format!(
-                "{}/api/v1/borrow-requests/{borrow_request_id}/{operation}",
-                &self.address
-            ))
-            .header("Idempotency-Key", idempotency_key)
-            .json(body)
-            .send()
-            .await
-            .expect("Failed to execute request.")
-    }
-
     pub async fn store_user(&self, user: &TestUser) {
         user.store(&self.db_pool).await;
     }
@@ -647,53 +330,6 @@ impl TestApp {
             .await
             .expect("Failed to fetch unit id.")
     }
-
-    pub async fn insert_remote_laboratory(
-        &self,
-        remote_laboratory_id: Uuid,
-        name: &str,
-        address: &str,
-        key_id: &str,
-        shared_secret: &str,
-    ) {
-        sqlx::query(
-            r#"
-            INSERT INTO remote_laboratories (
-                remote_laboratory_id,
-                name,
-                api_base_url,
-                is_enabled,
-                key_id,
-                shared_secret
-            )
-            VALUES ($1, $2, $3, true, $4, $5)
-            "#,
-        )
-        .bind(remote_laboratory_id)
-        .bind(name)
-        .bind(format!("{}/api/v1", address.trim_end_matches('/')))
-        .bind(key_id)
-        .bind(shared_secret)
-        .execute(&self.db_pool)
-        .await
-        .expect("Failed to insert remote laboratory.");
-    }
-}
-
-async fn seed_local_laboratory(pool: &PgPool, laboratory_id: Uuid) {
-    sqlx::query(
-        r#"
-        INSERT INTO laboratories (laboratory_id, name, address)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (laboratory_id) DO NOTHING
-        "#,
-    )
-    .bind(laboratory_id)
-    .bind(format!("Local Lab {laboratory_id}"))
-    .bind("Local test node")
-    .execute(pool)
-    .await
-    .expect("Failed to seed local laboratory.");
 }
 
 async fn configure_database(config: &DatabaseSettings) -> PgPool {

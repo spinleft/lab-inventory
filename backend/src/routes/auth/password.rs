@@ -1,17 +1,19 @@
+use crate::access_control::get_actor;
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::authentication::{
-    AuthError, UserId, get_actor, hash_password, validate_password_for_user,
-};
-use crate::utils::{ApiError, error_chain_fmt};
+use crate::authentication::{AuthError, hash_password, validate_password_for_user};
+use crate::domain::UserId;
+use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
+use anyhow::Context;
 use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use sqlx::PgPool;
+use serde_json::{Value, json};
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct JsonData {
     current_password: Secret<String>,
     new_password: Secret<String>,
@@ -25,8 +27,8 @@ struct MessageResponse {
 
 #[derive(sqlx::FromRow)]
 struct ChangedPasswordUser {
-    username: String,
-    laboratory_id: Option<Uuid>,
+    user_id: Uuid,
+    previous_password_hash: String,
 }
 
 #[derive(thiserror::Error)]
@@ -79,14 +81,12 @@ pub async fn change_password(
         return Err(ChangePasswordError::PasswordConfirmationMismatch);
     }
 
-    let actor = get_actor(pool.get_ref(), user_id)
+    let actor = get_actor(&pool, user_id)
         .await
-        .map_err(|e| match e {
-            ApiError::Unauthorized => ChangePasswordError::AuthenticationRequired,
-            _ => ChangePasswordError::UnexpectedError(e.into()),
-        })?;
+        .map_err(ChangePasswordError::UnexpectedError)?
+        .ok_or(ChangePasswordError::AuthenticationRequired)?;
 
-    validate_password_for_user(*user_id, payload.current_password, pool.get_ref())
+    validate_password_for_user(*user_id, payload.current_password, &pool)
         .await
         .map_err(|e| match e {
             AuthError::InvalidCredentials(_) => ChangePasswordError::CurrentPasswordIncorrect,
@@ -100,38 +100,81 @@ pub async fn change_password(
     let mut transaction = pool
         .begin()
         .await
-        .map_err(|e| ChangePasswordError::UnexpectedError(e.into()))?;
-    let user = sqlx::query_as::<_, ChangedPasswordUser>(
-        r#"
-        UPDATE users
-        SET password_hash = $2
-        WHERE user_id = $1
-        RETURNING username, laboratory_id
-        "#,
-    )
-    .bind(*user_id)
-    .bind(password_hash.expose_secret())
-    .fetch_one(transaction.as_mut())
-    .await
-    .map_err(|e| ChangePasswordError::UnexpectedError(e.into()))?;
+        .context("Failed to acquire a Postgres connection from the pool")?;
+    let user =
+        update_password_in_database(&mut transaction, *user_id, password_hash.expose_secret())
+            .await?;
 
     record_audit(
         &mut transaction,
         &actor,
-        user.laboratory_id,
         AuditAction::Update,
         AuditResource::User,
-        Some(*user_id),
-        json!({ "username": user.username, "changed_fields": ["password"] }),
+        Some(user.user_id),
+        change_password_rollback_details(&user),
     )
-    .await
-    .map_err(|e| ChangePasswordError::UnexpectedError(e.into()))?;
+    .await?;
     transaction
         .commit()
         .await
-        .map_err(|e| ChangePasswordError::UnexpectedError(e.into()))?;
+        .context("Failed to commit SQL transaction to change password.")?;
 
     Ok(HttpResponse::Ok().json(MessageResponse {
         message: "Password changed",
     }))
+}
+
+#[tracing::instrument(
+    name = "Updating current user's password in the database",
+    skip(transaction, password_hash),
+    fields(user_id=%user_id)
+)]
+async fn update_password_in_database(
+    transaction: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+    password_hash: &str,
+) -> Result<ChangedPasswordUser, ChangePasswordError> {
+    sqlx::query_as!(
+        ChangedPasswordUser,
+        r#"
+        WITH previous_user AS (
+            SELECT user_id, password_hash AS previous_password_hash
+            FROM users
+            WHERE user_id = $1
+            FOR UPDATE
+        ),
+        updated_user AS (
+            UPDATE users
+            SET password_hash = $2
+            FROM previous_user
+            WHERE users.user_id = previous_user.user_id
+            RETURNING users.user_id
+        )
+        SELECT
+            previous_user.user_id,
+            previous_user.previous_password_hash
+        FROM previous_user
+        INNER JOIN updated_user USING (user_id)
+        "#,
+        user_id,
+        password_hash,
+    )
+    .fetch_one(transaction.as_mut())
+    .await
+    .map_err(|e| ChangePasswordError::UnexpectedError(e.into()))
+}
+
+fn change_password_rollback_details(user: &ChangedPasswordUser) -> Value {
+    json!({
+        "rollback": {
+            "operation": "update",
+            "resource_type": "user",
+            "where": {
+                "user_id": user.user_id,
+            },
+            "values": {
+                "password_hash": &user.previous_password_hash,
+            },
+        },
+    })
 }

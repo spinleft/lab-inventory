@@ -1,14 +1,29 @@
-import { render } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
-import { App } from "../../app/App";
-import { AppProviders } from "../../app/providers";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, type RenderOptions } from "@testing-library/react";
+import { type ReactElement } from "react";
+import { BrowserRouter } from "react-router-dom";
+import { BackendConfigProvider } from "../api/backendConfig";
+import { ThemeProvider } from "../theme/ThemeProvider";
+import { ToastProvider } from "../ui/Toast";
 
-export function renderRoute(initialEntries = ["/"]) {
+export function renderApp(ui: ReactElement, options?: RenderOptions) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      mutations: { retry: false },
+      queries: { retry: false },
+    },
+  });
+
   return render(
-    <MemoryRouter initialEntries={initialEntries}>
-      <AppProviders>
-        <App />
-      </AppProviders>
-    </MemoryRouter>,
+    <ThemeProvider>
+      <ToastProvider>
+        <BackendConfigProvider>
+          <QueryClientProvider client={queryClient}>
+            <BrowserRouter>{ui}</BrowserRouter>
+          </QueryClientProvider>
+        </BackendConfigProvider>
+      </ToastProvider>
+    </ThemeProvider>,
+    options,
   );
 }

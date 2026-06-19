@@ -1,0 +1,27 @@
+import { describe, expect, it } from "vitest";
+import { optionalText, userSchema } from "./api";
+
+describe("admin api schemas", () => {
+  it("parses phone_number from backend users", () => {
+    expect(
+      userSchema.parse({
+        created_at: "2026-06-17T00:00:00Z",
+        email: null,
+        laboratory: null,
+        last_login_at: null,
+        phone_number: "13800138000",
+        user_id: "00000000-0000-4000-8000-000000000001",
+        user_type: {
+          name: "root",
+          user_type_id: "00000000-0000-4000-8000-000000000002",
+        },
+        username: "root",
+      }).phone_number,
+    ).toBe("13800138000");
+  });
+
+  it("normalizes optional text payload fields", () => {
+    expect(optionalText("  test@example.com ")).toBe("test@example.com");
+    expect(optionalText("   ")).toBeNull();
+  });
+});

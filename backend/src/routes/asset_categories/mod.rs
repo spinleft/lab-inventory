@@ -1,7 +1,6 @@
 mod create;
 mod delete;
 mod get;
-mod helpers;
 mod list;
 mod model;
 mod update;

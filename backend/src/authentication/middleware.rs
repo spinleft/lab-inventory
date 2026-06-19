@@ -1,49 +1,10 @@
+use crate::domain::UserId;
 use crate::session_state::TypedSession;
 use crate::utils::{e500, json_unauthorized};
 use actix_web::body::{EitherBody, MessageBody};
-use actix_web::dev::{Payload, ServiceRequest, ServiceResponse};
-use actix_web::error::InternalError;
+use actix_web::dev::{ServiceRequest, ServiceResponse};
 use actix_web::middleware::Next;
-use actix_web::{FromRequest, HttpMessage, HttpRequest};
-use std::future::{Ready, ready};
-use std::ops::Deref;
-use uuid::Uuid;
-
-#[derive(Copy, Clone, Debug)]
-pub struct UserId(Uuid);
-
-impl std::fmt::Display for UserId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl Deref for UserId {
-    type Target = Uuid;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl FromRequest for UserId {
-    type Error = actix_web::Error;
-    type Future = Ready<Result<Self, Self::Error>>;
-
-    fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
-        match req.extensions().get::<UserId>() {
-            Some(user_id) => ready(Ok(*user_id)),
-            None => {
-                let e = anyhow::anyhow!("User id was not found in request extensions");
-                ready(Err(InternalError::from_response(
-                    e,
-                    json_unauthorized("Authentication required"),
-                )
-                .into()))
-            }
-        }
-    }
-}
+use actix_web::{FromRequest, HttpMessage};
 
 pub async fn reject_anonymous_users(
     mut req: ServiceRequest,

@@ -1,12 +1,8 @@
-mod alerts;
+mod asset_categories;
 mod auth;
-mod borrow_requests;
-mod federation;
 mod health_check;
 mod helpers;
-mod inventory;
 mod laboratories;
-mod maintenance;
 mod migrations;
 mod query_export_audit;
 mod test_user;

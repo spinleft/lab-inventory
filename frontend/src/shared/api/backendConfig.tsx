@@ -30,11 +30,9 @@ export class BackendConfigError extends Error {
 export function BackendConfigProvider({ children }: PropsWithChildren) {
   const defaultApiBaseUrl = normalizeApiBaseUrl(DEFAULT_API_BASE_URL);
   const initialConfig = readStoredApiBaseUrl(defaultApiBaseUrl);
-  const [apiBaseUrl, setApiBaseUrlState] = useState(() => {
-    return initialConfig.apiBaseUrl;
-  });
+  const [apiBaseUrl, setApiBaseUrlState] = useState(initialConfig.apiBaseUrl);
   const [hasConfiguredApiBaseUrl, setHasConfiguredApiBaseUrl] = useState(
-    () => initialConfig.hasConfiguredApiBaseUrl,
+    initialConfig.hasConfiguredApiBaseUrl,
   );
 
   const value = useMemo<BackendConfigContextValue>(

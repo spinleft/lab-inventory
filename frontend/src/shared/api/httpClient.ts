@@ -11,13 +11,15 @@ export class ApiError extends Error {
 type RequestOptions = {
   body?: unknown;
   method?: string;
+  query?: Record<string, string | number | boolean | null | undefined>;
 };
 
 export function createApiClient(apiBaseUrl: string) {
   const baseUrl = apiBaseUrl.replace(/\/+$/, "");
 
   async function request<T>(path: string, options: RequestOptions = {}) {
-    const response = await fetch(`${baseUrl}/${path.replace(/^\/+/, "")}`, {
+    const url = buildUrl(baseUrl, path, options.query);
+    const response = await fetch(url, {
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       credentials: "include",
       headers:
@@ -39,12 +41,27 @@ export function createApiClient(apiBaseUrl: string) {
 
   return {
     delete: <T = unknown>(path: string) => request<T>(path, { method: "DELETE" }),
-    get: <T = unknown>(path: string) => request<T>(path),
+    get: <T = unknown>(path: string, query?: RequestOptions["query"]) =>
+      request<T>(path, { query }),
     patch: <T = unknown>(path: string, body: unknown) =>
       request<T>(path, { body, method: "PATCH" }),
     post: <T = unknown>(path: string, body?: unknown) =>
       request<T>(path, { body, method: "POST" }),
   };
+}
+
+function buildUrl(
+  baseUrl: string,
+  path: string,
+  query?: Record<string, string | number | boolean | null | undefined>,
+) {
+  const url = new URL(`${baseUrl}/${path.replace(/^\/+/, "")}`);
+  for (const [key, value] of Object.entries(query ?? {})) {
+    if (value !== null && value !== undefined && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
+  }
+  return url.toString();
 }
 
 async function readPayload(response: Response) {

@@ -8,7 +8,10 @@ async fn migrations_seed_default_user_types_and_audit_log_table() {
         .fetch_all(&app.db_pool)
         .await
         .unwrap();
-    assert_eq!(user_types, vec!["guest", "maintainer", "owner", "user"]);
+    assert_eq!(
+        user_types,
+        vec!["guest", "lab_admin", "root", "super_admin", "user"]
+    );
 
     let user_type_ids: Vec<String> =
         sqlx::query_scalar("SELECT user_type_id::text FROM user_types ORDER BY name")
@@ -33,7 +36,7 @@ async fn migrations_seed_default_user_types_and_audit_log_table() {
     .fetch_one(&app.db_pool)
     .await
     .unwrap();
-    assert_eq!(root.0, "owner");
+    assert_eq!(root.0, "root");
     assert!(root.1.is_none());
 
     let audit_log_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_logs")
@@ -74,9 +77,6 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
         "locations",
         "assets",
         "asset_inventory_items",
-        "borrow_requests",
-        "maintenance_records",
-        "maintenance_schedules",
         "attachments",
         "inventory_transactions",
         "idempotency",
@@ -214,9 +214,7 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
         WHERE schemaname = 'public'
           AND indexname IN (
             'idx_assets_search_trgm',
-            'idx_asset_inventory_items_search_trgm',
-            'idx_borrow_requests_purpose_trgm',
-            'idx_maintenance_records_search_trgm'
+            'idx_asset_inventory_items_search_trgm'
           )
         ORDER BY indexname
         "#,
@@ -228,9 +226,7 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
         search_indexes,
         vec![
             "idx_asset_inventory_items_search_trgm",
-            "idx_assets_search_trgm",
-            "idx_borrow_requests_purpose_trgm",
-            "idx_maintenance_records_search_trgm"
+            "idx_assets_search_trgm"
         ]
     );
 }

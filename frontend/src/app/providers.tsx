@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { App as AntApp, ConfigProvider } from "antd";
-import zhCN from "antd/locale/zh_CN";
+import * as Tooltip from "@radix-ui/react-tooltip";
 import { type PropsWithChildren, useState } from "react";
 import { BackendConfigProvider } from "../shared/api/backendConfig";
+import { ThemeProvider } from "../shared/theme/ThemeProvider";
+import { ToastProvider } from "../shared/ui/Toast";
 
 export function AppProviders({ children }: PropsWithChildren) {
   const [queryClient] = useState(
@@ -21,27 +22,14 @@ export function AppProviders({ children }: PropsWithChildren) {
   );
 
   return (
-    <ConfigProvider
-      locale={zhCN}
-      theme={{
-        token: {
-          colorPrimary: "#1677ff",
-          colorBgLayout: "#f5f7fb",
-          colorTextBase: "#101828",
-          borderRadius: 8,
-          borderRadiusLG: 8,
-          controlHeight: 40,
-          controlHeightLG: 44,
-          fontFamily:
-            'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        },
-      }}
-    >
-      <AntApp>
+    <ThemeProvider>
+      <ToastProvider>
         <BackendConfigProvider>
-          <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+          <QueryClientProvider client={queryClient}>
+            <Tooltip.Provider delayDuration={250}>{children}</Tooltip.Provider>
+          </QueryClientProvider>
         </BackendConfigProvider>
-      </AntApp>
-    </ConfigProvider>
+      </ToastProvider>
+    </ThemeProvider>
   );
 }

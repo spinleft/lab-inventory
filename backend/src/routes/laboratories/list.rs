@@ -1,49 +1,84 @@
-use super::model::Laboratory;
-use crate::authentication::{UserId, get_actor};
-use crate::utils::ApiError;
-use actix_web::{HttpResponse, web};
+use super::model::{LaboratoryResponse, LaboratoryRow};
+use crate::access_control::get_actor;
+use crate::domain::UserId;
+use crate::utils::error_chain_fmt;
+use actix_web::http::StatusCode;
+use actix_web::{HttpResponse, ResponseError, web};
 use sqlx::PgPool;
+use uuid::Uuid;
 
-#[tracing::instrument(name = "List laboratories", skip(pool), fields(user_id=%user_id))]
+#[derive(thiserror::Error)]
+pub enum ListLaboratoriesError {
+    #[error("{0}")]
+    Forbidden(String),
+    #[error(transparent)]
+    UnexpectedError(#[from] anyhow::Error),
+}
+
+impl std::fmt::Debug for ListLaboratoriesError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+impl ResponseError for ListLaboratoriesError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            ListLaboratoriesError::Forbidden(_) => StatusCode::FORBIDDEN,
+            ListLaboratoriesError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+#[tracing::instrument(name = "List laboratories", skip(pool), fields(actor_user_id=%actor_user_id))]
 pub async fn list_laboratories(
-    user_id: UserId,
+    actor_user_id: UserId,
     pool: web::Data<PgPool>,
-) -> Result<HttpResponse, ApiError> {
-    let actor = get_actor(pool.get_ref(), user_id).await?;
-    if actor.is_owner() {
-        let laboratories = sqlx::query_as::<_, Laboratory>(
-            r#"
-            SELECT laboratory_id, name, address, description, contact, created_at, updated_at
-            FROM laboratories
-            ORDER BY name
-            "#,
-        )
-        .fetch_all(pool.get_ref())
+) -> Result<HttpResponse, ListLaboratoriesError> {
+    let actor = get_actor(&pool, actor_user_id)
         .await
-        .map_err(|e| ApiError::UnexpectedError(e.into()))?;
-
-        return Ok(HttpResponse::Ok().json(laboratories));
+        .map_err(ListLaboratoriesError::UnexpectedError)?
+        .ok_or(ListLaboratoriesError::Forbidden(
+            "Actor not found in the database".into(),
+        ))?;
+    if !actor.is_admin() {
+        return Err(ListLaboratoriesError::Forbidden(
+            "You don't have permission to list laboratories.".into(),
+        ));
     }
 
-    if actor.is_maintainer() {
-        let Some(laboratory_id) = actor.laboratory_id else {
-            return Ok(HttpResponse::Ok().json(Vec::<Laboratory>::new()));
+    let actor_laboratory_id = if actor.is_lab_admin() {
+        let Some(laboratory_id) = actor.laboratory_id.map(Uuid::from) else {
+            return Ok(HttpResponse::Ok().json(Vec::<LaboratoryResponse>::new()));
         };
-        let laboratories = sqlx::query_as::<_, Laboratory>(
-            r#"
-            SELECT laboratory_id, name, address, description, contact, created_at, updated_at
-            FROM laboratories
-            WHERE laboratory_id = $1
-            ORDER BY name
-            "#,
-        )
-        .bind(laboratory_id)
-        .fetch_all(pool.get_ref())
-        .await
-        .map_err(|e| ApiError::UnexpectedError(e.into()))?;
+        Some(laboratory_id)
+    } else {
+        None
+    };
+    let laboratories: Vec<_> = fetch_laboratories(&pool, actor_laboratory_id)
+        .await?
+        .into_iter()
+        .map(LaboratoryResponse::from)
+        .collect();
 
-        return Ok(HttpResponse::Ok().json(laboratories));
-    }
+    Ok(HttpResponse::Ok().json(laboratories))
+}
 
-    Err(ApiError::Forbidden)
+async fn fetch_laboratories(
+    pool: &PgPool,
+    laboratory_id: Option<Uuid>,
+) -> Result<Vec<LaboratoryRow>, ListLaboratoriesError> {
+    sqlx::query_as!(
+        LaboratoryRow,
+        r#"
+        SELECT laboratory_id, name, address, description, contact, created_at, updated_at
+        FROM laboratories
+        WHERE $1::uuid IS NULL OR laboratory_id = $1
+        ORDER BY name
+        "#,
+        laboratory_id,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| ListLaboratoriesError::UnexpectedError(e.into()))
 }

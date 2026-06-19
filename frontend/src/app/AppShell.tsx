@@ -1,346 +1,285 @@
-import {
-  ApartmentOutlined,
-  ApiOutlined,
-  AuditOutlined,
-  DashboardOutlined,
-  DatabaseOutlined,
-  LockOutlined,
-  LogoutOutlined,
-  ProfileOutlined,
-  SettingOutlined,
-  SwapOutlined,
-  ToolOutlined,
-  UserOutlined,
-} from "@ant-design/icons";
+import * as Dialog from "@radix-ui/react-dialog";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Space, Spin, Typography, type MenuProps } from "antd";
-import { createContext, useContext, type PropsWithChildren } from "react";
-import { Link, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useCurrentUser, useLogout } from "../features/auth/api";
 import {
-  canAccessAdminSettings,
-  describeRole,
-  describeScope,
-} from "../features/auth/permissions";
-import { type CurrentUser } from "../features/auth/types";
-import { useBackendConfig } from "../shared/api/backendConfig";
-import { ApiError } from "../shared/api/httpClient";
-import { AppChrome, type AppChromeNavItem } from "../shared/ui/AppChrome";
-import { EntryShell } from "../shared/ui/EntryShell";
+  ChevronDown,
+  LogOut,
+  Menu,
+  Moon,
+  Search,
+  KeyRound,
+  Settings,
+  SquarePen,
+  Sun,
+  UserRound,
+  X,
+} from "lucide-react";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useLogout } from "../modules/auth/api";
+import { describeRole, describeScope } from "../modules/auth/permissions";
+import { Button } from "../shared/ui/Button";
+import { useTheme, type ThemePreference } from "../shared/theme/ThemeProvider";
+import { useAuth } from "./auth-context";
+import { CommandMenu, useCommandMenuState } from "./CommandMenu";
+import { findRoute, moduleNavItems, type ModuleNavItem } from "./modules";
 
-const { Text } = Typography;
-
-type AppShellContextValue = {
-  currentUser: CurrentUser;
-};
-
-const AppShellContext = createContext<AppShellContextValue | null>(null);
-
-const pageTitles: Record<string, string> = {
-  "/dashboard": "概览",
-  "/settings/profile": "用户资料",
-  "/settings/password": "密码",
-  "/settings/preference": "偏好设置",
-  "/admin": "管理中心",
-  "/admin/laboratories": "实验室",
-  "/admin/remotes": "远端实验室",
-  "/admin/users": "用户",
+const groupLabels: Record<ModuleNavItem["group"], string> = {
+  admin: "管理",
+  settings: "设置",
+  workspace: "工作区",
 };
 
 export function AppShell() {
-  const { hasConfiguredApiBaseUrl } = useBackendConfig();
-  const currentUser = useCurrentUser({ enabled: hasConfiguredApiBaseUrl });
-
-  if (!hasConfiguredApiBaseUrl) {
-    return <Navigate to="/server-settings" replace />;
-  }
-
-  if (currentUser.isLoading) {
-    return (
-      <EntryShell
-        title="正在检查登录状态"
-        titleId="app-shell-session-check-title"
-        description="正在确认当前服务器与本机会话，完成后会自动进入后台。"
-        cardTitle="状态检查"
-      >
-        <Space align="center">
-          <Spin />
-          <Text>正在检查登录状态...</Text>
-        </Space>
-      </EntryShell>
-    );
-  }
-
-  if (currentUser.error instanceof ApiError && currentUser.error.status === 401) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (currentUser.isError || !currentUser.data) {
-    return (
-      <EntryShell
-        title="无法连接后端"
-        titleId="app-shell-backend-error-title"
-        description="请确认地址、网络、CORS 和后端服务状态。"
-        cardTitle="连接异常"
-      >
-        <Alert
-          showIcon
-          type="error"
-          title={currentUser.error?.message ?? "请求失败。"}
-        />
-        <Link to="/server-settings" className="entry-action-link">
-          <Button type="primary" size="large">
-            服务器设置
-          </Button>
-        </Link>
-      </EntryShell>
-    );
-  }
-
-  return (
-    <AppShellContext.Provider value={{ currentUser: currentUser.data }}>
-      <AuthenticatedShell currentUser={currentUser.data}>
-        <Outlet />
-      </AuthenticatedShell>
-    </AppShellContext.Provider>
-  );
-}
-
-function AuthenticatedShell({
-  children,
-  currentUser,
-}: PropsWithChildren<{ currentUser: CurrentUser }>) {
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { currentUser } = useAuth();
   const logout = useLogout();
-  const currentPath = normalizePath(location.pathname);
-  const navigationDomain = getNavigationDomain(currentPath);
-  const title = pageTitles[currentPath] ?? "后台";
-  const sidebarItems = getSidebarItems(navigationDomain, currentUser);
-  const sidebarTitle = getSidebarTitle(navigationDomain);
-  const selectedSidebarKey = sidebarItems.some((item) => item.key === currentPath)
-    ? currentPath
-    : undefined;
+  const [commandOpen, setCommandOpen] = useCommandMenuState();
+  const visibleNavItems = moduleNavItems.filter(
+    (item) => !item.canAccess || item.canAccess(currentUser),
+  );
+  const currentRoute = findRoute(location.pathname);
 
-  const userMenuItems: MenuProps["items"] = [
-    {
-      key: "settings-user",
-      icon: <UserOutlined />,
-      label: "用户设置",
-    },
-    ...(canAccessAdminSettings(currentUser)
-      ? [
-          {
-            key: "settings-admin",
-            icon: <ApartmentOutlined />,
-            label: "管理中心",
-          },
-        ]
-      : []),
-    {
-      type: "divider" as const,
-    },
-    {
-      key: "logout",
-      danger: true,
-      icon: <LogoutOutlined />,
-      label: "登出",
-    },
-  ];
-
-  function handleUserMenuClick({ key }: Parameters<NonNullable<MenuProps["onClick"]>>[0]) {
-    if (key === "settings-user") {
-      navigate("/settings/profile");
-      return;
-    }
-    if (key === "settings-admin") {
-      navigate("/admin");
-      return;
-    }
-    if (key === "logout") {
-      logout.mutate(undefined, {
-        onSettled: () => {
-          queryClient.clear();
-          navigate("/login", { replace: true });
-        },
-      });
-    }
+  function handleLogout() {
+    logout.mutate(undefined, {
+      onSettled: () => {
+        queryClient.clear();
+        navigate("/login", { replace: true });
+      },
+    });
   }
 
   return (
-    <AppChrome
-      breadcrumbItems={[
-        {
-          key: "dashboard",
-          label: "后台",
-          onClick: () => navigate("/dashboard"),
-        },
-        { key: currentPath, label: title },
-      ]}
-      isUserMenuLoading={logout.isPending}
-      onBrandClick={() => navigate("/dashboard")}
-      onSidebarSelect={(key) => navigate(key)}
-      onUserMenuClick={handleUserMenuClick}
-      pageIcon={<ToolOutlined aria-hidden="true" className="app-page-title-icon" />}
-      pageMeta={
-        <Text type="secondary">
-          {describeRole(currentUser)} · {describeScope(currentUser)}
-        </Text>
-      }
-      pageTitle={title}
-      selectedSidebarKey={selectedSidebarKey}
-      sidebarItems={sidebarItems}
-      sidebarTitle={sidebarTitle}
-      userInitial={currentUser.username.slice(0, 1).toUpperCase()}
-      userMenuItems={userMenuItems}
-      userName={currentUser.username}
-    >
-      {children}
-    </AppChrome>
+    <div className="app-shell">
+      <Sidebar
+        items={visibleNavItems}
+        isLogoutPending={logout.isPending}
+        onCommandOpen={() => setCommandOpen(true)}
+        onLogout={handleLogout}
+      />
+      <div className="app-main">
+        <header className="topbar">
+          <div className="topbar-left">
+            <MobileNavigation
+              items={visibleNavItems}
+              isLogoutPending={logout.isPending}
+              onLogout={handleLogout}
+            />
+            <span className="breadcrumb">{currentRoute?.title ?? "工作台"}</span>
+          </div>
+          <div className="topbar-right">
+            <ThemeMenu />
+          </div>
+        </header>
+        <div className="page-scroll">
+          <Outlet />
+        </div>
+      </div>
+      <CommandMenu open={commandOpen} onOpenChange={setCommandOpen} />
+    </div>
   );
 }
 
-export function useAppShell() {
-  const context = useContext(AppShellContext);
-  if (!context) {
-    throw new Error("useAppShell must be used inside AppShell.");
-  }
-  return context;
+function Sidebar({
+  items,
+  isLogoutPending = false,
+  onCommandOpen,
+  onLogout,
+}: {
+  items: ModuleNavItem[];
+  isLogoutPending?: boolean;
+  onCommandOpen?: () => void;
+  onLogout?: () => void;
+}) {
+  const { currentUser } = useAuth();
+  const navigate = useNavigate();
+
+  return (
+    <aside className="sidebar">
+      <div className="sidebar-header">
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <Button
+              aria-label={`用户菜单 ${currentUser.username}`}
+              className="workspace-button user-trigger sidebar-user-trigger"
+              variant="ghost"
+            >
+              <span className="avatar workspace-avatar">
+                {currentUser.username.slice(0, 1).toUpperCase()}
+              </span>
+              <span className="workspace-name">{currentUser.username}</span>
+              <ChevronDown className="workspace-caret" size={13} aria-hidden="true" />
+            </Button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content className="dropdown-content" align="start">
+              <DropdownMenu.Item
+                className="dropdown-item"
+                onSelect={() => navigate("/settings/profile")}
+              >
+                <UserRound size={15} />
+                个人资料
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                className="dropdown-item"
+                onSelect={() => navigate("/settings/password")}
+              >
+                <KeyRound size={15} />
+                修改密码
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                className="dropdown-item"
+                onSelect={() => navigate("/settings/preferences")}
+              >
+                <Settings size={15} />
+                偏好设置
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator className="dropdown-separator" />
+              <DropdownMenu.Item
+                className="dropdown-item"
+                disabled={isLogoutPending}
+                onSelect={onLogout}
+              >
+                <LogOut size={15} />
+                退出登录
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+        {onCommandOpen ? (
+          <div className="sidebar-header-actions">
+            <Button
+              aria-label="搜索"
+              className="sidebar-chrome-button"
+              onClick={onCommandOpen}
+              size="icon"
+              variant="ghost"
+            >
+              <Search size={14} />
+            </Button>
+            <Button
+              aria-label="新建"
+              className="sidebar-chrome-button"
+              onClick={onCommandOpen}
+              size="icon"
+              variant="ghost"
+            >
+              <SquarePen size={14} />
+            </Button>
+          </div>
+        ) : null}
+      </div>
+      <nav className="sidebar-scroll" aria-label="主导航">
+        {(["workspace", "admin", "settings"] as const).map((group) => {
+          const groupItems = items.filter((item) => item.group === group);
+          if (groupItems.length === 0) {
+            return null;
+          }
+          return (
+            <div className="sidebar-group" key={group}>
+              <div className="sidebar-group-label">{groupLabels[group]}</div>
+              {groupItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <NavLink
+                    className={({ isActive }) =>
+                      isActive ? "sidebar-link active" : "sidebar-link"
+                    }
+                    key={item.path}
+                    to={item.path}
+                  >
+                    <Icon size={15} aria-hidden="true" />
+                    {item.title}
+                  </NavLink>
+                );
+              })}
+            </div>
+          );
+        })}
+      </nav>
+    </aside>
+  );
 }
 
-function normalizePath(pathname: string) {
-  if (pathname.startsWith("/settings/user")) {
-    return "/settings/profile";
-  }
-  if (pathname.startsWith("/settings/profile")) {
-    return "/settings/profile";
-  }
-  if (pathname.startsWith("/settings/password")) {
-    return "/settings/password";
-  }
-  if (pathname.startsWith("/settings/system")) {
-    return "/settings/preference";
-  }
-  if (pathname.startsWith("/settings/preference")) {
-    return "/settings/preference";
-  }
-  if (pathname.startsWith("/settings/admin")) {
-    return "/admin";
-  }
-  if (pathname.startsWith("/admin/laboratories")) {
-    return "/admin/laboratories";
-  }
-  if (pathname.startsWith("/admin/remotes")) {
-    return "/admin/remotes";
-  }
-  if (pathname.startsWith("/admin/users")) {
-    return "/admin/users";
-  }
-  if (pathname.startsWith("/admin")) {
-    return "/admin";
-  }
-  return "/dashboard";
+function MobileNavigation({
+  items,
+  isLogoutPending,
+  onLogout,
+}: {
+  items: ModuleNavItem[];
+  isLogoutPending: boolean;
+  onLogout: () => void;
+}) {
+  return (
+    <Dialog.Root>
+      <Dialog.Trigger asChild>
+        <Button
+          aria-label="打开导航"
+          className="mobile-menu-button"
+          size="icon"
+          variant="ghost"
+        >
+          <Menu size={17} />
+        </Button>
+      </Dialog.Trigger>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="dialog-content side-panel">
+          <div className="dialog-header">
+            <Dialog.Title className="dialog-title">导航</Dialog.Title>
+            <Dialog.Close asChild>
+              <Button size="icon" variant="ghost" aria-label="关闭导航">
+                <X size={16} />
+              </Button>
+            </Dialog.Close>
+          </div>
+          <div className="dialog-body">
+            <Sidebar items={items} isLogoutPending={isLogoutPending} onLogout={onLogout} />
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
 }
 
-type NavigationDomain = "dashboard" | "settings" | "admin";
-
-function getNavigationDomain(pathname: string): NavigationDomain {
-  if (pathname.startsWith("/settings/")) {
-    return "settings";
-  }
-  if (pathname.startsWith("/admin")) {
-    return "admin";
-  }
-  return "dashboard";
-}
-
-function getSidebarTitle(navigationDomain: NavigationDomain) {
-  if (navigationDomain === "settings") {
-    return "设置导航";
-  }
-  if (navigationDomain === "admin") {
-    return "管理导航";
-  }
-  return "后台导航";
-}
-
-function getSidebarItems(
-  navigationDomain: NavigationDomain,
-  currentUser: CurrentUser,
-): AppChromeNavItem[] {
-  if (navigationDomain === "settings") {
-    return [
-      {
-        key: "/settings/profile",
-        icon: <ProfileOutlined />,
-        label: "用户资料",
-      },
-      {
-        key: "/settings/password",
-        icon: <LockOutlined />,
-        label: "密码",
-      },
-      {
-        key: "/settings/preference",
-        icon: <SettingOutlined />,
-        label: "偏好设置",
-      },
-    ];
-  }
-
-  if (navigationDomain === "admin") {
-    if (!canAccessAdminSettings(currentUser)) {
-      return [];
-    }
-    return [
-      {
-        key: "/admin/laboratories",
-        icon: <ApartmentOutlined />,
-        label: "实验室",
-      },
-      {
-        key: "/admin/users",
-        icon: <UserOutlined />,
-        label: "用户",
-      },
-      {
-        key: "/admin/remotes",
-        icon: <ApiOutlined />,
-        label: "远端实验室",
-      },
-    ];
-  }
-
-  return [
-    {
-      key: "/dashboard",
-      icon: <DashboardOutlined />,
-      label: "概览",
-    },
-    {
-      key: "/inventory",
-      icon: <DatabaseOutlined />,
-      label: "库存",
-      disabled: true,
-    },
-    {
-      key: "/borrow-requests",
-      icon: <SwapOutlined />,
-      label: "借用",
-      disabled: true,
-    },
-    {
-      key: "/maintenance",
-      icon: <ToolOutlined />,
-      label: "维护",
-      disabled: true,
-    },
-    {
-      key: "/audit-logs",
-      icon: <AuditOutlined />,
-      label: "审计日志",
-      disabled: true,
-    },
+function ThemeMenu() {
+  const { preference, setPreference } = useTheme();
+  const options: Array<{ label: string; value: ThemePreference }> = [
+    { label: "跟随系统", value: "system" },
+    { label: "浅色", value: "light" },
+    { label: "深色", value: "dark" },
   ];
+
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <Button size="icon" variant="ghost" aria-label="切换主题">
+          {preference === "dark" ? <Moon size={16} /> : <Sun size={16} />}
+        </Button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content className="dropdown-content" align="end">
+          {options.map((option) => (
+            <DropdownMenu.Item
+              className="dropdown-item"
+              key={option.value}
+              onSelect={() => setPreference(option.value)}
+            >
+              {option.label}
+            </DropdownMenu.Item>
+          ))}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+
+export function UserContextLine() {
+  const { currentUser } = useAuth();
+  return (
+    <span>
+      {describeRole(currentUser)} · {describeScope(currentUser)}
+    </span>
+  );
 }

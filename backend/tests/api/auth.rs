@@ -85,7 +85,7 @@ async fn auth_me_returns_current_user_after_login() {
     let body: serde_json::Value = response.json().await.unwrap();
     assert_eq!(body["user_id"], app.test_user.user_id.to_string());
     assert_eq!(body["username"], app.test_user.username);
-    assert_eq!(body["user_type"]["name"], "owner");
+    assert_eq!(body["user_type"]["name"], "super_admin");
     assert!(body["laboratory"].is_null());
 }
 
@@ -215,10 +215,16 @@ async fn changing_password_keeps_session_valid_and_allows_new_password_login() {
 }
 
 #[tokio::test]
-async fn changing_password_records_a_non_sensitive_audit_log() {
+async fn changing_password_records_rollback_audit_log_without_plaintext_passwords() {
     let app = spawn_app().await;
     app.test_user.login(&app).await;
     let new_password = Uuid::new_v4().to_string();
+    let previous_password_hash: String =
+        sqlx::query_scalar("SELECT password_hash FROM users WHERE user_id = $1")
+            .bind(app.test_user.user_id)
+            .fetch_one(&app.db_pool)
+            .await
+            .unwrap();
 
     let response = app
         .patch_auth_password(&serde_json::json!({
@@ -234,7 +240,6 @@ async fn changing_password_records_a_non_sensitive_audit_log() {
         SELECT details
         FROM audit_logs
         WHERE actor_user_id = $1
-          AND target_laboratory_id IS NULL
           AND action = 'update'
           AND resource_type = 'user'
           AND resource_id = $1
@@ -249,12 +254,19 @@ async fn changing_password_records_a_non_sensitive_audit_log() {
     assert_eq!(
         details,
         serde_json::json!({
-            "username": app.test_user.username,
-            "changed_fields": ["password"],
+            "rollback": {
+                "operation": "update",
+                "resource_type": "user",
+                "where": {
+                    "user_id": app.test_user.user_id,
+                },
+                "values": {
+                    "password_hash": previous_password_hash,
+                },
+            },
         })
     );
     let details = details.to_string();
     assert!(!details.contains(&app.test_user.password));
     assert!(!details.contains(&new_password));
-    assert!(!details.contains("password_hash"));
 }

@@ -1,8 +1,10 @@
 use super::model::AuditLog;
-use crate::authentication::{Actor, UserId, get_actor};
-use crate::routes::{PaginatedResponse, Pagination};
-use crate::utils::ApiError;
-use actix_web::{HttpResponse, web};
+use crate::access_control::get_actor;
+use crate::domain::UserId;
+use crate::routes::{PaginatedResponse, Pagination, PaginationError};
+use crate::utils::error_chain_fmt;
+use actix_web::http::StatusCode;
+use actix_web::{HttpResponse, ResponseError, web};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use sqlx::{PgPool, Postgres, QueryBuilder};
@@ -13,8 +15,6 @@ pub struct AuditLogListQuery {
     #[serde(flatten)]
     pub pagination: Pagination,
     pub actor_user_id: Option<Uuid>,
-    pub actor_laboratory_id: Option<Uuid>,
-    pub target_laboratory_id: Option<Uuid>,
     pub action: Option<String>,
     pub resource_type: Option<String>,
     pub resource_id: Option<Uuid>,
@@ -22,29 +22,72 @@ pub struct AuditLogListQuery {
     pub created_to: Option<DateTime<Utc>>,
 }
 
-#[tracing::instrument(name = "List audit logs", skip(pool), fields(user_id=%user_id))]
+#[derive(thiserror::Error)]
+pub enum ListAuditLogsError {
+    #[error("{0}")]
+    ValidationError(String),
+    #[error("{0}")]
+    Forbidden(String),
+    #[error(transparent)]
+    UnexpectedError(#[from] anyhow::Error),
+}
+
+impl std::fmt::Debug for ListAuditLogsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+impl ResponseError for ListAuditLogsError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            ListAuditLogsError::ValidationError(_) => StatusCode::BAD_REQUEST,
+            ListAuditLogsError::Forbidden(_) => StatusCode::FORBIDDEN,
+            ListAuditLogsError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<PaginationError> for ListAuditLogsError {
+    fn from(error: PaginationError) -> Self {
+        Self::ValidationError(error.to_string())
+    }
+}
+
+#[tracing::instrument(name = "List audit logs", skip(pool), fields(actor_user_id=%actor_user_id))]
 pub async fn list_audit_logs(
-    user_id: UserId,
+    actor_user_id: UserId,
     pool: web::Data<PgPool>,
     query: web::Query<AuditLogListQuery>,
-) -> Result<HttpResponse, ApiError> {
-    let actor = get_actor(pool.get_ref(), user_id).await?;
-    if !actor.is_owner() && !actor.is_maintainer() {
-        return Err(ApiError::Forbidden);
+) -> Result<HttpResponse, ListAuditLogsError> {
+    let actor = get_actor(&pool, actor_user_id)
+        .await
+        .map_err(ListAuditLogsError::UnexpectedError)?
+        .ok_or(ListAuditLogsError::Forbidden(
+            "Actor not found in the database".into(),
+        ))?;
+    if !(actor.is_root() || actor.is_super_admin()) {
+        return Err(ListAuditLogsError::Forbidden(
+            "You don't have permission to list audit logs.".into(),
+        ));
     }
-    let total = fetch_audit_log_count(pool.get_ref(), &actor, &query).await?;
+
+    let total = fetch_audit_log_count(&pool, &query).await?;
+    let limit = query.pagination.limit()?;
+    let offset = query.pagination.offset()?;
+
     let mut builder = QueryBuilder::<Postgres>::new(audit_log_select());
-    push_audit_log_filters(&mut builder, &actor, &query);
+    push_audit_log_filters(&mut builder, &query);
     builder.push(" ORDER BY audit_logs.created_at DESC");
     builder.push(" LIMIT ");
-    builder.push_bind(query.pagination.limit()?);
+    builder.push_bind(limit);
     builder.push(" OFFSET ");
-    builder.push_bind(query.pagination.offset()?);
+    builder.push_bind(offset);
     let audit_logs = builder
         .build_query_as::<AuditLog>()
         .fetch_all(pool.get_ref())
         .await
-        .map_err(|e| ApiError::UnexpectedError(e.into()))?;
+        .map_err(|e| ListAuditLogsError::UnexpectedError(e.into()))?;
 
     Ok(HttpResponse::Ok().json(PaginatedResponse::new(
         audit_logs,
@@ -55,24 +98,21 @@ pub async fn list_audit_logs(
 
 async fn fetch_audit_log_count(
     pool: &PgPool,
-    actor: &Actor,
     query: &AuditLogListQuery,
-) -> Result<i64, ApiError> {
+) -> Result<i64, ListAuditLogsError> {
     let mut builder = QueryBuilder::<Postgres>::new(
         r#"
         SELECT COUNT(*)
         FROM audit_logs
         LEFT JOIN users AS actor_user ON actor_user.user_id = audit_logs.actor_user_id
-        LEFT JOIN laboratories AS actor_laboratory ON actor_laboratory.laboratory_id = audit_logs.actor_laboratory_id
-        LEFT JOIN laboratories AS target_laboratory ON target_laboratory.laboratory_id = audit_logs.target_laboratory_id
         "#,
     );
-    push_audit_log_filters(&mut builder, actor, query);
+    push_audit_log_filters(&mut builder, query);
     builder
         .build_query_scalar()
         .fetch_one(pool)
         .await
-        .map_err(|e| ApiError::UnexpectedError(e.into()))
+        .map_err(|e| ListAuditLogsError::UnexpectedError(e.into()))
 }
 
 fn audit_log_select() -> &'static str {
@@ -81,10 +121,6 @@ fn audit_log_select() -> &'static str {
         audit_logs.audit_log_id,
         audit_logs.actor_user_id,
         actor_user.username AS actor_username,
-        audit_logs.actor_laboratory_id,
-        actor_laboratory.name AS actor_laboratory_name,
-        audit_logs.target_laboratory_id,
-        target_laboratory.name AS target_laboratory_name,
         audit_logs.action,
         audit_logs.resource_type,
         audit_logs.resource_id,
@@ -92,39 +128,14 @@ fn audit_log_select() -> &'static str {
         audit_logs.created_at
     FROM audit_logs
     LEFT JOIN users AS actor_user ON actor_user.user_id = audit_logs.actor_user_id
-    LEFT JOIN laboratories AS actor_laboratory ON actor_laboratory.laboratory_id = audit_logs.actor_laboratory_id
-    LEFT JOIN laboratories AS target_laboratory ON target_laboratory.laboratory_id = audit_logs.target_laboratory_id
     "#
 }
 
-fn push_audit_log_filters(
-    builder: &mut QueryBuilder<'_, Postgres>,
-    actor: &Actor,
-    query: &AuditLogListQuery,
-) {
+fn push_audit_log_filters(builder: &mut QueryBuilder<'_, Postgres>, query: &AuditLogListQuery) {
     builder.push(" WHERE TRUE");
-    if !actor.is_owner() {
-        if let Some(laboratory_id) = actor.laboratory_id {
-            builder.push(" AND (audit_logs.actor_laboratory_id = ");
-            builder.push_bind(laboratory_id);
-            builder.push(" OR audit_logs.target_laboratory_id = ");
-            builder.push_bind(laboratory_id);
-            builder.push(")");
-        } else {
-            builder.push(" AND FALSE");
-        }
-    }
     if let Some(actor_user_id) = query.actor_user_id {
         builder.push(" AND audit_logs.actor_user_id = ");
         builder.push_bind(actor_user_id);
-    }
-    if let Some(actor_laboratory_id) = query.actor_laboratory_id {
-        builder.push(" AND audit_logs.actor_laboratory_id = ");
-        builder.push_bind(actor_laboratory_id);
-    }
-    if let Some(target_laboratory_id) = query.target_laboratory_id {
-        builder.push(" AND audit_logs.target_laboratory_id = ");
-        builder.push_bind(target_laboratory_id);
     }
     if let Some(action) = query
         .action

@@ -4,8 +4,12 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     Write-Error "docker is not installed. Install Docker Desktop, then retry this script."
 }
 
-docker info *> $null
-if ($LASTEXITCODE -ne 0) {
+try {
+    docker ps -q 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Docker daemon is not running or is not reachable. Start Docker Desktop, wait until it is ready, then retry this script."
+    }
+} catch {
     Write-Error "Docker daemon is not running or is not reachable. Start Docker Desktop, wait until it is ready, then retry this script."
 }
 

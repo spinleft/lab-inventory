@@ -131,7 +131,7 @@ fn verify_password_hash(
         .map_err(AuthError::InvalidCredentials)
 }
 
-fn compute_password_hash(password: Secret<String>) -> Result<Secret<String>, anyhow::Error> {
+pub fn compute_password_hash(password: Secret<String>) -> Result<Secret<String>, anyhow::Error> {
     use argon2::password_hash::SaltString;
     use argon2::{Algorithm, PasswordHasher, Version};
 

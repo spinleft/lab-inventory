@@ -1,9 +1,31 @@
-use crate::utils::ApiError;
+use crate::utils::error_chain_fmt;
+use actix_web::ResponseError;
+use actix_web::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_aux::field_attributes::deserialize_option_number_from_string;
 
 const DEFAULT_LIMIT: i64 = 50;
 const MAX_LIMIT: i64 = 200;
+
+#[derive(thiserror::Error)]
+pub enum PaginationError {
+    #[error("{0}")]
+    ValidationError(String),
+}
+
+impl std::fmt::Debug for PaginationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+impl ResponseError for PaginationError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            PaginationError::ValidationError(_) => StatusCode::BAD_REQUEST,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct Pagination {
@@ -14,18 +36,22 @@ pub struct Pagination {
 }
 
 impl Pagination {
-    pub fn limit(&self) -> Result<i64, ApiError> {
+    pub fn limit(&self) -> Result<i64, PaginationError> {
         let limit = self.limit.unwrap_or(DEFAULT_LIMIT);
         if limit <= 0 {
-            return Err(ApiError::BadRequest("limit must be positive".into()));
+            return Err(PaginationError::ValidationError(
+                "limit must be positive".into(),
+            ));
         }
         Ok(limit.min(MAX_LIMIT))
     }
 
-    pub fn offset(&self) -> Result<i64, ApiError> {
+    pub fn offset(&self) -> Result<i64, PaginationError> {
         let offset = self.offset.unwrap_or(0);
         if offset < 0 {
-            return Err(ApiError::BadRequest("offset must be non-negative".into()));
+            return Err(PaginationError::ValidationError(
+                "offset must be non-negative".into(),
+            ));
         }
         Ok(offset)
     }
@@ -40,7 +66,11 @@ pub struct PaginatedResponse<T> {
 }
 
 impl<T> PaginatedResponse<T> {
-    pub fn new(items: Vec<T>, pagination: &Pagination, total: i64) -> Result<Self, ApiError> {
+    pub fn new(
+        items: Vec<T>,
+        pagination: &Pagination,
+        total: i64,
+    ) -> Result<Self, PaginationError> {
         Ok(Self {
             items,
             limit: pagination.limit()?,
@@ -48,11 +78,4 @@ impl<T> PaginatedResponse<T> {
             total,
         })
     }
-}
-
-pub fn normalized_search_pattern(q: &Option<String>) -> Option<String> {
-    q.as_deref()
-        .map(str::trim)
-        .filter(|q| !q.is_empty())
-        .map(|q| format!("%{q}%"))
 }

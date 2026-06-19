@@ -4,7 +4,6 @@ mod get;
 mod list;
 mod model;
 mod update;
-mod validation;
 
 pub use create::create_user;
 pub use delete::delete_user;
