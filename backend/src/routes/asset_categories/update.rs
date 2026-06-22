@@ -1,12 +1,12 @@
 use super::model::{
-    AssetCategoryResponse, AssetCategoryRow, can_write_laboratory_categories,
-    fetch_asset_category_for_update, map_database_conflict, update_asset_category_rollback_details,
+    AssetCategoryResponse, AssetCategoryRow, fetch_asset_category_for_update,
+    map_database_conflict, update_asset_category_rollback_details,
 };
-use crate::access_control::get_actor;
+use crate::access_control::{Actor, get_actor};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{
-    AssetCategoryCode, AssetCategoryId, AssetCategoryName, NullableUpdate, UpdateAssetCategory,
-    UserId,
+    AssetCategoryCode, AssetCategoryId, AssetCategoryName, LaboratoryId, NullableUpdate,
+    UpdateAssetCategory, UserId,
 };
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
@@ -125,11 +125,9 @@ pub async fn update_asset_category(
         .ok_or(UpdateAssetCategoryError::NotFound(
             "Asset category not found".into(),
         ))?;
-    if !can_write_laboratory_categories(&actor, existing.laboratory_id) {
-        return Err(UpdateAssetCategoryError::Forbidden(
-            "You don't have permission to update this asset category.".into(),
-        ));
-    }
+    let laboratory_id = LaboratoryId::parse(existing.laboratory_id)
+        .map_err(|e| UpdateAssetCategoryError::UnexpectedError(anyhow::anyhow!("{e}")))?;
+    validate_update_permission(&actor, &laboratory_id)?;
 
     let name = update_category
         .name
@@ -155,7 +153,8 @@ pub async fn update_asset_category(
         .description
         .resolve(existing.description.clone());
 
-    let parent = fetch_new_parent(&mut transaction, &existing, parent_category_id).await?;
+    let parent: Option<AssetCategoryRow> =
+        fetch_new_parent(&mut transaction, &existing, parent_category_id).await?;
     let (path, depth) = build_path_and_depth(parent.as_ref(), &code);
     let updated = update_asset_category_in_database(
         &mut transaction,
@@ -195,6 +194,19 @@ pub async fn update_asset_category(
         .context("Failed to commit SQL transaction to update an asset category.")?;
 
     Ok(HttpResponse::Ok().json(AssetCategoryResponse::from(updated)))
+}
+
+fn validate_update_permission(
+    actor: &Actor,
+    target_laboratory_id: &LaboratoryId,
+) -> Result<(), UpdateAssetCategoryError> {
+    if actor.can_write_laboratory_resource(target_laboratory_id) {
+        Ok(())
+    } else {
+        Err(UpdateAssetCategoryError::Forbidden(
+            "You don't have permission to update asset categories for this laboratory.".into(),
+        ))
+    }
 }
 
 async fn fetch_new_parent(

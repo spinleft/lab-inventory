@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { canAccessAdmin, canAccessAuditLogs, describeScope, roleLabel } from "./permissions";
+import {
+  canAccessAdmin,
+  canAccessAuditLogs,
+  canManageAssetCategories,
+  canSelectAssetCategoryLaboratory,
+  describeScope,
+  roleLabel,
+} from "./permissions";
 import { type CurrentUser } from "./types";
 
 function user(role: CurrentUser["user_type"]["name"], laboratory = null): CurrentUser {
@@ -27,6 +34,21 @@ describe("permissions", () => {
     expect(canAccessAuditLogs(user("root"))).toBe(true);
     expect(canAccessAuditLogs(user("super_admin"))).toBe(true);
     expect(canAccessAuditLogs(user("lab_admin"))).toBe(false);
+  });
+
+  it("allows asset category management for scoped users but not guests", () => {
+    expect(canManageAssetCategories(user("root"))).toBe(true);
+    expect(canManageAssetCategories(user("super_admin"))).toBe(true);
+    expect(canManageAssetCategories(user("lab_admin"))).toBe(true);
+    expect(canManageAssetCategories(user("user"))).toBe(true);
+    expect(canManageAssetCategories(user("guest"))).toBe(false);
+  });
+
+  it("limits asset category laboratory selection to global admins", () => {
+    expect(canSelectAssetCategoryLaboratory(user("root"))).toBe(true);
+    expect(canSelectAssetCategoryLaboratory(user("super_admin"))).toBe(true);
+    expect(canSelectAssetCategoryLaboratory(user("lab_admin"))).toBe(false);
+    expect(canSelectAssetCategoryLaboratory(user("user"))).toBe(false);
   });
 
   it("formats role and scope labels", () => {

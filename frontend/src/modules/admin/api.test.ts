@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { optionalText, userSchema } from "./api";
+import { assetCategorySchema, optionalText, userSchema } from "./api";
 
 describe("admin api schemas", () => {
   it("parses phone_number from backend users", () => {
@@ -23,5 +23,22 @@ describe("admin api schemas", () => {
   it("normalizes optional text payload fields", () => {
     expect(optionalText("  test@example.com ")).toBe("test@example.com");
     expect(optionalText("   ")).toBeNull();
+  });
+
+  it("parses asset categories from the backend", () => {
+    expect(
+      assetCategorySchema.parse({
+        category_id: "00000000-0000-4000-8000-000000000031",
+        code: "microscope",
+        created_at: "2026-06-17T00:00:00Z",
+        depth: 0,
+        description: "Microscope assets",
+        laboratory_id: "00000000-0000-4000-8000-000000000011",
+        name: "显微镜",
+        parent_category_id: null,
+        path: "microscope",
+        updated_at: "2026-06-17T00:00:00Z",
+      }).path,
+    ).toBe("microscope");
   });
 });

@@ -1,9 +1,10 @@
-use super::model::{AssetCategoryResponse, can_read_laboratory_categories, fetch_asset_category};
-use crate::access_control::get_actor;
-use crate::domain::{AssetCategoryId, UserId};
+use super::model::{AssetCategoryResponse, fetch_asset_category};
+use crate::access_control::{Actor, get_actor};
+use crate::domain::{AssetCategoryId, LaboratoryId, UserId};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
+use anyhow::anyhow;
 use sqlx::PgPool;
 
 #[derive(thiserror::Error)]
@@ -55,11 +56,22 @@ pub async fn get_asset_category(
             .ok_or(GetAssetCategoryError::NotFound(
                 "Asset category not found".into(),
             ))?;
-    if !can_read_laboratory_categories(&actor, category.laboratory_id) {
-        return Err(GetAssetCategoryError::Forbidden(
-            "You don't have permission to view this asset category.".into(),
-        ));
-    }
+    let laboratory_id = LaboratoryId::parse(category.laboratory_id)
+        .map_err(|e| GetAssetCategoryError::UnexpectedError(anyhow!("{e}")))?;
+    validate_read_permission(&actor, &laboratory_id)?;
 
     Ok(HttpResponse::Ok().json(AssetCategoryResponse::from(category)))
+}
+
+fn validate_read_permission(
+    actor: &Actor,
+    target_laboratory_id: &LaboratoryId,
+) -> Result<(), GetAssetCategoryError> {
+    if actor.can_read_laboratory_resource(target_laboratory_id) {
+        Ok(())
+    } else {
+        Err(GetAssetCategoryError::Forbidden(
+            "You do not have permission to view this asset category".into(),
+        ))
+    }
 }

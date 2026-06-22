@@ -16,6 +16,21 @@ export const laboratorySchema = z.object({
 
 const laboratoriesSchema = z.array(laboratorySchema);
 
+export const assetCategorySchema = z.object({
+  category_id: z.string().uuid(),
+  laboratory_id: z.string().uuid(),
+  parent_category_id: z.string().uuid().nullable(),
+  name: z.string(),
+  code: z.string(),
+  path: z.string(),
+  depth: z.number(),
+  description: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+const assetCategoriesSchema = z.array(assetCategorySchema);
+
 export const userSchema = z.object({
   user_id: z.string().uuid(),
   username: z.string(),
@@ -38,6 +53,7 @@ export const userSchema = z.object({
 const usersSchema = z.array(userSchema);
 
 export type Laboratory = z.infer<typeof laboratorySchema>;
+export type AssetCategory = z.infer<typeof assetCategorySchema>;
 export type AdminUser = z.infer<typeof userSchema>;
 
 export type LaboratoryPayload = {
@@ -45,6 +61,13 @@ export type LaboratoryPayload = {
   contact: string | null;
   description: string | null;
   name: string;
+};
+
+export type AssetCategoryPayload = {
+  parent_category_id: string | null;
+  name: string;
+  code: string;
+  description: string | null;
 };
 
 export type CreateUserPayload = {
@@ -65,6 +88,8 @@ export type UpdateUserPayload = {
 };
 
 export const adminQueryKeys = {
+  assetCategories: (apiBaseUrl: string, laboratoryId: string) =>
+    ["admin", "asset-categories", apiBaseUrl, laboratoryId] as const,
   laboratories: (apiBaseUrl: string) => ["admin", "laboratories", apiBaseUrl] as const,
   users: (apiBaseUrl: string) => ["admin", "users", apiBaseUrl] as const,
 };
@@ -90,6 +115,27 @@ export function useUsers() {
     queryFn: async () => {
       const client = createApiClient(apiBaseUrl);
       return usersSchema.parse(await client.get("/users"));
+    },
+  });
+}
+
+export function useAssetCategories({
+  enabled = true,
+  laboratoryId,
+}: {
+  enabled?: boolean;
+  laboratoryId: string;
+}) {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useQuery({
+    enabled: enabled && Boolean(laboratoryId),
+    queryKey: adminQueryKeys.assetCategories(apiBaseUrl, laboratoryId),
+    queryFn: async () => {
+      const client = createApiClient(apiBaseUrl);
+      return assetCategoriesSchema.parse(
+        await client.get(`/laboratories/${laboratoryId}/asset-categories`),
+      );
     },
   });
 }
@@ -131,6 +177,55 @@ export function useDeleteLaboratory() {
     mutationFn: async (laboratoryId: string) => {
       const client = createApiClient(apiBaseUrl);
       await client.delete(`/laboratories/${laboratoryId}`);
+    },
+  });
+}
+
+export function useCreateAssetCategory() {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useMutation({
+    mutationFn: async ({
+      laboratoryId,
+      payload,
+    }: {
+      laboratoryId: string;
+      payload: AssetCategoryPayload;
+    }) => {
+      const client = createApiClient(apiBaseUrl);
+      return assetCategorySchema.parse(
+        await client.post(`/laboratories/${laboratoryId}/asset-categories`, payload),
+      );
+    },
+  });
+}
+
+export function useUpdateAssetCategory() {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useMutation({
+    mutationFn: async ({
+      categoryId,
+      payload,
+    }: {
+      categoryId: string;
+      payload: AssetCategoryPayload;
+    }) => {
+      const client = createApiClient(apiBaseUrl);
+      return assetCategorySchema.parse(
+        await client.patch(`/asset-categories/${categoryId}`, payload),
+      );
+    },
+  });
+}
+
+export function useDeleteAssetCategory() {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useMutation({
+    mutationFn: async (categoryId: string) => {
+      const client = createApiClient(apiBaseUrl);
+      await client.delete(`/asset-categories/${categoryId}`);
     },
   });
 }

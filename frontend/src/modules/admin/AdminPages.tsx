@@ -17,6 +17,7 @@ import { Select } from "../../shared/ui/Select";
 import { useToast } from "../../shared/ui/Toast";
 import { authQueryKeys } from "../auth/api";
 import {
+  canAccessAdmin,
   canManageLaboratories,
   canManageUser,
   getCreatableRoles,
@@ -58,7 +59,13 @@ type UserForm = {
 };
 
 export function AdminHomePage() {
-  return <Navigate to="/admin/laboratories" replace />;
+  const { currentUser } = useAuth();
+  return (
+    <Navigate
+      to={canAccessAdmin(currentUser) ? "/admin/laboratories" : "/admin/asset-categories"}
+      replace
+    />
+  );
 }
 
 export function LaboratoriesPage() {

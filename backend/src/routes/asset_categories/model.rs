@@ -1,5 +1,5 @@
-use crate::{access_control::Actor, domain::LaboratoryId};
 use crate::domain::AssetCategoryId;
+use crate::domain::LaboratoryId;
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -102,22 +102,6 @@ pub(super) fn delete_asset_category_rollback_details(
     })
 }
 
-pub(super) fn can_read_laboratory_categories(actor: &Actor, laboratory_id: Uuid) -> bool {
-    actor.is_root()
-        || actor.is_super_admin()
-        || actor.laboratory_id.map(Uuid::from) == Some(laboratory_id)
-}
-
-pub(super) fn can_write_laboratory_categories(actor: &Actor, laboratory_id: LaboratoryId) -> bool {
-    if actor.is_guest() {
-        return false;
-    }
-
-    actor.is_root()
-        || actor.is_super_admin()
-        || actor.laboratory_id == Some(laboratory_id)
-}
-
 pub(super) async fn fetch_asset_category(
     pool: &PgPool,
     category_id: AssetCategoryId,
@@ -177,7 +161,7 @@ pub(super) async fn fetch_asset_category_for_update(
 
 pub(super) async fn fetch_asset_category_tree_for_update(
     transaction: &mut Transaction<'_, Postgres>,
-    laboratory_id: Uuid,
+    laboratory_id: LaboratoryId,
     root_path: &str,
 ) -> Result<Vec<AssetCategoryRow>, anyhow::Error> {
     sqlx::query_as!(
@@ -200,7 +184,7 @@ pub(super) async fn fetch_asset_category_tree_for_update(
         ORDER BY path
         FOR UPDATE
         "#,
-        laboratory_id,
+        *laboratory_id,
         root_path,
     )
     .fetch_all(transaction.as_mut())

@@ -28,6 +28,19 @@ export function canAccessAuditLogs(user: CurrentUser) {
   return isRoot(user) || isSuperAdmin(user);
 }
 
+export function canManageAssetCategories(user: CurrentUser) {
+  return (
+    isRoot(user) ||
+    isSuperAdmin(user) ||
+    isLabAdmin(user) ||
+    getUserTypeName(user) === "user"
+  );
+}
+
+export function canSelectAssetCategoryLaboratory(user: CurrentUser) {
+  return isRoot(user) || isSuperAdmin(user);
+}
+
 export function canManageLaboratories(user: CurrentUser) {
   return isRoot(user) || isSuperAdmin(user);
 }

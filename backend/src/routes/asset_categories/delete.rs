@@ -1,14 +1,14 @@
 use super::model::{
-    can_write_laboratory_categories, delete_asset_category_rollback_details,
-    fetch_asset_category_for_update, fetch_asset_category_tree_for_update,
+    delete_asset_category_rollback_details, fetch_asset_category_for_update,
+    fetch_asset_category_tree_for_update,
 };
-use crate::access_control::get_actor;
+use crate::access_control::{Actor, get_actor};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{AssetCategoryId, UserId};
+use crate::domain::{AssetCategoryId, LaboratoryId, UserId};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
@@ -67,22 +67,20 @@ pub async fn delete_asset_category(
         .ok_or(DeleteAssetCategoryError::NotFound(
             "Asset category not found".into(),
         ))?;
-    if !can_write_laboratory_categories(&actor, existing.laboratory_id) {
-        return Err(DeleteAssetCategoryError::Forbidden(
-            "You don't have permission to delete this asset category.".into(),
-        ));
-    }
+    let laboratory_id = LaboratoryId::parse(existing.laboratory_id)
+        .map_err(|e| DeleteAssetCategoryError::UnexpectedError(anyhow!(e)))?;
+    validate_delete_permission(&actor, &laboratory_id)?;
 
     let categories = fetch_asset_category_tree_for_update(
         &mut transaction,
-        existing.laboratory_id,
+        laboratory_id,
         &existing.path,
     )
     .await?;
     let cleared_asset_ids =
-        clear_asset_category_references(&mut transaction, existing.laboratory_id, &existing.path)
+        clear_asset_category_references(&mut transaction, laboratory_id, &existing.path)
             .await?;
-    delete_asset_category_tree(&mut transaction, existing.laboratory_id, &existing.path).await?;
+    delete_asset_category_tree(&mut transaction, laboratory_id, &existing.path).await?;
 
     record_audit(
         &mut transaction,
@@ -101,6 +99,19 @@ pub async fn delete_asset_category(
     Ok(HttpResponse::NoContent().finish())
 }
 
+fn validate_delete_permission(
+    actor: &Actor,
+    target_laboratory_id: &LaboratoryId,
+) -> Result<(), DeleteAssetCategoryError> {
+    if actor.can_write_laboratory_resource(target_laboratory_id) {
+        Ok(())
+    } else {
+        return Err(DeleteAssetCategoryError::Forbidden(
+            "You don't have permission to delete this asset category.".into(),
+        ));
+    }
+}
+
 #[tracing::instrument(
     name = "Clearing deleted asset category references from assets",
     skip(transaction, root_path),
@@ -108,7 +119,7 @@ pub async fn delete_asset_category(
 )]
 async fn clear_asset_category_references(
     transaction: &mut Transaction<'_, Postgres>,
-    laboratory_id: Uuid,
+    laboratory_id: LaboratoryId,
     root_path: &str,
 ) -> Result<Vec<Uuid>, DeleteAssetCategoryError> {
     let asset_ids: Vec<Uuid> = sqlx::query_scalar(
@@ -125,7 +136,7 @@ async fn clear_asset_category_references(
         ORDER BY asset_id
         "#,
     )
-    .bind(laboratory_id)
+    .bind(*laboratory_id)
     .bind(root_path)
     .fetch_all(transaction.as_mut())
     .await
@@ -145,7 +156,7 @@ async fn clear_asset_category_references(
           )
         "#,
     )
-    .bind(laboratory_id)
+    .bind(*laboratory_id)
     .bind(root_path)
     .execute(transaction.as_mut())
     .await
@@ -161,7 +172,7 @@ async fn clear_asset_category_references(
 )]
 async fn delete_asset_category_tree(
     transaction: &mut Transaction<'_, Postgres>,
-    laboratory_id: Uuid,
+    laboratory_id: LaboratoryId,
     root_path: &str,
 ) -> Result<(), DeleteAssetCategoryError> {
     sqlx::query(
@@ -171,7 +182,7 @@ async fn delete_asset_category_tree(
           AND path <@ $2::text::ltree
         "#,
     )
-    .bind(laboratory_id)
+    .bind(*laboratory_id)
     .bind(root_path)
     .execute(transaction.as_mut())
     .await

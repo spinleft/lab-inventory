@@ -126,12 +126,16 @@ impl Actor {
         self.is_super_admin() || self.is_root()
     }
 
-    pub fn can_write_laboratory_resource(&self, laboratory_id: LaboratoryId) -> bool {
+    pub fn can_read_laboratory_resource(&self, laboratory_id: &LaboratoryId) -> bool {
+        self.is_root() || self.is_super_admin() || self.laboratory_id == Some(*laboratory_id)
+    }
+
+    pub fn can_write_laboratory_resource(&self, laboratory_id: &LaboratoryId) -> bool {
         // Guest users cannot write
         if self.is_guest() {
             return false;
         }
-        self.laboratory_id == Some(laboratory_id) || self.is_admin()
+        self.is_root() || self.is_super_admin() || self.laboratory_id == Some(*laboratory_id)
     }
 }
 

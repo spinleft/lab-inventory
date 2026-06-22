@@ -1,6 +1,7 @@
 import {
   Activity,
   Building2,
+  FolderTree,
   Gauge,
   KeyRound,
   ScrollText,
@@ -10,9 +11,14 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { type ReactNode } from "react";
+import { AssetCategoriesPage } from "../modules/admin/AssetCategoriesPage";
 import { AdminHomePage, LaboratoriesPage, UsersPage } from "../modules/admin/AdminPages";
 import { AuditLogsPage } from "../modules/audit/AuditLogsPage";
-import { canAccessAdmin, canAccessAuditLogs } from "../modules/auth/permissions";
+import {
+  canAccessAdmin,
+  canAccessAuditLogs,
+  canManageAssetCategories,
+} from "../modules/auth/permissions";
 import { type CurrentUser } from "../modules/auth/types";
 import { DashboardPage } from "../modules/dashboard/DashboardPage";
 import { PasswordPage, ProfilePage, PreferencesPage } from "../modules/profile/ProfilePages";
@@ -78,6 +84,13 @@ export const appModules: FrontendModule[] = [
         path: "/admin/users",
         title: "用户",
       },
+      {
+        canAccess: canManageAssetCategories,
+        group: "admin",
+        icon: FolderTree,
+        path: "/admin/asset-categories",
+        title: "资产分类",
+      },
     ],
     commands: [
       {
@@ -92,10 +105,16 @@ export const appModules: FrontendModule[] = [
         path: "/admin/users",
         title: "管理用户",
       },
+      {
+        canAccess: canManageAssetCategories,
+        icon: FolderTree,
+        path: "/admin/asset-categories",
+        title: "管理资产分类",
+      },
     ],
     routes: [
       {
-        canAccess: canAccessAdmin,
+        canAccess: canManageAssetCategories,
         element: <AdminHomePage />,
         id: "admin.index",
         path: "/admin",
@@ -114,6 +133,13 @@ export const appModules: FrontendModule[] = [
         id: "admin.users",
         path: "/admin/users",
         title: "用户",
+      },
+      {
+        canAccess: canManageAssetCategories,
+        element: <AssetCategoriesPage />,
+        id: "admin.asset-categories",
+        path: "/admin/asset-categories",
+        title: "资产分类",
       },
     ],
   },

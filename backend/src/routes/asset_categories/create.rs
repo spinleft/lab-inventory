@@ -1,16 +1,16 @@
 use super::model::{
-    AssetCategoryResponse, AssetCategoryRow, can_write_laboratory_categories,
+    AssetCategoryResponse, AssetCategoryRow,
     create_asset_category_rollback_details, fetch_asset_category_for_update, map_database_conflict,
 };
-use crate::access_control::get_actor;
+use crate::access_control::{Actor, get_actor};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{AssetCategoryCode, AssetCategoryId, AssetCategoryName, NewAssetCategory};
 use crate::domain::{LaboratoryId, UserId};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
-use anyhow::Context;
 use serde::Deserialize;
+use anyhow::Context;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
@@ -86,31 +86,16 @@ pub async fn create_asset_category(
         .ok_or(CreateAssetCategoryError::Forbidden(
             "Actor not found in the database".into(),
         ))?;
-    if !can_write_laboratory_categories(&actor, laboratory_id) {
-        return Err(CreateAssetCategoryError::Forbidden(
-            "You don't have permission to create asset categories for this laboratory.".into(),
-        ));
-    }
-
     let new_category = NewAssetCategory::try_from(payload.into_inner())
         .map_err(CreateAssetCategoryError::ValidationError)?;
+    validate_create_permission(&actor, &laboratory_id)?;
 
     let mut transaction = pool
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
     let parent = fetch_parent_category(&mut transaction, new_category.parent_category_id).await?;
-    if let Some(parent) = &parent {
-        if LaboratoryId::parse(parent.laboratory_id)
-            .map_err(CreateAssetCategoryError::ValidationError)?
-            != laboratory_id
-        {
-            return Err(CreateAssetCategoryError::ValidationError(
-                "Parent category does not belong to this laboratory".into(),
-            ));
-        }
-    }
-
+    validate_parent(&parent, &laboratory_id)?;
     let parent_category_id = new_category.parent_category_id;
     let (path, depth) = build_path_and_depth(parent.as_ref(), new_category.code.as_ref());
     let category = insert_asset_category(
@@ -137,9 +122,19 @@ pub async fn create_asset_category(
     transaction
         .commit()
         .await
-        .context("Failed to commit SQL transaction to store a new asset category.")?;
+        .context("Failed to commit SQL transaction to store a new user.")?;
 
     Ok(HttpResponse::Created().json(AssetCategoryResponse::from(category)))
+}
+
+fn validate_create_permission(actor: &Actor, target_laboratory_id: &LaboratoryId) -> Result<(), CreateAssetCategoryError> {
+    if actor.can_write_laboratory_resource(target_laboratory_id) {
+        Ok(())
+    } else {
+        Err(CreateAssetCategoryError::Forbidden(
+            "You don't have permission to create asset categories for this laboratory.".into(),
+        ))
+    }
 }
 
 async fn fetch_parent_category(
@@ -156,6 +151,20 @@ async fn fetch_parent_category(
             "Parent category not found".into(),
         ))
         .map(Some)
+}
+
+fn validate_parent(parent: &Option<AssetCategoryRow>, laboratory_id: &LaboratoryId) -> Result<(), CreateAssetCategoryError> {
+    if let Some(parent) = parent {
+        if &LaboratoryId::parse(parent.laboratory_id)
+            .map_err(CreateAssetCategoryError::ValidationError)?
+            != laboratory_id
+        {
+            return Err(CreateAssetCategoryError::ValidationError(
+                "Parent category does not belong to this laboratory".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn build_path_and_depth(parent: Option<&AssetCategoryRow>, code: &str) -> (String, i32) {
