@@ -3,6 +3,7 @@ mod auth;
 mod health_check;
 mod helpers;
 mod laboratories;
+mod locations;
 mod migrations;
 mod query_export_audit;
 mod test_user;

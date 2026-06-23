@@ -94,33 +94,6 @@ CREATE TABLE idempotency (
    PRIMARY KEY(user_id, idempotency_key)
 );
 
-CREATE TABLE units (
-    unit_id uuid PRIMARY KEY,
-    code TEXT NOT NULL UNIQUE,
-    name TEXT NOT NULL,
-    symbol TEXT NOT NULL,
-    dimension TEXT NOT NULL,
-    scale_to_base DOUBLE PRECISION NOT NULL,
-    allow_decimal BOOLEAN NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    CHECK (code <> ''),
-    CHECK (name <> ''),
-    CHECK (symbol <> ''),
-    CHECK (dimension IN ('count', 'length', 'mass', 'volume')),
-    CHECK (scale_to_base > 0)
-);
-
-INSERT INTO units (unit_id, code, name, symbol, dimension, scale_to_base, allow_decimal)
-VALUES
-    ('a7b2f3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c', 'pcs', 'Pieces', 'pcs', 'count', 1, false),
-    ('c8d9e0f1-a2b3-4c5d-6e7f-8a9b0c1d2e3f', 'm', 'Meter', 'm', 'length', 1, true),
-    ('d9eaf102-b3c4-5d6e-7f8a-9b0c1d2e3f4a', 'cm', 'Centimeter', 'cm', 'length', 0.01, true),
-    ('eab02f03-c4d5-6e7f-8a9b-0c1d2e3f4a5b', 'mm', 'Millimeter', 'mm', 'length', 0.001, true),
-    ('fbc03a04-d5e6-7f8a-9b0c-1d2e3f4a5b6c', 'kg', 'Kilogram', 'kg', 'mass', 1, true),
-    ('0cd04b05-e6f7-8a9b-0c1d-2e3f4a5b6c7d', 'g', 'Gram', 'g', 'mass', 0.001, true),
-    ('0de05c06-f708-9a0b-1c2d-3e4f5a6b7c8d', 'l', 'Liter', 'l', 'volume', 1, true),
-    ('1ef06d07-a809-0b1c-2d3e-4f5a6b7c8d9e', 'ml', 'Milliliter', 'ml', 'volume', 0.001, true);
-
 CREATE EXTENSION IF NOT EXISTS ltree;
 
 CREATE TABLE asset_categories (
@@ -161,43 +134,55 @@ ON asset_categories USING gist(path);
 
 CREATE TABLE locations (
     location_id uuid PRIMARY KEY,
-    laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id),
-    parent_location_id uuid REFERENCES locations (location_id),
-    name TEXT NOT NULL,
-    description TEXT,
-    is_active BOOLEAN NOT NULL DEFAULT true,
+    laboratory_id uuid NOT NULL REFERENCES laboratories(laboratory_id),
+    parent_location_id uuid REFERENCES locations(location_id),
+    name text NOT NULL,
+    code text NOT NULL,
+    path ltree NOT NULL,
+    depth integer NOT NULL,
+    description text,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
+
     CHECK (name <> ''),
-    CHECK (parent_location_id IS NULL OR parent_location_id <> location_id)
+    CHECK (code ~ '^[a-z][a-z0-9_]{0,63}$')
 );
 
-CREATE UNIQUE INDEX idx_locations_unique_sibling_name
-    ON locations (laboratory_id, COALESCE(parent_location_id, '00000000-0000-0000-0000-000000000000'::uuid), name);
-CREATE INDEX idx_locations_laboratory_id ON locations (laboratory_id);
-CREATE INDEX idx_locations_parent_location_id ON locations (parent_location_id);
+CREATE UNIQUE INDEX uq_locations_sibling_name
+ON locations (
+    laboratory_id,
+    COALESCE(parent_location_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    name
+);
+
+CREATE UNIQUE INDEX uq_locations_sibling_code
+ON locations (
+    laboratory_id,
+    COALESCE(parent_location_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    code
+);
+
+CREATE UNIQUE INDEX uq_locations_path
+ON locations(laboratory_id, path);
+
+CREATE INDEX idx_locations_path_gist
+ON locations USING gist(path);
 
 CREATE TABLE assets (
     asset_id uuid PRIMARY KEY,
     laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id),
     category_id uuid REFERENCES asset_categories (category_id),
-    asset_kind TEXT NOT NULL,
     tracking_mode TEXT NOT NULL,
     name TEXT NOT NULL,
     model TEXT,
     manufacturer TEXT,
     default_unit_id uuid NOT NULL REFERENCES units (unit_id),
-    minimum_stock_quantity DOUBLE PRECISION,
-    minimum_stock_unit_id uuid REFERENCES units (unit_id),
     public_notes TEXT,
     internal_notes TEXT,
     is_archived BOOLEAN NOT NULL DEFAULT false,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
-    CHECK (asset_kind IN ('equipment', 'material', 'other')),
     CHECK (tracking_mode IN ('serialized', 'quantity')),
-    CHECK (minimum_stock_quantity IS NULL OR minimum_stock_quantity >= 0),
-    CHECK ((minimum_stock_quantity IS NULL) = (minimum_stock_unit_id IS NULL)),
     CHECK (tracking_mode = 'quantity' OR minimum_stock_quantity IS NULL),
     CHECK (name <> '')
 );
@@ -207,9 +192,163 @@ CREATE UNIQUE INDEX idx_assets_unique_laboratory_name_model
 CREATE INDEX idx_assets_laboratory_id ON assets (laboratory_id);
 CREATE INDEX idx_assets_category_id ON assets (category_id);
 CREATE INDEX idx_assets_default_unit_id ON assets (default_unit_id);
-CREATE INDEX idx_assets_minimum_stock_unit_id ON assets (minimum_stock_unit_id);
 CREATE INDEX idx_assets_search_trgm
     ON assets USING gin ((name || ' ' || COALESCE(model, '') || ' ' || COALESCE(manufacturer, '')) gin_trgm_ops);
+
+
+CREATE TABLE unit_dimensions (
+    code text PRIMARY KEY,
+    name text NOT NULL,
+    description text,
+    CHECK (code ~ '^[a-z][a-z0-9_]{0,63}$'),
+    CHECK (name <> '')
+);
+
+INSERT INTO unit_dimensions (code, name)
+VALUES
+  ('count', '数量'),
+  ('length', '长度'),
+  ('area', '面积'),
+  ('volume', '体积'),
+  ('mass', '质量'),
+  ('time', '时间'),
+  ('temperature', '温度'),
+  ('current', '电流'),
+  ('luminous_intensity', '光强'),
+  ('frequency', '频率'),
+  ('power', '功率'),
+  ('pressure', '压力'),
+  ('energy', '能量'),
+  ('force', '力'),
+  ('torque', '扭矩'),
+  ('density', '密度');
+
+
+CREATE TABLE units (
+    unit_id uuid PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    dimension TEXT NOT NULL REFERENCES unit_dimensions(code),
+    scale_to_base DOUBLE PRECISION NOT NULL,
+    allow_decimal BOOLEAN NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (code <> ''),
+    CHECK (name <> ''),
+    CHECK (symbol <> ''),
+    CHECK (scale_to_base > 0)
+);
+
+INSERT INTO units (unit_id, code, name, symbol, dimension, scale_to_base, allow_decimal)
+VALUES
+  (gen_random_uuid(), 'm', 'Meter', 'm', 'length', 1, true),
+  (gen_random_uuid(), 'cm', 'Centimeter', 'cm', 'length', 0.01, true),
+  (gen_random_uuid(), 'mm', 'Millimeter', 'mm', 'length', 0.001, true),
+  (gen_random_uuid(), 'inch', 'Inch', 'in', 'length', 0.0254, true);
+
+CREATE TYPE asset_parameter_data_type AS ENUM (
+  'text',
+  'number',
+  'boolean',
+  'date',
+  'enum'
+);
+
+CREATE TABLE asset_parameter_types (
+    parameter_type_id uuid PRIMARY KEY,
+    laboratory_id uuid NOT NULL REFERENCES laboratories(laboratory_id),
+    code text NOT NULL,
+    name text NOT NULL,
+    data_type asset_parameter_data_type NOT NULL,
+    unit_dimension text REFERENCES unit_dimensions(code),
+    default_unit_id uuid REFERENCES units(unit_id),
+    description text,
+    is_archived boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+
+    UNIQUE (laboratory_id, code),
+    UNIQUE (parameter_type_id, data_type),
+    CHECK (code ~ '^[a-z][a-z0-9_]{0,63}$'),
+    CHECK (name <> '')
+    CHECK (
+      (data_type = 'number')
+      OR (unit_dimension IS NULL AND default_unit_id IS NULL)
+    )
+);
+
+CREATE TABLE asset_parameter_options (
+    option_id uuid PRIMARY KEY,
+    parameter_type_id uuid NOT NULL REFERENCES asset_parameter_types(parameter_type_id) ON DELETE CASCADE,
+    code text NOT NULL,
+    label text NOT NULL,
+    sort_order integer NOT NULL DEFAULT 0,
+    is_archived boolean NOT NULL DEFAULT false,
+
+    UNIQUE (parameter_type_id, code),
+    UNIQUE (parameter_type_id, option_id),
+    CHECK (code <> ''),
+    CHECK (label <> '')
+);
+
+CREATE TABLE asset_parameter_assignments (
+    assignment_id uuid PRIMARY KEY,
+    laboratory_id uuid NOT NULL REFERENCES laboratories(laboratory_id),
+    parameter_type_id uuid NOT NULL REFERENCES asset_parameter_types(parameter_type_id),
+    category_id uuid REFERENCES asset_categories(category_id) ON DELETE CASCADE,
+    asset_id uuid REFERENCES assets(asset_id) ON DELETE CASCADE,
+    applies_to_descendants boolean NOT NULL DEFAULT true,
+    is_required boolean NOT NULL DEFAULT true,
+    sort_order integer NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL DEFAULT now(),
+
+    CHECK ((category_id IS NULL) <> (asset_id IS NULL))
+);
+
+CREATE UNIQUE INDEX uq_asset_param_assignment_category
+ON asset_parameter_assignments(category_id, parameter_type_id)
+WHERE category_id IS NOT NULL;
+
+CREATE UNIQUE INDEX uq_asset_param_assignment_asset
+ON asset_parameter_assignments(asset_id, parameter_type_id)
+WHERE asset_id IS NOT NULL;
+
+CREATE TABLE asset_parameter_values (
+    value_id uuid PRIMARY KEY,
+    laboratory_id uuid NOT NULL REFERENCES laboratories(laboratory_id),
+    asset_id uuid NOT NULL REFERENCES assets(asset_id) ON DELETE CASCADE,
+    parameter_type_id uuid NOT NULL,
+    data_type asset_parameter_data_type NOT NULL,
+
+    value_text text,
+    value_number double precision,
+    value_number_base double precision,
+    unit_id uuid REFERENCES units(unit_id),
+    value_boolean boolean,
+    value_date date,
+    value_option_id uuid,
+
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+
+    UNIQUE (asset_id, parameter_type_id),
+    FOREIGN KEY (parameter_type_id, data_type)
+        REFERENCES asset_parameter_types(parameter_type_id, data_type),
+    FOREIGN KEY (parameter_type_id, value_option_id)
+        REFERENCES asset_parameter_options(parameter_type_id, option_id),
+
+    CHECK (
+      (data_type = 'text' AND value_text IS NOT NULL AND value_number IS NULL AND value_boolean IS NULL AND value_date IS NULL AND value_option_id IS NULL)
+      OR
+      (data_type = 'number' AND value_number IS NOT NULL AND value_text IS NULL AND value_boolean IS NULL AND value_date IS NULL AND value_option_id IS NULL)
+      OR
+      (data_type = 'boolean' AND value_boolean IS NOT NULL AND value_text IS NULL AND value_number IS NULL AND value_date IS NULL AND value_option_id IS NULL)
+      OR
+      (data_type = 'date' AND value_date IS NOT NULL AND value_text IS NULL AND value_number IS NULL AND value_boolean IS NULL AND value_option_id IS NULL)
+      OR
+      (data_type = 'enum' AND value_option_id IS NOT NULL AND value_text IS NULL AND value_number IS NULL AND value_boolean IS NULL AND value_date IS NULL)
+    )
+);
 
 CREATE TABLE asset_inventory_items (
     inventory_item_id uuid PRIMARY KEY,

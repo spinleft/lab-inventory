@@ -1,0 +1,356 @@
+use super::model::{
+    LocationResponse, LocationRow, fetch_location_for_update, map_database_conflict,
+    update_location_rollback_details,
+};
+use crate::access_control::{Actor, get_actor};
+use crate::audit::{AuditAction, AuditResource, record_audit};
+use crate::domain::{
+    LaboratoryId, LocationCode, LocationId, LocationName, NullableUpdate, UpdateLocation, UserId,
+};
+use crate::utils::error_chain_fmt;
+use actix_web::http::StatusCode;
+use actix_web::{HttpResponse, ResponseError, web};
+use anyhow::Context;
+use serde::{Deserialize, Deserializer};
+use sqlx::{PgPool, Postgres, Transaction};
+use uuid::Uuid;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JsonData {
+    #[serde(default, deserialize_with = "deserialize_nullable")]
+    parent_location_id: Option<Option<Uuid>>,
+    name: Option<String>,
+    code: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_nullable")]
+    description: Option<Option<String>>,
+}
+
+impl TryFrom<JsonData> for UpdateLocation {
+    type Error = String;
+
+    fn try_from(value: JsonData) -> Result<Self, Self::Error> {
+        let parent_location_id =
+            parse_nullable_update(value.parent_location_id, LocationId::parse)?;
+        let name = value.name.map(LocationName::parse).transpose()?;
+        let code = value.code.map(LocationCode::parse).transpose()?;
+        let description = match value.description {
+            Some(Some(description)) => NullableUpdate::Set(description),
+            Some(None) => NullableUpdate::Clear,
+            None => NullableUpdate::Unchanged,
+        };
+
+        Ok(Self::new(parent_location_id, name, code, description))
+    }
+}
+
+fn deserialize_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+fn parse_nullable_update<T, V>(
+    value: Option<Option<V>>,
+    parse: impl FnOnce(V) -> Result<T, String>,
+) -> Result<NullableUpdate<T>, String> {
+    match value {
+        Some(Some(value)) => parse(value).map(NullableUpdate::Set),
+        Some(None) => Ok(NullableUpdate::Clear),
+        None => Ok(NullableUpdate::Unchanged),
+    }
+}
+
+#[derive(thiserror::Error)]
+pub enum UpdateLocationError {
+    #[error("{0}")]
+    ValidationError(String),
+    #[error("{0}")]
+    Forbidden(String),
+    #[error("{0}")]
+    NotFound(String),
+    #[error("{0}")]
+    ConflictError(String),
+    #[error(transparent)]
+    UnexpectedError(#[from] anyhow::Error),
+}
+
+impl std::fmt::Debug for UpdateLocationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+impl ResponseError for UpdateLocationError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            UpdateLocationError::ValidationError(_) => StatusCode::BAD_REQUEST,
+            UpdateLocationError::Forbidden(_) => StatusCode::FORBIDDEN,
+            UpdateLocationError::NotFound(_) => StatusCode::NOT_FOUND,
+            UpdateLocationError::ConflictError(_) => StatusCode::CONFLICT,
+            UpdateLocationError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+#[tracing::instrument(
+    name = "Update a location",
+    skip(pool, payload),
+    fields(actor_user_id=%actor_user_id, location_id=%location_id)
+)]
+pub async fn update_location(
+    actor_user_id: UserId,
+    pool: web::Data<PgPool>,
+    location_id: web::Path<LocationId>,
+    payload: web::Json<JsonData>,
+) -> Result<HttpResponse, UpdateLocationError> {
+    let actor = get_actor(&pool, actor_user_id)
+        .await
+        .map_err(UpdateLocationError::UnexpectedError)?
+        .ok_or(UpdateLocationError::Forbidden(
+            "Actor not found in the database".into(),
+        ))?;
+    let update_location = UpdateLocation::try_from(payload.into_inner())
+        .map_err(UpdateLocationError::ValidationError)?;
+
+    let mut transaction = pool
+        .begin()
+        .await
+        .context("Failed to acquire a Postgres connection from the pool")?;
+    let existing = fetch_location_for_update(&mut transaction, *location_id)
+        .await?
+        .ok_or(UpdateLocationError::NotFound("Location not found".into()))?;
+    let laboratory_id = LaboratoryId::parse(existing.laboratory_id)
+        .map_err(|e| UpdateLocationError::UnexpectedError(anyhow::anyhow!("{e}")))?;
+    validate_update_permission(&actor, &laboratory_id)?;
+
+    let name = update_location
+        .name
+        .as_ref()
+        .map(|name| name.as_ref())
+        .unwrap_or(&existing.name)
+        .to_string();
+    let code = update_location
+        .code
+        .as_ref()
+        .map(|code| code.as_ref())
+        .unwrap_or(&existing.code)
+        .to_string();
+    let current_parent_location_id = existing
+        .parent_location_id
+        .map(LocationId::parse)
+        .transpose()
+        .map_err(UpdateLocationError::ValidationError)?;
+    let parent_location_id = update_location
+        .parent_location_id
+        .resolve(current_parent_location_id);
+    let description = update_location
+        .description
+        .resolve(existing.description.clone());
+
+    let parent: Option<LocationRow> =
+        fetch_new_parent(&mut transaction, &existing, parent_location_id).await?;
+    let (path, depth) = build_path_and_depth(parent.as_ref(), &code);
+    let updated = update_location_in_database(
+        &mut transaction,
+        existing.location_id,
+        parent_location_id.map(Uuid::from),
+        &name,
+        &code,
+        &path,
+        depth,
+        description.as_deref(),
+    )
+    .await?;
+
+    if updated.path != existing.path || updated.depth != existing.depth {
+        update_descendant_paths(
+            &mut transaction,
+            existing.laboratory_id,
+            existing.location_id,
+            &existing.path,
+            &updated.path,
+        )
+        .await?;
+    }
+
+    record_audit(
+        &mut transaction,
+        &actor,
+        AuditAction::Update,
+        AuditResource::Location,
+        Some(updated.location_id),
+        update_location_rollback_details(&existing),
+    )
+    .await?;
+    transaction
+        .commit()
+        .await
+        .context("Failed to commit SQL transaction to update a location.")?;
+
+    Ok(HttpResponse::Ok().json(LocationResponse::from(updated)))
+}
+
+fn validate_update_permission(
+    actor: &Actor,
+    target_laboratory_id: &LaboratoryId,
+) -> Result<(), UpdateLocationError> {
+    if actor.can_write_laboratory_resource(target_laboratory_id) {
+        Ok(())
+    } else {
+        Err(UpdateLocationError::Forbidden(
+            "You don't have permission to update locations for this laboratory.".into(),
+        ))
+    }
+}
+
+async fn fetch_new_parent(
+    transaction: &mut Transaction<'_, Postgres>,
+    existing: &LocationRow,
+    parent_location_id: Option<LocationId>,
+) -> Result<Option<LocationRow>, UpdateLocationError> {
+    let Some(parent_location_id) = parent_location_id else {
+        return Ok(None);
+    };
+    if Uuid::from(parent_location_id) == existing.location_id {
+        return Err(UpdateLocationError::ValidationError(
+            "Location cannot be moved under itself".into(),
+        ));
+    }
+
+    let parent = fetch_location_for_update(transaction, parent_location_id)
+        .await?
+        .ok_or(UpdateLocationError::ValidationError(
+            "Parent location not found".into(),
+        ))?;
+    if parent.laboratory_id != existing.laboratory_id {
+        return Err(UpdateLocationError::ValidationError(
+            "Parent location does not belong to this laboratory".into(),
+        ));
+    }
+    if path_is_self_or_descendant(&parent.path, &existing.path) {
+        return Err(UpdateLocationError::ValidationError(
+            "Location cannot be moved under one of its descendants".into(),
+        ));
+    }
+
+    Ok(Some(parent))
+}
+
+fn path_is_self_or_descendant(candidate_path: &str, root_path: &str) -> bool {
+    candidate_path == root_path
+        || candidate_path
+            .strip_prefix(root_path)
+            .is_some_and(|suffix| suffix.starts_with('.'))
+}
+
+fn build_path_and_depth(parent: Option<&LocationRow>, code: &str) -> (String, i32) {
+    match parent {
+        Some(parent) => (format!("{}.{}", parent.path, code), parent.depth + 1),
+        None => (code.to_string(), 0),
+    }
+}
+
+#[tracing::instrument(
+    name = "Updating location in the database",
+    skip(transaction, name, code, path, description),
+    fields(location_id=%location_id)
+)]
+async fn update_location_in_database(
+    transaction: &mut Transaction<'_, Postgres>,
+    location_id: Uuid,
+    parent_location_id: Option<Uuid>,
+    name: &str,
+    code: &str,
+    path: &str,
+    depth: i32,
+    description: Option<&str>,
+) -> Result<LocationRow, UpdateLocationError> {
+    sqlx::query_as!(
+        LocationRow,
+        r#"
+        UPDATE locations
+        SET
+            parent_location_id = $2,
+            name = $3,
+            code = $4,
+            path = $5::text::ltree,
+            depth = $6,
+            description = $7,
+            updated_at = now()
+        WHERE location_id = $1
+        RETURNING
+            location_id,
+            laboratory_id,
+            parent_location_id,
+            name,
+            code,
+            path::text AS "path!",
+            depth,
+            description,
+            created_at,
+            updated_at
+        "#,
+        location_id,
+        parent_location_id,
+        name,
+        code,
+        path,
+        depth,
+        description,
+    )
+    .fetch_one(transaction.as_mut())
+    .await
+    .map_err(map_database_error)
+}
+
+#[tracing::instrument(
+    name = "Updating location descendant paths in the database",
+    skip(transaction, old_path, new_path),
+    fields(laboratory_id=%laboratory_id, location_id=%location_id)
+)]
+async fn update_descendant_paths(
+    transaction: &mut Transaction<'_, Postgres>,
+    laboratory_id: Uuid,
+    location_id: Uuid,
+    old_path: &str,
+    new_path: &str,
+) -> Result<(), UpdateLocationError> {
+    sqlx::query(
+        r#"
+        UPDATE locations
+        SET
+            path = ($2::text::ltree || subpath(path, nlevel($3::text::ltree))),
+            depth = nlevel($2::text::ltree || subpath(path, nlevel($3::text::ltree))) - 1,
+            updated_at = now()
+        WHERE laboratory_id = $1
+          AND path <@ $3::text::ltree
+          AND location_id <> $4
+        "#,
+    )
+    .bind(laboratory_id)
+    .bind(new_path)
+    .bind(old_path)
+    .bind(location_id)
+    .execute(transaction.as_mut())
+    .await
+    .map_err(map_database_error)?;
+
+    Ok(())
+}
+
+fn map_database_error(error: sqlx::Error) -> UpdateLocationError {
+    if let Some(message) = map_database_conflict(
+        &error,
+        "Location name already exists under this parent",
+        "Location code already exists under this parent",
+        "Location path already exists",
+        "Location already exists",
+    ) {
+        return UpdateLocationError::ConflictError(message);
+    }
+
+    UpdateLocationError::UnexpectedError(error.into())
+}

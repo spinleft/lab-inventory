@@ -1,10 +1,11 @@
 use crate::authentication::reject_anonymous_users;
 use crate::configuration::{ApplicationSettings, DatabaseSettings, Settings};
 use crate::routes::{
-    change_password, create_asset_category, create_laboratory, create_user, delete_asset_category,
-    delete_laboratory, delete_user, get_asset_category, get_laboratory, get_user, health_check,
-    list_asset_categories, list_audit_logs, list_laboratories, list_users, login, logout, me,
-    update_asset_category, update_laboratory, update_user,
+    change_password, create_asset_category, create_laboratory, create_location, create_user,
+    delete_asset_category, delete_laboratory, delete_location, delete_user, get_asset_category,
+    get_laboratory, get_location, get_user, health_check, list_asset_categories, list_audit_logs,
+    list_laboratories, list_locations, list_users, login, logout, me, update_asset_category,
+    update_laboratory, update_location, update_user,
 };
 use actix_cors::Cors;
 use actix_session::SessionMiddleware;
@@ -163,6 +164,14 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                         web::post().to(create_asset_category),
                     )
                     .route(
+                        "/laboratories/{laboratory_id}/locations",
+                        web::get().to(list_locations),
+                    )
+                    .route(
+                        "/laboratories/{laboratory_id}/locations",
+                        web::post().to(create_location),
+                    )
+                    .route(
                         "/laboratories/{laboratory_id}",
                         web::get().to(get_laboratory),
                     )
@@ -190,6 +199,12 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                     .route(
                         "/asset-categories/{category_id}",
                         web::delete().to(delete_asset_category),
+                    )
+                    .route("/locations/{location_id}", web::get().to(get_location))
+                    .route("/locations/{location_id}", web::patch().to(update_location))
+                    .route(
+                        "/locations/{location_id}",
+                        web::delete().to(delete_location),
                     ),
             ),
     );

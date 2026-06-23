@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assetCategorySchema, optionalText, userSchema } from "./api";
+import { assetCategorySchema, locationSchema, optionalText, userSchema } from "./api";
 
 describe("admin api schemas", () => {
   it("parses phone_number from backend users", () => {
@@ -40,5 +40,22 @@ describe("admin api schemas", () => {
         updated_at: "2026-06-17T00:00:00Z",
       }).path,
     ).toBe("microscope");
+  });
+
+  it("parses locations from the backend", () => {
+    expect(
+      locationSchema.parse({
+        code: "room101",
+        created_at: "2026-06-17T00:00:00Z",
+        depth: 0,
+        description: "Room 101",
+        laboratory_id: "00000000-0000-4000-8000-000000000011",
+        location_id: "00000000-0000-4000-8000-000000000041",
+        name: "101 室",
+        parent_location_id: null,
+        path: "room101",
+        updated_at: "2026-06-17T00:00:00Z",
+      }).path,
+    ).toBe("room101");
   });
 });

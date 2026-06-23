@@ -41,6 +41,14 @@ export function canSelectAssetCategoryLaboratory(user: CurrentUser) {
   return isRoot(user) || isSuperAdmin(user);
 }
 
+export function canManageLocations(user: CurrentUser) {
+  return canManageAssetCategories(user);
+}
+
+export function canSelectLocationLaboratory(user: CurrentUser) {
+  return canSelectAssetCategoryLaboratory(user);
+}
+
 export function canManageLaboratories(user: CurrentUser) {
   return isRoot(user) || isSuperAdmin(user);
 }

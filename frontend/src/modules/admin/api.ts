@@ -31,6 +31,21 @@ export const assetCategorySchema = z.object({
 
 const assetCategoriesSchema = z.array(assetCategorySchema);
 
+export const locationSchema = z.object({
+  location_id: z.string().uuid(),
+  laboratory_id: z.string().uuid(),
+  parent_location_id: z.string().uuid().nullable(),
+  name: z.string(),
+  code: z.string(),
+  path: z.string(),
+  depth: z.number(),
+  description: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+const locationsSchema = z.array(locationSchema);
+
 export const userSchema = z.object({
   user_id: z.string().uuid(),
   username: z.string(),
@@ -54,6 +69,7 @@ const usersSchema = z.array(userSchema);
 
 export type Laboratory = z.infer<typeof laboratorySchema>;
 export type AssetCategory = z.infer<typeof assetCategorySchema>;
+export type Location = z.infer<typeof locationSchema>;
 export type AdminUser = z.infer<typeof userSchema>;
 
 export type LaboratoryPayload = {
@@ -65,6 +81,13 @@ export type LaboratoryPayload = {
 
 export type AssetCategoryPayload = {
   parent_category_id: string | null;
+  name: string;
+  code: string;
+  description: string | null;
+};
+
+export type LocationPayload = {
+  parent_location_id: string | null;
   name: string;
   code: string;
   description: string | null;
@@ -91,6 +114,8 @@ export const adminQueryKeys = {
   assetCategories: (apiBaseUrl: string, laboratoryId: string) =>
     ["admin", "asset-categories", apiBaseUrl, laboratoryId] as const,
   laboratories: (apiBaseUrl: string) => ["admin", "laboratories", apiBaseUrl] as const,
+  locations: (apiBaseUrl: string, laboratoryId: string) =>
+    ["admin", "locations", apiBaseUrl, laboratoryId] as const,
   users: (apiBaseUrl: string) => ["admin", "users", apiBaseUrl] as const,
 };
 
@@ -135,6 +160,27 @@ export function useAssetCategories({
       const client = createApiClient(apiBaseUrl);
       return assetCategoriesSchema.parse(
         await client.get(`/laboratories/${laboratoryId}/asset-categories`),
+      );
+    },
+  });
+}
+
+export function useLocations({
+  enabled = true,
+  laboratoryId,
+}: {
+  enabled?: boolean;
+  laboratoryId: string;
+}) {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useQuery({
+    enabled: enabled && Boolean(laboratoryId),
+    queryKey: adminQueryKeys.locations(apiBaseUrl, laboratoryId),
+    queryFn: async () => {
+      const client = createApiClient(apiBaseUrl);
+      return locationsSchema.parse(
+        await client.get(`/laboratories/${laboratoryId}/locations`),
       );
     },
   });
@@ -226,6 +272,53 @@ export function useDeleteAssetCategory() {
     mutationFn: async (categoryId: string) => {
       const client = createApiClient(apiBaseUrl);
       await client.delete(`/asset-categories/${categoryId}`);
+    },
+  });
+}
+
+export function useCreateLocation() {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useMutation({
+    mutationFn: async ({
+      laboratoryId,
+      payload,
+    }: {
+      laboratoryId: string;
+      payload: LocationPayload;
+    }) => {
+      const client = createApiClient(apiBaseUrl);
+      return locationSchema.parse(
+        await client.post(`/laboratories/${laboratoryId}/locations`, payload),
+      );
+    },
+  });
+}
+
+export function useUpdateLocation() {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useMutation({
+    mutationFn: async ({
+      locationId,
+      payload,
+    }: {
+      locationId: string;
+      payload: LocationPayload;
+    }) => {
+      const client = createApiClient(apiBaseUrl);
+      return locationSchema.parse(await client.patch(`/locations/${locationId}`, payload));
+    },
+  });
+}
+
+export function useDeleteLocation() {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useMutation({
+    mutationFn: async (locationId: string) => {
+      const client = createApiClient(apiBaseUrl);
+      await client.delete(`/locations/${locationId}`);
     },
   });
 }

@@ -4,6 +4,7 @@ import {
   FolderTree,
   Gauge,
   KeyRound,
+  MapPin,
   ScrollText,
   Settings,
   UserRound,
@@ -13,11 +14,13 @@ import {
 import { type ReactNode } from "react";
 import { AssetCategoriesPage } from "../modules/admin/AssetCategoriesPage";
 import { AdminHomePage, LaboratoriesPage, UsersPage } from "../modules/admin/AdminPages";
+import { LocationsPage } from "../modules/admin/LocationsPage";
 import { AuditLogsPage } from "../modules/audit/AuditLogsPage";
 import {
   canAccessAdmin,
   canAccessAuditLogs,
   canManageAssetCategories,
+  canManageLocations,
 } from "../modules/auth/permissions";
 import { type CurrentUser } from "../modules/auth/types";
 import { DashboardPage } from "../modules/dashboard/DashboardPage";
@@ -91,6 +94,13 @@ export const appModules: FrontendModule[] = [
         path: "/admin/asset-categories",
         title: "资产分类",
       },
+      {
+        canAccess: canManageLocations,
+        group: "admin",
+        icon: MapPin,
+        path: "/admin/locations",
+        title: "位置管理",
+      },
     ],
     commands: [
       {
@@ -110,6 +120,12 @@ export const appModules: FrontendModule[] = [
         icon: FolderTree,
         path: "/admin/asset-categories",
         title: "管理资产分类",
+      },
+      {
+        canAccess: canManageLocations,
+        icon: MapPin,
+        path: "/admin/locations",
+        title: "管理位置",
       },
     ],
     routes: [
@@ -140,6 +156,13 @@ export const appModules: FrontendModule[] = [
         id: "admin.asset-categories",
         path: "/admin/asset-categories",
         title: "资产分类",
+      },
+      {
+        canAccess: canManageLocations,
+        element: <LocationsPage />,
+        id: "admin.locations",
+        path: "/admin/locations",
+        title: "位置管理",
       },
     ],
   },
