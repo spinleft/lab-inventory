@@ -1,15 +1,13 @@
-use super::model::{
-    AssetCategoryResponse, AssetCategoryRow, fetch_asset_category,
-};
+use super::model::{AssetCategoryResponse, AssetCategoryRow, fetch_asset_category};
 use crate::access_control::{Actor, get_actor};
 use crate::domain::{AssetCategoryId, LaboratoryId, UserId};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
+use anyhow::anyhow;
 use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
-use anyhow::anyhow;
 
 #[derive(Deserialize)]
 pub struct ListQuery {

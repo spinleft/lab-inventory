@@ -467,12 +467,11 @@ async fn insert_test_asset(app: &TestApp, laboratory_id: Uuid, category_id: Uuid
             asset_id,
             laboratory_id,
             category_id,
-            asset_kind,
             tracking_mode,
             name,
             default_unit_id
         )
-        VALUES ($1, $2, $3, 'equipment', 'quantity', $4, $5)
+        VALUES ($1, $2, $3, 'quantity', $4, $5)
         RETURNING asset_id
         "#,
     )

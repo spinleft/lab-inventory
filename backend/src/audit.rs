@@ -37,6 +37,7 @@ pub enum AuditResource {
     Asset,
     InventoryItem,
     Attachment,
+    Unit,
 }
 
 impl AuditResource {
@@ -49,6 +50,7 @@ impl AuditResource {
             Self::Asset => "asset",
             Self::InventoryItem => "inventory_item",
             Self::Attachment => "attachment",
+            Self::Unit => "unit",
         }
     }
 }

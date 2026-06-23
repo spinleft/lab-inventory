@@ -5,6 +5,7 @@ import {
   Gauge,
   KeyRound,
   MapPin,
+  Ruler,
   ScrollText,
   Settings,
   UserRound,
@@ -15,12 +16,14 @@ import { type ReactNode } from "react";
 import { AssetCategoriesPage } from "../modules/admin/AssetCategoriesPage";
 import { AdminHomePage, LaboratoriesPage, UsersPage } from "../modules/admin/AdminPages";
 import { LocationsPage } from "../modules/admin/LocationsPage";
+import { UnitsPage } from "../modules/admin/UnitsPage";
 import { AuditLogsPage } from "../modules/audit/AuditLogsPage";
 import {
   canAccessAdmin,
   canAccessAuditLogs,
   canManageAssetCategories,
   canManageLocations,
+  canManageUnits,
 } from "../modules/auth/permissions";
 import { type CurrentUser } from "../modules/auth/types";
 import { DashboardPage } from "../modules/dashboard/DashboardPage";
@@ -101,6 +104,13 @@ export const appModules: FrontendModule[] = [
         path: "/admin/locations",
         title: "位置管理",
       },
+      {
+        canAccess: canManageUnits,
+        group: "admin",
+        icon: Ruler,
+        path: "/admin/units",
+        title: "单位管理",
+      },
     ],
     commands: [
       {
@@ -126,6 +136,12 @@ export const appModules: FrontendModule[] = [
         icon: MapPin,
         path: "/admin/locations",
         title: "管理位置",
+      },
+      {
+        canAccess: canManageUnits,
+        icon: Ruler,
+        path: "/admin/units",
+        title: "管理单位",
       },
     ],
     routes: [
@@ -163,6 +179,13 @@ export const appModules: FrontendModule[] = [
         id: "admin.locations",
         path: "/admin/locations",
         title: "位置管理",
+      },
+      {
+        canAccess: canManageUnits,
+        element: <UnitsPage />,
+        id: "admin.units",
+        path: "/admin/units",
+        title: "单位管理",
       },
     ],
   },

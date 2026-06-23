@@ -13,10 +13,10 @@ export default defineConfig({
     strictPort: true,
     host: host || "127.0.0.1",
     hmr: host
-      ? {
+        ? {
           protocol: "ws",
           host,
-          port: 5174,
+          port: 5173,
         }
       : undefined,
     watch: {

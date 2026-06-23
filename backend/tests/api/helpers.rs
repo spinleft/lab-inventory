@@ -271,6 +271,54 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
+    pub async fn post_unit<Body>(&self, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(format!("{}/api/v1/units", &self.address))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_units(&self) -> reqwest::Response {
+        self.api_client
+            .get(format!("{}/api/v1/units", &self.address))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_unit(&self, unit_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .get(format!("{}/api/v1/units/{unit_id}", &self.address))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn patch_unit<Body>(&self, unit_id: Uuid, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .patch(format!("{}/api/v1/units/{unit_id}", &self.address))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn delete_unit(&self, unit_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .delete(format!("{}/api/v1/units/{unit_id}", &self.address))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
     pub async fn post_location<Body>(&self, laboratory_id: Uuid, body: &Body) -> reqwest::Response
     where
         Body: serde::Serialize,

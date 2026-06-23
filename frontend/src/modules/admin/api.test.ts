@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assetCategorySchema, locationSchema, optionalText, userSchema } from "./api";
+import { assetCategorySchema, locationSchema, optionalText, unitSchema, userSchema } from "./api";
 
 describe("admin api schemas", () => {
   it("parses phone_number from backend users", () => {
@@ -57,5 +57,20 @@ describe("admin api schemas", () => {
         updated_at: "2026-06-17T00:00:00Z",
       }).path,
     ).toBe("room101");
+  });
+
+  it("parses units from the backend", () => {
+    expect(
+      unitSchema.parse({
+        allow_decimal: true,
+        code: "mm",
+        created_at: "2026-06-17T00:00:00Z",
+        dimension: "length",
+        name: "Millimeter",
+        scale_to_base: 0.001,
+        symbol: "mm",
+        unit_id: "00000000-0000-4000-8000-000000000051",
+      }).scale_to_base,
+    ).toBe(0.001);
   });
 });

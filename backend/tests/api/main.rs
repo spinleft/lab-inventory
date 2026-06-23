@@ -7,4 +7,5 @@ mod locations;
 mod migrations;
 mod query_export_audit;
 mod test_user;
+mod units;
 mod users;

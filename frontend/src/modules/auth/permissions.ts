@@ -45,6 +45,10 @@ export function canManageLocations(user: CurrentUser) {
   return canManageAssetCategories(user);
 }
 
+export function canManageUnits(user: CurrentUser) {
+  return isRoot(user) || isSuperAdmin(user);
+}
+
 export function canSelectLocationLaboratory(user: CurrentUser) {
   return canSelectAssetCategoryLaboratory(user);
 }

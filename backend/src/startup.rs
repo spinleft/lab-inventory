@@ -1,11 +1,12 @@
 use crate::authentication::reject_anonymous_users;
 use crate::configuration::{ApplicationSettings, DatabaseSettings, Settings};
 use crate::routes::{
-    change_password, create_asset_category, create_laboratory, create_location, create_user,
-    delete_asset_category, delete_laboratory, delete_location, delete_user, get_asset_category,
-    get_laboratory, get_location, get_user, health_check, list_asset_categories, list_audit_logs,
-    list_laboratories, list_locations, list_users, login, logout, me, update_asset_category,
-    update_laboratory, update_location, update_user,
+    change_password, create_asset_category, create_laboratory, create_location, create_unit,
+    create_user, delete_asset_category, delete_laboratory, delete_location, delete_unit,
+    delete_user, get_asset_category, get_laboratory, get_location, get_unit, get_user,
+    health_check, list_asset_categories, list_audit_logs, list_laboratories, list_locations,
+    list_units, list_users, login, logout, me, update_asset_category, update_laboratory,
+    update_location, update_unit, update_user,
 };
 use actix_cors::Cors;
 use actix_session::SessionMiddleware;
@@ -153,6 +154,8 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                     .route("/auth/me", web::get().to(me))
                     .route("/auth/password", web::patch().to(change_password))
                     .route("/audit-logs", web::get().to(list_audit_logs))
+                    .route("/units", web::get().to(list_units))
+                    .route("/units", web::post().to(create_unit))
                     .route("/laboratories", web::post().to(create_laboratory))
                     .route("/laboratories", web::get().to(list_laboratories))
                     .route(
@@ -188,6 +191,9 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                     .route("/users/{target_user_id}", web::get().to(get_user))
                     .route("/users/{target_user_id}", web::patch().to(update_user))
                     .route("/users/{target_user_id}", web::delete().to(delete_user))
+                    .route("/units/{unit_id}", web::get().to(get_unit))
+                    .route("/units/{unit_id}", web::patch().to(update_unit))
+                    .route("/units/{unit_id}", web::delete().to(delete_unit))
                     .route(
                         "/asset-categories/{category_id}",
                         web::get().to(get_asset_category),

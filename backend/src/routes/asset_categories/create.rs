@@ -1,6 +1,6 @@
 use super::model::{
-    AssetCategoryResponse, AssetCategoryRow,
-    create_asset_category_rollback_details, fetch_asset_category_for_update, map_database_conflict,
+    AssetCategoryResponse, AssetCategoryRow, create_asset_category_rollback_details,
+    fetch_asset_category_for_update, map_database_conflict,
 };
 use crate::access_control::{Actor, get_actor};
 use crate::audit::{AuditAction, AuditResource, record_audit};
@@ -9,8 +9,8 @@ use crate::domain::{LaboratoryId, UserId};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
-use serde::Deserialize;
 use anyhow::Context;
+use serde::Deserialize;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
@@ -127,7 +127,10 @@ pub async fn create_asset_category(
     Ok(HttpResponse::Created().json(AssetCategoryResponse::from(category)))
 }
 
-fn validate_create_permission(actor: &Actor, target_laboratory_id: &LaboratoryId) -> Result<(), CreateAssetCategoryError> {
+fn validate_create_permission(
+    actor: &Actor,
+    target_laboratory_id: &LaboratoryId,
+) -> Result<(), CreateAssetCategoryError> {
     if actor.can_write_laboratory_resource(target_laboratory_id) {
         Ok(())
     } else {
@@ -153,7 +156,10 @@ async fn fetch_parent_category(
         .map(Some)
 }
 
-fn validate_parent(parent: &Option<AssetCategoryRow>, laboratory_id: &LaboratoryId) -> Result<(), CreateAssetCategoryError> {
+fn validate_parent(
+    parent: &Option<AssetCategoryRow>,
+    laboratory_id: &LaboratoryId,
+) -> Result<(), CreateAssetCategoryError> {
     if let Some(parent) = parent {
         if &LaboratoryId::parse(parent.laboratory_id)
             .map_err(CreateAssetCategoryError::ValidationError)?

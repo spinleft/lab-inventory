@@ -71,15 +71,11 @@ pub async fn delete_asset_category(
         .map_err(|e| DeleteAssetCategoryError::UnexpectedError(anyhow!(e)))?;
     validate_delete_permission(&actor, &laboratory_id)?;
 
-    let categories = fetch_asset_category_tree_for_update(
-        &mut transaction,
-        laboratory_id,
-        &existing.path,
-    )
-    .await?;
-    let cleared_asset_ids =
-        clear_asset_category_references(&mut transaction, laboratory_id, &existing.path)
+    let categories =
+        fetch_asset_category_tree_for_update(&mut transaction, laboratory_id, &existing.path)
             .await?;
+    let cleared_asset_ids =
+        clear_asset_category_references(&mut transaction, laboratory_id, &existing.path).await?;
     delete_asset_category_tree(&mut transaction, laboratory_id, &existing.path).await?;
 
     record_audit(

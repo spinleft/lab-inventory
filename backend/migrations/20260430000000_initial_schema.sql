@@ -129,6 +129,12 @@ ON asset_categories (
 CREATE UNIQUE INDEX uq_asset_categories_path
 ON asset_categories(laboratory_id, path);
 
+INSERT INTO asset_categories (category_id, laboratory_id, parent_category_id, name, code, path, depth)
+VALUES
+    ('8744dc59-e2ff-41e1-9ad8-95eb84ade2e0', '7227c5ab-78ef-43ce-87bc-5ce2337ccfe3', NULL, '光学', 'optical', 'optical', 0),
+    ('71711a23-f348-4409-bb2a-04b67b3bbd80', '7227c5ab-78ef-43ce-87bc-5ce2337ccfe3', '8744dc59-e2ff-41e1-9ad8-95eb84ade2e0', '透镜', 'lens', 'optical.lens', 1);
+
+
 CREATE INDEX idx_asset_categories_path_gist
 ON asset_categories USING gist(path);
 
@@ -167,34 +173,6 @@ ON locations(laboratory_id, path);
 
 CREATE INDEX idx_locations_path_gist
 ON locations USING gist(path);
-
-CREATE TABLE assets (
-    asset_id uuid PRIMARY KEY,
-    laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id),
-    category_id uuid REFERENCES asset_categories (category_id),
-    tracking_mode TEXT NOT NULL,
-    name TEXT NOT NULL,
-    model TEXT,
-    manufacturer TEXT,
-    default_unit_id uuid NOT NULL REFERENCES units (unit_id),
-    public_notes TEXT,
-    internal_notes TEXT,
-    is_archived BOOLEAN NOT NULL DEFAULT false,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    CHECK (tracking_mode IN ('serialized', 'quantity')),
-    CHECK (tracking_mode = 'quantity' OR minimum_stock_quantity IS NULL),
-    CHECK (name <> '')
-);
-
-CREATE UNIQUE INDEX idx_assets_unique_laboratory_name_model
-    ON assets (laboratory_id, name, COALESCE(model, ''));
-CREATE INDEX idx_assets_laboratory_id ON assets (laboratory_id);
-CREATE INDEX idx_assets_category_id ON assets (category_id);
-CREATE INDEX idx_assets_default_unit_id ON assets (default_unit_id);
-CREATE INDEX idx_assets_search_trgm
-    ON assets USING gin ((name || ' ' || COALESCE(model, '') || ' ' || COALESCE(manufacturer, '')) gin_trgm_ops);
-
 
 CREATE TABLE unit_dimensions (
     code text PRIMARY KEY,
@@ -244,7 +222,34 @@ VALUES
   (gen_random_uuid(), 'm', 'Meter', 'm', 'length', 1, true),
   (gen_random_uuid(), 'cm', 'Centimeter', 'cm', 'length', 0.01, true),
   (gen_random_uuid(), 'mm', 'Millimeter', 'mm', 'length', 0.001, true),
-  (gen_random_uuid(), 'inch', 'Inch', 'in', 'length', 0.0254, true);
+  (gen_random_uuid(), 'inch', 'Inch', 'in', 'length', 0.0254, true),
+  (gen_random_uuid(), 'pcs', 'Pieces', 'pcs', 'count', 1, false);
+
+CREATE TABLE assets (
+    asset_id uuid PRIMARY KEY,
+    laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id),
+    category_id uuid REFERENCES asset_categories (category_id),
+    tracking_mode TEXT NOT NULL,
+    name TEXT NOT NULL,
+    model TEXT,
+    manufacturer TEXT,
+    default_unit_id uuid NOT NULL REFERENCES units (unit_id),
+    public_notes TEXT,
+    internal_notes TEXT,
+    is_archived BOOLEAN NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (tracking_mode IN ('serialized', 'quantity')),
+    CHECK (name <> '')
+);
+
+CREATE UNIQUE INDEX idx_assets_unique_laboratory_name_model
+    ON assets (laboratory_id, name, COALESCE(model, ''));
+CREATE INDEX idx_assets_laboratory_id ON assets (laboratory_id);
+CREATE INDEX idx_assets_category_id ON assets (category_id);
+CREATE INDEX idx_assets_default_unit_id ON assets (default_unit_id);
+CREATE INDEX idx_assets_search_trgm
+    ON assets USING gin ((name || ' ' || COALESCE(model, '') || ' ' || COALESCE(manufacturer, '')) gin_trgm_ops);
 
 CREATE TYPE asset_parameter_data_type AS ENUM (
   'text',
@@ -270,7 +275,7 @@ CREATE TABLE asset_parameter_types (
     UNIQUE (laboratory_id, code),
     UNIQUE (parameter_type_id, data_type),
     CHECK (code ~ '^[a-z][a-z0-9_]{0,63}$'),
-    CHECK (name <> '')
+    CHECK (name <> ''),
     CHECK (
       (data_type = 'number')
       OR (unit_dimension IS NULL AND default_unit_id IS NULL)

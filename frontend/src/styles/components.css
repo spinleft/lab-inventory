@@ -142,6 +142,44 @@
   color: var(--text-subtle);
 }
 
+.checkbox-field {
+  min-height: var(--control-height);
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  padding: 9px 10px;
+  cursor: pointer;
+}
+
+.checkbox-field input {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.checkbox-field span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.checkbox-field strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 580;
+}
+
+.checkbox-field small {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .select-trigger {
   display: inline-flex;
   align-items: center;
@@ -316,6 +354,24 @@
   display: inline-flex;
   gap: 6px;
   justify-content: flex-end;
+}
+
+.unit-name-cell {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.unit-name-cell svg {
+  flex: 0 0 auto;
+  color: var(--text-subtle);
+}
+
+.unit-name-cell strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .category-laboratory-select {

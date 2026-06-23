@@ -67,10 +67,7 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
         .fetch_all(&app.db_pool)
         .await
         .unwrap();
-    assert_eq!(
-        unit_codes,
-        vec!["cm", "g", "kg", "l", "m", "ml", "mm", "pcs"]
-    );
+    assert_eq!(unit_codes, vec!["cm", "inch", "m", "mm", "pcs"]);
 
     let required_tables = vec![
         "asset_categories",
@@ -188,10 +185,7 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
     .fetch_all(&app.db_pool)
     .await
     .unwrap();
-    assert_eq!(
-        threshold_columns,
-        vec!["minimum_stock_quantity", "minimum_stock_unit_id"]
-    );
+    assert!(threshold_columns.is_empty());
 
     let cost_column: Option<i32> = sqlx::query_scalar(
         r#"
@@ -243,12 +237,11 @@ async fn inventory_quantity_constraints_are_enforced_by_the_database() {
         INSERT INTO assets (
             asset_id,
             laboratory_id,
-            asset_kind,
             tracking_mode,
             name,
             default_unit_id
         )
-        VALUES ($1, $2, 'material', 'quantity', 'Resistors', $3)
+        VALUES ($1, $2, 'quantity', 'Resistors', $3)
         "#,
     )
     .bind(asset_id)
@@ -274,49 +267,6 @@ async fn inventory_quantity_constraints_are_enforced_by_the_database() {
     )
     .bind(uuid::Uuid::new_v4())
     .bind(asset_id)
-    .bind(laboratory_id)
-    .bind(unit_id)
-    .execute(&app.db_pool)
-    .await;
-    assert!(result.is_err());
-
-    let result = sqlx::query(
-        r#"
-        INSERT INTO assets (
-            asset_id,
-            laboratory_id,
-            asset_kind,
-            tracking_mode,
-            name,
-            default_unit_id,
-            minimum_stock_quantity,
-            minimum_stock_unit_id
-        )
-        VALUES ($1, $2, 'material', 'quantity', 'Bad Threshold', $3, -1, $3)
-        "#,
-    )
-    .bind(uuid::Uuid::new_v4())
-    .bind(laboratory_id)
-    .bind(unit_id)
-    .execute(&app.db_pool)
-    .await;
-    assert!(result.is_err());
-
-    let result = sqlx::query(
-        r#"
-        INSERT INTO assets (
-            asset_id,
-            laboratory_id,
-            asset_kind,
-            tracking_mode,
-            name,
-            default_unit_id,
-            minimum_stock_quantity
-        )
-        VALUES ($1, $2, 'material', 'quantity', 'Partial Threshold', $3, 1)
-        "#,
-    )
-    .bind(uuid::Uuid::new_v4())
     .bind(laboratory_id)
     .bind(unit_id)
     .execute(&app.db_pool)

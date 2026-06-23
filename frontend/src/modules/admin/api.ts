@@ -46,6 +46,19 @@ export const locationSchema = z.object({
 
 const locationsSchema = z.array(locationSchema);
 
+export const unitSchema = z.object({
+  unit_id: z.string().uuid(),
+  code: z.string(),
+  name: z.string(),
+  symbol: z.string(),
+  dimension: z.string(),
+  scale_to_base: z.number(),
+  allow_decimal: z.boolean(),
+  created_at: z.string(),
+});
+
+const unitsSchema = z.array(unitSchema);
+
 export const userSchema = z.object({
   user_id: z.string().uuid(),
   username: z.string(),
@@ -70,6 +83,7 @@ const usersSchema = z.array(userSchema);
 export type Laboratory = z.infer<typeof laboratorySchema>;
 export type AssetCategory = z.infer<typeof assetCategorySchema>;
 export type Location = z.infer<typeof locationSchema>;
+export type Unit = z.infer<typeof unitSchema>;
 export type AdminUser = z.infer<typeof userSchema>;
 
 export type LaboratoryPayload = {
@@ -91,6 +105,15 @@ export type LocationPayload = {
   name: string;
   code: string;
   description: string | null;
+};
+
+export type UnitPayload = {
+  allow_decimal: boolean;
+  code: string;
+  dimension: string;
+  name: string;
+  scale_to_base: number;
+  symbol: string;
 };
 
 export type CreateUserPayload = {
@@ -116,6 +139,7 @@ export const adminQueryKeys = {
   laboratories: (apiBaseUrl: string) => ["admin", "laboratories", apiBaseUrl] as const,
   locations: (apiBaseUrl: string, laboratoryId: string) =>
     ["admin", "locations", apiBaseUrl, laboratoryId] as const,
+  units: (apiBaseUrl: string) => ["admin", "units", apiBaseUrl] as const,
   users: (apiBaseUrl: string) => ["admin", "users", apiBaseUrl] as const,
 };
 
@@ -182,6 +206,18 @@ export function useLocations({
       return locationsSchema.parse(
         await client.get(`/laboratories/${laboratoryId}/locations`),
       );
+    },
+  });
+}
+
+export function useUnits() {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useQuery({
+    queryKey: adminQueryKeys.units(apiBaseUrl),
+    queryFn: async () => {
+      const client = createApiClient(apiBaseUrl);
+      return unitsSchema.parse(await client.get("/units"));
     },
   });
 }
@@ -319,6 +355,45 @@ export function useDeleteLocation() {
     mutationFn: async (locationId: string) => {
       const client = createApiClient(apiBaseUrl);
       await client.delete(`/locations/${locationId}`);
+    },
+  });
+}
+
+export function useCreateUnit() {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useMutation({
+    mutationFn: async (payload: UnitPayload) => {
+      const client = createApiClient(apiBaseUrl);
+      return unitSchema.parse(await client.post("/units", payload));
+    },
+  });
+}
+
+export function useUpdateUnit() {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useMutation({
+    mutationFn: async ({
+      payload,
+      unitId,
+    }: {
+      payload: Partial<UnitPayload>;
+      unitId: string;
+    }) => {
+      const client = createApiClient(apiBaseUrl);
+      return unitSchema.parse(await client.patch(`/units/${unitId}`, payload));
+    },
+  });
+}
+
+export function useDeleteUnit() {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useMutation({
+    mutationFn: async (unitId: string) => {
+      const client = createApiClient(apiBaseUrl);
+      await client.delete(`/units/${unitId}`);
     },
   });
 }

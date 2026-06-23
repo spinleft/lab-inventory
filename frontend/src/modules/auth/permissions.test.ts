@@ -4,6 +4,7 @@ import {
   canAccessAuditLogs,
   canManageAssetCategories,
   canManageLocations,
+  canManageUnits,
   canSelectAssetCategoryLaboratory,
   canSelectLocationLaboratory,
   describeScope,
@@ -52,6 +53,14 @@ describe("permissions", () => {
     expect(canManageLocations(user("lab_admin"))).toBe(true);
     expect(canManageLocations(user("user"))).toBe(true);
     expect(canManageLocations(user("guest"))).toBe(false);
+  });
+
+  it("limits unit management to server admins", () => {
+    expect(canManageUnits(user("root"))).toBe(true);
+    expect(canManageUnits(user("super_admin"))).toBe(true);
+    expect(canManageUnits(user("lab_admin"))).toBe(false);
+    expect(canManageUnits(user("user"))).toBe(false);
+    expect(canManageUnits(user("guest"))).toBe(false);
   });
 
   it("limits asset category laboratory selection to global admins", () => {

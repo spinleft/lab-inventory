@@ -5,6 +5,7 @@ mod health_check;
 mod laboratories;
 mod locations;
 mod pagination;
+mod units;
 mod users;
 
 pub use asset_categories::*;
@@ -14,4 +15,5 @@ pub use health_check::*;
 pub use laboratories::*;
 pub use locations::*;
 pub(crate) use pagination::*;
+pub use units::*;
 pub use users::*;

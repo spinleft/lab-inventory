@@ -36,6 +36,10 @@ impl Actor {
         self.user_type == UserType::Root
     }
 
+    pub fn can_manage_units(&self) -> bool {
+        self.is_root() || self.is_super_admin()
+    }
+
     pub fn can_manage_user(
         &self,
         target_user_type: UserType,
