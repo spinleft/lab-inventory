@@ -1,12 +1,13 @@
 use crate::authentication::reject_anonymous_users;
 use crate::configuration::{ApplicationSettings, DatabaseSettings, Settings};
 use crate::routes::{
-    change_password, create_asset_category, create_laboratory, create_location, create_unit,
-    create_user, delete_asset_category, delete_laboratory, delete_location, delete_unit,
-    delete_user, get_asset_category, get_laboratory, get_location, get_unit, get_user,
-    health_check, list_asset_categories, list_audit_logs, list_laboratories, list_locations,
-    list_units, list_users, login, logout, me, update_asset_category, update_laboratory,
-    update_location, update_unit, update_user,
+    change_password, create_asset_category, create_asset_parameter, create_laboratory,
+    create_location, create_unit, create_user, delete_asset_category, delete_asset_parameter,
+    delete_laboratory, delete_location, delete_unit, delete_user, get_asset_category,
+    get_asset_parameter, get_laboratory, get_location, get_unit, get_user, health_check,
+    list_asset_categories, list_asset_parameters, list_audit_logs, list_laboratories,
+    list_locations, list_units, list_users, login, logout, me, update_asset_category,
+    update_asset_parameter, update_laboratory, update_location, update_unit, update_user,
 };
 use actix_cors::Cors;
 use actix_session::SessionMiddleware;
@@ -167,6 +168,14 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                         web::post().to(create_asset_category),
                     )
                     .route(
+                        "/laboratories/{laboratory_id}/asset-parameters",
+                        web::get().to(list_asset_parameters),
+                    )
+                    .route(
+                        "/laboratories/{laboratory_id}/asset-parameters",
+                        web::post().to(create_asset_parameter),
+                    )
+                    .route(
                         "/laboratories/{laboratory_id}/locations",
                         web::get().to(list_locations),
                     )
@@ -205,6 +214,18 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                     .route(
                         "/asset-categories/{category_id}",
                         web::delete().to(delete_asset_category),
+                    )
+                    .route(
+                        "/asset-parameters/{parameter_id}",
+                        web::get().to(get_asset_parameter),
+                    )
+                    .route(
+                        "/asset-parameters/{parameter_id}",
+                        web::patch().to(update_asset_parameter),
+                    )
+                    .route(
+                        "/asset-parameters/{parameter_id}",
+                        web::delete().to(delete_asset_parameter),
                     )
                     .route("/locations/{location_id}", web::get().to(get_location))
                     .route("/locations/{location_id}", web::patch().to(update_location))

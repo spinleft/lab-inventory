@@ -526,6 +526,14 @@
   .form-grid-2 {
     grid-template-columns: 1fr;
   }
+
+  .parameter-option-row {
+    grid-template-columns: 1fr;
+  }
+
+  .parameter-option-delete {
+    justify-self: end;
+  }
 }
 
 @media (max-width: 560px) {

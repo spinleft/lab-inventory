@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Ruler, Trash2 } from "lucide-react";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { Fragment, type FormEvent, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../app/auth-context";
 import { useBackendConfig } from "../../shared/api/backendConfig";
 import { formatDate } from "../../shared/lib/date";
@@ -25,6 +25,11 @@ import {
   useUnits,
   useUpdateUnit,
 } from "./api";
+import {
+  DEFAULT_UNIT_DIMENSION,
+  UNIT_DIMENSION_OPTIONS,
+  unitDimensionLabel,
+} from "./unitDimensions";
 
 type UnitForm = {
   allow_decimal: boolean;
@@ -35,26 +40,11 @@ type UnitForm = {
   symbol: string;
 };
 
-const UNIT_DIMENSION_OPTIONS = [
-  { label: "数量", value: "count" },
-  { label: "长度", value: "length" },
-  { label: "面积", value: "area" },
-  { label: "体积", value: "volume" },
-  { label: "质量", value: "mass" },
-  { label: "时间", value: "time" },
-  { label: "温度", value: "temperature" },
-  { label: "电流", value: "current" },
-  { label: "光强", value: "luminous_intensity" },
-  { label: "频率", value: "frequency" },
-  { label: "功率", value: "power" },
-  { label: "压力", value: "pressure" },
-  { label: "能量", value: "energy" },
-  { label: "力", value: "force" },
-  { label: "扭矩", value: "torque" },
-  { label: "密度", value: "density" },
-];
-
-const DEFAULT_DIMENSION = "length";
+type UnitDimensionGroup = {
+  dimension: string;
+  label: string;
+  units: Unit[];
+};
 
 export function UnitsPage() {
   const { currentUser } = useAuth();
@@ -77,7 +67,7 @@ export function UnitsPage() {
           unit.name,
           unit.symbol,
           unit.dimension,
-          dimensionLabel(unit.dimension),
+          unitDimensionLabel(unit.dimension),
         ]
           .join(" ")
           .toLowerCase()
@@ -85,6 +75,7 @@ export function UnitsPage() {
       ),
     [search, units],
   );
+  const unitGroups = useMemo(() => groupUnitsByDimension(filteredUnits), [filteredUnits]);
 
   function refresh() {
     queryClient.invalidateQueries({ queryKey: adminQueryKeys.units(apiBaseUrl) });
@@ -118,11 +109,6 @@ export function UnitsPage() {
       render: (item) => <Badge>{item.code}</Badge>,
     },
     { header: "符号", key: "symbol", render: (item) => item.symbol },
-    {
-      header: "维度",
-      key: "dimension",
-      render: (item) => <Badge tone="accent">{dimensionLabel(item.dimension)}</Badge>,
-    },
     {
       header: "基础换算系数",
       key: "scale",
@@ -175,7 +161,7 @@ export function UnitsPage() {
       <main className="page">
         <PageHeader
           kicker="管理"
-          title="单位管理"
+          title="单位"
           description="当前账号没有管理单位的权限。"
         />
         <section className="panel">
@@ -189,7 +175,7 @@ export function UnitsPage() {
     <main className="page">
       <PageHeader
         kicker="管理"
-        title="单位管理"
+        title="单位"
         description="维护系统可用单位及基础单位换算系数，用于库存数量和资产参数筛选。"
         actions={
           <Button onClick={() => setEditing("new")} variant="primary">
@@ -213,13 +199,22 @@ export function UnitsPage() {
             onChange={(event) => setSearch(event.target.value)}
           />
         </div>
-        <DataTable
-          columns={columns}
-          emptyDescription="当前还没有可用单位。"
-          getRowKey={(item) => item.unit_id}
-          items={filteredUnits}
-          loading={unitsQuery.isLoading}
-        />
+        {unitsQuery.isLoading ? (
+          <DataTable
+            columns={columns}
+            emptyDescription="当前还没有可用单位。"
+            getRowKey={(item) => item.unit_id}
+            items={[]}
+            loading
+          />
+        ) : filteredUnits.length === 0 ? (
+          <EmptyState
+            description={search ? "没有匹配的单位。" : "当前还没有可用单位。"}
+            title={search ? "未找到单位" : "暂无数据"}
+          />
+        ) : (
+          <UnitGroupsTable columns={columns} groups={unitGroups} />
+        )}
       </section>
       <UnitEditor
         createUnit={createUnit}
@@ -233,6 +228,68 @@ export function UnitsPage() {
         }}
       />
     </main>
+  );
+}
+
+function UnitGroupsTable({
+  columns,
+  groups,
+}: {
+  columns: DataTableColumn<Unit>[];
+  groups: UnitDimensionGroup[];
+}) {
+  return (
+    <div className="table-wrap">
+      <table className="data-table unit-groups-table">
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <th
+                key={column.key}
+                style={{ textAlign: column.align === "right" ? "right" : "left" }}
+              >
+                {column.header}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map((group) => {
+            const headingId = dimensionHeadingId(group.dimension);
+
+            return (
+              <Fragment key={group.dimension}>
+                <tr className="unit-dimension-row">
+                  <td colSpan={columns.length}>
+                    <div className="unit-dimension-row-content">
+                      <div>
+                        <h3 className="unit-dimension-title" id={headingId}>
+                          {group.label}
+                        </h3>
+                        <p className="unit-dimension-meta">维度代码：{group.dimension}</p>
+                      </div>
+                      <Badge tone="accent">{group.units.length} 个单位</Badge>
+                    </div>
+                  </td>
+                </tr>
+                {group.units.map((unit) => (
+                  <tr aria-describedby={headingId} key={unit.unit_id}>
+                    {columns.map((column) => (
+                      <td
+                        key={column.key}
+                        style={{ textAlign: column.align === "right" ? "right" : "left" }}
+                      >
+                        {column.render(unit)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -415,17 +472,56 @@ function emptyUnitForm(): UnitForm {
   return {
     allow_decimal: true,
     code: "",
-    dimension: DEFAULT_DIMENSION,
+    dimension: DEFAULT_UNIT_DIMENSION,
     name: "",
     scale_to_base: "1",
     symbol: "",
   };
 }
 
-function dimensionLabel(dimension: string) {
-  return (
-    UNIT_DIMENSION_OPTIONS.find((option) => option.value === dimension)?.label ?? dimension
-  );
+function groupUnitsByDimension(units: Unit[]): UnitDimensionGroup[] {
+  const groups = new Map<string, Unit[]>();
+
+  for (const unit of units) {
+    const dimension = unit.dimension || "unknown";
+    const group = groups.get(dimension);
+
+    if (group) {
+      group.push(unit);
+      continue;
+    }
+
+    groups.set(dimension, [unit]);
+  }
+
+  const orderedGroups: UnitDimensionGroup[] = [];
+
+  for (const option of UNIT_DIMENSION_OPTIONS) {
+    const group = groups.get(option.value);
+
+    if (!group) continue;
+
+    orderedGroups.push({
+      dimension: option.value,
+      label: option.label,
+      units: group,
+    });
+    groups.delete(option.value);
+  }
+
+  const remainingGroups = Array.from(groups.entries())
+    .map(([dimension, group]) => ({
+      dimension,
+      label: unitDimensionLabel(dimension),
+      units: group,
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label, "zh-CN"));
+
+  return [...orderedGroups, ...remainingGroups];
+}
+
+function dimensionHeadingId(dimension: string) {
+  return `unit-dimension-${dimension.replace(/[^a-z0-9_-]+/gi, "-") || "unknown"}`;
 }
 
 function formatScaleToBase(value: number) {

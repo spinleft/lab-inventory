@@ -8,12 +8,14 @@ import {
   Ruler,
   ScrollText,
   Settings,
+  SlidersHorizontal,
   UserRound,
   Users,
   type LucideIcon,
 } from "lucide-react";
 import { type ReactNode } from "react";
 import { AssetCategoriesPage } from "../modules/admin/AssetCategoriesPage";
+import { AssetParametersPage } from "../modules/admin/AssetParametersPage";
 import { AdminHomePage, LaboratoriesPage, UsersPage } from "../modules/admin/AdminPages";
 import { LocationsPage } from "../modules/admin/LocationsPage";
 import { UnitsPage } from "../modules/admin/UnitsPage";
@@ -22,6 +24,7 @@ import {
   canAccessAdmin,
   canAccessAuditLogs,
   canManageAssetCategories,
+  canManageAssetParameters,
   canManageLocations,
   canManageUnits,
 } from "../modules/auth/permissions";
@@ -98,18 +101,25 @@ export const appModules: FrontendModule[] = [
         title: "资产分类",
       },
       {
+        canAccess: canManageAssetParameters,
+        group: "admin",
+        icon: SlidersHorizontal,
+        path: "/admin/asset-parameters",
+        title: "资产参数",
+      },
+      {
         canAccess: canManageLocations,
         group: "admin",
         icon: MapPin,
         path: "/admin/locations",
-        title: "位置管理",
+        title: "位置",
       },
       {
         canAccess: canManageUnits,
         group: "admin",
         icon: Ruler,
         path: "/admin/units",
-        title: "单位管理",
+        title: "单位",
       },
     ],
     commands: [
@@ -130,6 +140,12 @@ export const appModules: FrontendModule[] = [
         icon: FolderTree,
         path: "/admin/asset-categories",
         title: "管理资产分类",
+      },
+      {
+        canAccess: canManageAssetParameters,
+        icon: SlidersHorizontal,
+        path: "/admin/asset-parameters",
+        title: "管理资产参数",
       },
       {
         canAccess: canManageLocations,
@@ -174,18 +190,25 @@ export const appModules: FrontendModule[] = [
         title: "资产分类",
       },
       {
+        canAccess: canManageAssetParameters,
+        element: <AssetParametersPage />,
+        id: "admin.asset-parameters",
+        path: "/admin/asset-parameters",
+        title: "资产参数",
+      },
+      {
         canAccess: canManageLocations,
         element: <LocationsPage />,
         id: "admin.locations",
         path: "/admin/locations",
-        title: "位置管理",
+        title: "位置",
       },
       {
         canAccess: canManageUnits,
         element: <UnitsPage />,
         id: "admin.units",
         path: "/admin/units",
-        title: "单位管理",
+        title: "单位",
       },
     ],
   },

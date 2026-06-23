@@ -191,7 +191,7 @@ export function LocationsPage() {
       <main className="page">
         <PageHeader
           kicker="管理"
-          title="位置管理"
+          title="位置"
           description="当前账号没有管理位置的权限。"
         />
         <section className="panel">
@@ -205,7 +205,7 @@ export function LocationsPage() {
     <main className="page">
       <PageHeader
         kicker="管理"
-        title="位置管理"
+        title="位置"
         description="按实验室维护存放位置树，位置代码会参与生成层级路径。"
         actions={pageActions}
       />

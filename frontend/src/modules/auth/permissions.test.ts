@@ -3,9 +3,11 @@ import {
   canAccessAdmin,
   canAccessAuditLogs,
   canManageAssetCategories,
+  canManageAssetParameters,
   canManageLocations,
   canManageUnits,
   canSelectAssetCategoryLaboratory,
+  canSelectAssetParameterLaboratory,
   canSelectLocationLaboratory,
   describeScope,
   roleLabel,
@@ -47,6 +49,14 @@ describe("permissions", () => {
     expect(canManageAssetCategories(user("guest"))).toBe(false);
   });
 
+  it("allows asset parameter management for scoped users but not guests", () => {
+    expect(canManageAssetParameters(user("root"))).toBe(true);
+    expect(canManageAssetParameters(user("super_admin"))).toBe(true);
+    expect(canManageAssetParameters(user("lab_admin"))).toBe(true);
+    expect(canManageAssetParameters(user("user"))).toBe(true);
+    expect(canManageAssetParameters(user("guest"))).toBe(false);
+  });
+
   it("allows location management for scoped users but not guests", () => {
     expect(canManageLocations(user("root"))).toBe(true);
     expect(canManageLocations(user("super_admin"))).toBe(true);
@@ -68,6 +78,13 @@ describe("permissions", () => {
     expect(canSelectAssetCategoryLaboratory(user("super_admin"))).toBe(true);
     expect(canSelectAssetCategoryLaboratory(user("lab_admin"))).toBe(false);
     expect(canSelectAssetCategoryLaboratory(user("user"))).toBe(false);
+  });
+
+  it("limits asset parameter laboratory selection to global admins", () => {
+    expect(canSelectAssetParameterLaboratory(user("root"))).toBe(true);
+    expect(canSelectAssetParameterLaboratory(user("super_admin"))).toBe(true);
+    expect(canSelectAssetParameterLaboratory(user("lab_admin"))).toBe(false);
+    expect(canSelectAssetParameterLaboratory(user("user"))).toBe(false);
   });
 
   it("limits location laboratory selection to global admins", () => {

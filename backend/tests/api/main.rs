@@ -1,4 +1,5 @@
 mod asset_categories;
+mod asset_parameters;
 mod auth;
 mod health_check;
 mod helpers;

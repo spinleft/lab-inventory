@@ -271,6 +271,77 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
+    pub async fn post_asset_parameter<Body>(
+        &self,
+        laboratory_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/asset-parameters",
+                &self.address
+            ))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_asset_parameters(&self, laboratory_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/asset-parameters",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_asset_parameter(&self, parameter_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/asset-parameters/{parameter_id}",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn patch_asset_parameter<Body>(
+        &self,
+        parameter_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .patch(format!(
+                "{}/api/v1/asset-parameters/{parameter_id}",
+                &self.address
+            ))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn delete_asset_parameter(&self, parameter_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .delete(format!(
+                "{}/api/v1/asset-parameters/{parameter_id}",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
     pub async fn post_unit<Body>(&self, body: &Body) -> reqwest::Response
     where
         Body: serde::Serialize,

@@ -31,6 +31,32 @@ export const assetCategorySchema = z.object({
 
 const assetCategoriesSchema = z.array(assetCategorySchema);
 
+export const assetParameterOptionSchema = z.object({
+  option_id: z.string().uuid(),
+  parameter_type_id: z.string().uuid(),
+  code: z.string(),
+  label: z.string(),
+  sort_order: z.number(),
+  is_archived: z.boolean(),
+});
+
+export const assetParameterSchema = z.object({
+  parameter_type_id: z.string().uuid(),
+  laboratory_id: z.string().uuid(),
+  code: z.string(),
+  name: z.string(),
+  data_type: z.enum(["text", "number", "boolean", "date", "enum"]),
+  unit_dimension: z.string().nullable(),
+  default_unit_id: z.string().uuid().nullable(),
+  description: z.string().nullable(),
+  is_archived: z.boolean(),
+  options: z.array(assetParameterOptionSchema),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+const assetParametersSchema = z.array(assetParameterSchema);
+
 export const locationSchema = z.object({
   location_id: z.string().uuid(),
   laboratory_id: z.string().uuid(),
@@ -82,6 +108,8 @@ const usersSchema = z.array(userSchema);
 
 export type Laboratory = z.infer<typeof laboratorySchema>;
 export type AssetCategory = z.infer<typeof assetCategorySchema>;
+export type AssetParameter = z.infer<typeof assetParameterSchema>;
+export type AssetParameterOption = z.infer<typeof assetParameterOptionSchema>;
 export type Location = z.infer<typeof locationSchema>;
 export type Unit = z.infer<typeof unitSchema>;
 export type AdminUser = z.infer<typeof userSchema>;
@@ -98,6 +126,25 @@ export type AssetCategoryPayload = {
   name: string;
   code: string;
   description: string | null;
+};
+
+export type AssetParameterOptionPayload = {
+  option_id?: string;
+  code: string;
+  label: string;
+  sort_order: number;
+  is_archived: boolean;
+};
+
+export type AssetParameterPayload = {
+  code: string;
+  name: string;
+  data_type: AssetParameter["data_type"];
+  unit_dimension: string | null;
+  default_unit_id: string | null;
+  description: string | null;
+  is_archived: boolean;
+  options: AssetParameterOptionPayload[];
 };
 
 export type LocationPayload = {
@@ -136,6 +183,8 @@ export type UpdateUserPayload = {
 export const adminQueryKeys = {
   assetCategories: (apiBaseUrl: string, laboratoryId: string) =>
     ["admin", "asset-categories", apiBaseUrl, laboratoryId] as const,
+  assetParameters: (apiBaseUrl: string, laboratoryId: string) =>
+    ["admin", "asset-parameters", apiBaseUrl, laboratoryId] as const,
   laboratories: (apiBaseUrl: string) => ["admin", "laboratories", apiBaseUrl] as const,
   locations: (apiBaseUrl: string, laboratoryId: string) =>
     ["admin", "locations", apiBaseUrl, laboratoryId] as const,
@@ -184,6 +233,27 @@ export function useAssetCategories({
       const client = createApiClient(apiBaseUrl);
       return assetCategoriesSchema.parse(
         await client.get(`/laboratories/${laboratoryId}/asset-categories`),
+      );
+    },
+  });
+}
+
+export function useAssetParameters({
+  enabled = true,
+  laboratoryId,
+}: {
+  enabled?: boolean;
+  laboratoryId: string;
+}) {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useQuery({
+    enabled: enabled && Boolean(laboratoryId),
+    queryKey: adminQueryKeys.assetParameters(apiBaseUrl, laboratoryId),
+    queryFn: async () => {
+      const client = createApiClient(apiBaseUrl);
+      return assetParametersSchema.parse(
+        await client.get(`/laboratories/${laboratoryId}/asset-parameters`),
       );
     },
   });
@@ -308,6 +378,55 @@ export function useDeleteAssetCategory() {
     mutationFn: async (categoryId: string) => {
       const client = createApiClient(apiBaseUrl);
       await client.delete(`/asset-categories/${categoryId}`);
+    },
+  });
+}
+
+export function useCreateAssetParameter() {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useMutation({
+    mutationFn: async ({
+      laboratoryId,
+      payload,
+    }: {
+      laboratoryId: string;
+      payload: AssetParameterPayload;
+    }) => {
+      const client = createApiClient(apiBaseUrl);
+      return assetParameterSchema.parse(
+        await client.post(`/laboratories/${laboratoryId}/asset-parameters`, payload),
+      );
+    },
+  });
+}
+
+export function useUpdateAssetParameter() {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useMutation({
+    mutationFn: async ({
+      parameterId,
+      payload,
+    }: {
+      parameterId: string;
+      payload: AssetParameterPayload;
+    }) => {
+      const client = createApiClient(apiBaseUrl);
+      return assetParameterSchema.parse(
+        await client.patch(`/asset-parameters/${parameterId}`, payload),
+      );
+    },
+  });
+}
+
+export function useDeleteAssetParameter() {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useMutation({
+    mutationFn: async (parameterId: string) => {
+      const client = createApiClient(apiBaseUrl);
+      await client.delete(`/asset-parameters/${parameterId}`);
     },
   });
 }

@@ -37,8 +37,16 @@ export function canManageAssetCategories(user: CurrentUser) {
   );
 }
 
+export function canManageAssetParameters(user: CurrentUser) {
+  return canManageAssetCategories(user);
+}
+
 export function canSelectAssetCategoryLaboratory(user: CurrentUser) {
   return isRoot(user) || isSuperAdmin(user);
+}
+
+export function canSelectAssetParameterLaboratory(user: CurrentUser) {
+  return canSelectAssetCategoryLaboratory(user);
 }
 
 export function canManageLocations(user: CurrentUser) {

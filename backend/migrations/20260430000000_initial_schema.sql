@@ -189,17 +189,18 @@ VALUES
   ('area', '面积'),
   ('volume', '体积'),
   ('mass', '质量'),
+  ('density', '密度'),
   ('time', '时间'),
+  ('frequency', '频率'),
   ('temperature', '温度'),
   ('current', '电流'),
-  ('luminous_intensity', '光强'),
-  ('frequency', '频率'),
+  ('voltage', '电压'),
   ('power', '功率'),
-  ('pressure', '压力'),
   ('energy', '能量'),
+  ('luminous_intensity', '光强'),
+  ('pressure', '压力'),
   ('force', '力'),
-  ('torque', '扭矩'),
-  ('density', '密度');
+  ('torque', '扭矩');
 
 
 CREATE TABLE units (
@@ -219,11 +220,11 @@ CREATE TABLE units (
 
 INSERT INTO units (unit_id, code, name, symbol, dimension, scale_to_base, allow_decimal)
 VALUES
-  (gen_random_uuid(), 'm', 'Meter', 'm', 'length', 1, true),
-  (gen_random_uuid(), 'cm', 'Centimeter', 'cm', 'length', 0.01, true),
-  (gen_random_uuid(), 'mm', 'Millimeter', 'mm', 'length', 0.001, true),
-  (gen_random_uuid(), 'inch', 'Inch', 'in', 'length', 0.0254, true),
-  (gen_random_uuid(), 'pcs', 'Pieces', 'pcs', 'count', 1, false);
+  (gen_random_uuid(), 'm', '米', 'm', 'length', 1, true),
+  (gen_random_uuid(), 'cm', '厘米', 'cm', 'length', 0.01, true),
+  (gen_random_uuid(), 'mm', '毫米', 'mm', 'length', 0.001, true),
+  (gen_random_uuid(), 'inch', '英寸', 'in', 'length', 0.0254, true),
+  (gen_random_uuid(), 'pcs', '件', 'pcs', 'count', 1, false);
 
 CREATE TABLE assets (
     asset_id uuid PRIMARY KEY,
@@ -302,6 +303,7 @@ CREATE TABLE asset_parameter_assignments (
     parameter_type_id uuid NOT NULL REFERENCES asset_parameter_types(parameter_type_id),
     category_id uuid REFERENCES asset_categories(category_id) ON DELETE CASCADE,
     asset_id uuid REFERENCES assets(asset_id) ON DELETE CASCADE,
+    default_unit_id uuid REFERENCES units(unit_id),
     applies_to_descendants boolean NOT NULL DEFAULT true,
     is_required boolean NOT NULL DEFAULT true,
     sort_order integer NOT NULL DEFAULT 0,

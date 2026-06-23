@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { assetCategorySchema, locationSchema, optionalText, unitSchema, userSchema } from "./api";
+import {
+  assetCategorySchema,
+  assetParameterSchema,
+  locationSchema,
+  optionalText,
+  unitSchema,
+  userSchema,
+} from "./api";
 
 describe("admin api schemas", () => {
   it("parses phone_number from backend users", () => {
@@ -40,6 +47,25 @@ describe("admin api schemas", () => {
         updated_at: "2026-06-17T00:00:00Z",
       }).path,
     ).toBe("microscope");
+  });
+
+  it("parses asset parameters from the backend", () => {
+    expect(
+      assetParameterSchema.parse({
+        code: "max_load",
+        created_at: "2026-06-17T00:00:00Z",
+        data_type: "number",
+        default_unit_id: "00000000-0000-4000-8000-000000000051",
+        description: "Maximum load",
+        is_archived: false,
+        laboratory_id: "00000000-0000-4000-8000-000000000011",
+        name: "最大载荷",
+        options: [],
+        parameter_type_id: "00000000-0000-4000-8000-000000000061",
+        unit_dimension: "mass",
+        updated_at: "2026-06-17T00:00:00Z",
+      }).unit_dimension,
+    ).toBe("mass");
   });
 
   it("parses locations from the backend", () => {

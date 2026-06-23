@@ -64,9 +64,13 @@ test("manage units", async ({ page }) => {
   }, apiBaseUrl);
 
   await page.goto(appUrl);
-  await expect(page.getByRole("heading", { name: "单位管理" })).toBeVisible();
+  await expect(page.getByRole("heading", { exact: true, name: "单位" })).toBeVisible();
+  await expect(page.locator(".unit-groups-table")).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "长度" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "数量" })).toBeVisible();
   await expect(page.getByText("毫米")).toBeVisible();
   await expect(page.getByText("件")).toBeVisible();
+  await expectAlignedUnitRows(page);
   await expectNoHorizontalOverflow(page);
 
   await page.getByRole("button", { name: "新建单位" }).click();
@@ -86,8 +90,22 @@ test("manage units", async ({ page }) => {
     symbol: "cm",
   });
   await expect(page.getByText("厘米")).toBeVisible();
+  await expectAlignedUnitRows(page);
   await expectNoHorizontalOverflow(page);
 });
+
+async function expectAlignedUnitRows(page: Page) {
+  const columnLefts = await page.locator(".unit-groups-table").evaluate((table) =>
+    Array.from(table.querySelectorAll("tbody tr:not(.unit-dimension-row)")).map((row) =>
+      Array.from(row.children).map((cell) => Math.round(cell.getBoundingClientRect().left)),
+    ),
+  );
+
+  expect(columnLefts.length).toBeGreaterThanOrEqual(2);
+  for (const rowLefts of columnLefts.slice(1)) {
+    expect(rowLefts).toEqual(columnLefts[0]);
+  }
+}
 
 async function expectNoHorizontalOverflow(page: Page) {
   await expect
