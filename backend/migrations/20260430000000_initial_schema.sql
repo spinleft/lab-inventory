@@ -255,6 +255,7 @@ CREATE INDEX idx_assets_search_trgm
 CREATE TYPE asset_parameter_data_type AS ENUM (
   'text',
   'number',
+  'range',
   'boolean',
   'date',
   'enum'
@@ -278,7 +279,7 @@ CREATE TABLE asset_parameter_types (
     CHECK (code ~ '^[a-z][a-z0-9_]{0,63}$'),
     CHECK (name <> ''),
     CHECK (
-      (data_type = 'number')
+      (data_type IN ('number', 'range'))
       OR (unit_dimension IS NULL AND default_unit_id IS NULL)
     )
 );
@@ -330,6 +331,10 @@ CREATE TABLE asset_parameter_values (
     value_text text,
     value_number double precision,
     value_number_base double precision,
+    value_range_start double precision,
+    value_range_end double precision,
+    value_range_start_base double precision,
+    value_range_end_base double precision,
     unit_id uuid REFERENCES units(unit_id),
     value_boolean boolean,
     value_date date,
@@ -345,15 +350,22 @@ CREATE TABLE asset_parameter_values (
         REFERENCES asset_parameter_options(parameter_type_id, option_id),
 
     CHECK (
-      (data_type = 'text' AND value_text IS NOT NULL AND value_number IS NULL AND value_boolean IS NULL AND value_date IS NULL AND value_option_id IS NULL)
+      (data_type = 'text' AND value_text IS NOT NULL AND value_number IS NULL AND value_number_base IS NULL AND value_range_start IS NULL AND value_range_end IS NULL AND value_range_start_base IS NULL AND value_range_end_base IS NULL AND unit_id IS NULL AND value_boolean IS NULL AND value_date IS NULL AND value_option_id IS NULL)
       OR
-      (data_type = 'number' AND value_number IS NOT NULL AND value_text IS NULL AND value_boolean IS NULL AND value_date IS NULL AND value_option_id IS NULL)
+      (data_type = 'number' AND value_number IS NOT NULL AND value_range_start IS NULL AND value_range_end IS NULL AND value_range_start_base IS NULL AND value_range_end_base IS NULL AND value_text IS NULL AND value_boolean IS NULL AND value_date IS NULL AND value_option_id IS NULL)
       OR
-      (data_type = 'boolean' AND value_boolean IS NOT NULL AND value_text IS NULL AND value_number IS NULL AND value_date IS NULL AND value_option_id IS NULL)
+      (data_type = 'range' AND value_range_start IS NOT NULL AND value_range_end IS NOT NULL AND value_range_start <= value_range_end AND value_text IS NULL AND value_number IS NULL AND value_number_base IS NULL AND value_boolean IS NULL AND value_date IS NULL AND value_option_id IS NULL)
       OR
-      (data_type = 'date' AND value_date IS NOT NULL AND value_text IS NULL AND value_number IS NULL AND value_boolean IS NULL AND value_option_id IS NULL)
+      (data_type = 'boolean' AND value_boolean IS NOT NULL AND value_text IS NULL AND value_number IS NULL AND value_number_base IS NULL AND value_range_start IS NULL AND value_range_end IS NULL AND value_range_start_base IS NULL AND value_range_end_base IS NULL AND unit_id IS NULL AND value_date IS NULL AND value_option_id IS NULL)
       OR
-      (data_type = 'enum' AND value_option_id IS NOT NULL AND value_text IS NULL AND value_number IS NULL AND value_boolean IS NULL AND value_date IS NULL)
+      (data_type = 'date' AND value_date IS NOT NULL AND value_text IS NULL AND value_number IS NULL AND value_number_base IS NULL AND value_range_start IS NULL AND value_range_end IS NULL AND value_range_start_base IS NULL AND value_range_end_base IS NULL AND unit_id IS NULL AND value_boolean IS NULL AND value_option_id IS NULL)
+      OR
+      (data_type = 'enum' AND value_option_id IS NOT NULL AND value_text IS NULL AND value_number IS NULL AND value_number_base IS NULL AND value_range_start IS NULL AND value_range_end IS NULL AND value_range_start_base IS NULL AND value_range_end_base IS NULL AND unit_id IS NULL AND value_boolean IS NULL AND value_date IS NULL)
+    ),
+    CHECK (
+      value_range_start_base IS NULL
+      OR value_range_end_base IS NULL
+      OR value_range_start_base <= value_range_end_base
     )
 );
 

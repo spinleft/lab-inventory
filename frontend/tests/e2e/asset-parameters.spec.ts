@@ -47,6 +47,20 @@ test("manage asset parameters grouped by unit dimension", async ({ page }) => {
       unit_dimension: null,
       updated_at: "2026-06-23T09:05:00Z",
     },
+    {
+      code: "wavelength_range",
+      created_at: "2026-06-23T09:10:00Z",
+      data_type: "range",
+      default_unit_id: millimeterUnitId,
+      description: "Visible spectrum",
+      is_archived: false,
+      laboratory_id: laboratoryId,
+      name: "波长范围",
+      options: [],
+      parameter_type_id: "20000000-0000-4000-8000-000000000203",
+      unit_dimension: "length",
+      updated_at: "2026-06-23T09:10:00Z",
+    },
   ];
 
   await page.route("**/api/v1/auth/me", async (route) => {
@@ -123,25 +137,28 @@ test("manage asset parameters grouped by unit dimension", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "长度" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "无单位维度" })).toBeVisible();
   await expect(page.getByText("序列号")).toBeVisible();
+  await expect(page.getByText("波长范围")).toBeVisible();
   await expectAlignedParameterRows(page);
   await expectNoHorizontalOverflow(page);
 
   await page.getByRole("button", { name: "新建参数" }).click();
   await expect(page.getByRole("heading", { name: "新建资产参数" })).toBeVisible();
-  await page.getByLabel("参数名称").fill("宽度");
-  await page.getByLabel("参数代码").fill("width");
+  await page.getByLabel("数据类型").click();
+  await page.getByRole("option", { name: "范围" }).click();
+  await page.getByLabel("参数名称").fill("厚度范围");
+  await page.getByLabel("参数代码").fill("thickness_range");
   await page.getByRole("button", { name: "保存" }).click();
 
   await expect.poll(() => postedParameter).toMatchObject({
-    code: "width",
-    data_type: "number",
+    code: "thickness_range",
+    data_type: "range",
     default_unit_id: null,
     is_archived: false,
-    name: "宽度",
+    name: "厚度范围",
     options: [],
     unit_dimension: "length",
   });
-  await expect(page.getByText("宽度")).toBeVisible();
+  await expect(page.getByText("厚度范围")).toBeVisible();
   await expectAlignedParameterRows(page);
   await expectNoHorizontalOverflow(page);
 });

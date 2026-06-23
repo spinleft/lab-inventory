@@ -201,6 +201,19 @@ async fn create_asset_parameter_rejects_invalid_conflicting_or_inconsistent_inpu
         .post_asset_parameter(
             laboratory_id,
             &serde_json::json!({
+                "code": "missing_range_default_unit",
+                "name": "Missing Range Default Unit",
+                "data_type": "range",
+                "default_unit_id": Uuid::new_v4()
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+
+    let response = app
+        .post_asset_parameter(
+            laboratory_id,
+            &serde_json::json!({
                 "code": "bad_default_unit",
                 "name": "Bad Default Unit",
                 "data_type": "number",
@@ -237,6 +250,85 @@ async fn create_asset_parameter_rejects_invalid_conflicting_or_inconsistent_inpu
         )
         .await;
     assert_eq!(response.status().as_u16(), 409);
+}
+
+#[tokio::test]
+async fn range_asset_parameters_allow_units_and_enforce_value_bounds() {
+    let app = spawn_app().await;
+    app.test_user.login(&app).await;
+    let laboratory_id = app.create_laboratory("Asset Parameter Range Lab").await;
+    let nanometer_unit_id = insert_nanometer_unit(&app).await;
+
+    let response = app
+        .post_asset_parameter(
+            laboratory_id,
+            &serde_json::json!({
+                "code": "wavelength_range",
+                "name": "Wavelength Range",
+                "data_type": "range",
+                "default_unit_id": nanometer_unit_id,
+                "description": "Visible spectrum, for example 400-700 nm"
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 201);
+    let parameter: serde_json::Value = response.json().await.unwrap();
+    let parameter_id = parameter_id(&parameter);
+    assert_eq!(parameter["data_type"], "range");
+    assert_eq!(parameter["unit_dimension"], "length");
+    assert_eq!(parameter["default_unit_id"], nanometer_unit_id.to_string());
+
+    let asset_id = insert_test_asset(&app, laboratory_id, nanometer_unit_id).await;
+    sqlx::query(
+        r#"
+        INSERT INTO asset_parameter_values (
+            value_id,
+            laboratory_id,
+            asset_id,
+            parameter_type_id,
+            data_type,
+            value_range_start,
+            value_range_end,
+            value_range_start_base,
+            value_range_end_base,
+            unit_id
+        )
+        VALUES ($1, $2, $3, $4, 'range', 400, 700, 0.0000004, 0.0000007, $5)
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(laboratory_id)
+    .bind(asset_id)
+    .bind(parameter_id)
+    .bind(nanometer_unit_id)
+    .execute(&app.db_pool)
+    .await
+    .unwrap();
+
+    let invalid_asset_id = insert_test_asset(&app, laboratory_id, nanometer_unit_id).await;
+    let result = sqlx::query(
+        r#"
+        INSERT INTO asset_parameter_values (
+            value_id,
+            laboratory_id,
+            asset_id,
+            parameter_type_id,
+            data_type,
+            value_range_start,
+            value_range_end,
+            unit_id
+        )
+        VALUES ($1, $2, $3, $4, 'range', 700, 400, $5)
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(laboratory_id)
+    .bind(invalid_asset_id)
+    .bind(parameter_id)
+    .bind(nanometer_unit_id)
+    .execute(&app.db_pool)
+    .await;
+    assert!(result.is_err());
 }
 
 #[tokio::test]
@@ -379,6 +471,51 @@ async fn insert_assignment(
     .execute(&app.db_pool)
     .await
     .unwrap();
+}
+
+async fn insert_nanometer_unit(app: &TestApp) -> Uuid {
+    sqlx::query_scalar(
+        r#"
+        INSERT INTO units (
+            unit_id,
+            code,
+            name,
+            symbol,
+            dimension,
+            scale_to_base,
+            allow_decimal
+        )
+        VALUES ($1, 'nm', 'Nanometer', 'nm', 'length', 0.000000001, true)
+        RETURNING unit_id
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .fetch_one(&app.db_pool)
+    .await
+    .unwrap()
+}
+
+async fn insert_test_asset(app: &TestApp, laboratory_id: Uuid, unit_id: Uuid) -> Uuid {
+    sqlx::query_scalar(
+        r#"
+        INSERT INTO assets (
+            asset_id,
+            laboratory_id,
+            tracking_mode,
+            name,
+            default_unit_id
+        )
+        VALUES ($1, $2, 'quantity', $3, $4)
+        RETURNING asset_id
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(laboratory_id)
+    .bind(format!("Test Asset {}", Uuid::new_v4()))
+    .bind(unit_id)
+    .fetch_one(&app.db_pool)
+    .await
+    .unwrap()
 }
 
 fn parameter_id(parameter: &serde_json::Value) -> Uuid {

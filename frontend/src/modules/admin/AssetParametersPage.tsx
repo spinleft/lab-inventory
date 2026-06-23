@@ -68,6 +68,7 @@ type AssetParameterDimensionGroup = {
 const DATA_TYPE_OPTIONS = [
   { label: "文本", value: "text" },
   { label: "数字", value: "number" },
+  { label: "范围", value: "range" },
   { label: "布尔", value: "boolean" },
   { label: "日期", value: "date" },
   { label: "枚举", value: "enum" },
@@ -275,7 +276,7 @@ export function AssetParametersPage() {
       <PageHeader
         kicker="管理"
         title="资产参数"
-        description="按实验室维护资产参数，并通过单位维度组织数字参数。"
+        description="按实验室维护资产参数，并通过单位维度组织数字和范围参数。"
         actions={pageActions}
       />
       <section className="panel">
@@ -465,16 +466,17 @@ function AssetParameterEditor({
 
   function updateDataType(value: string) {
     const dataType = value as AssetParameter["data_type"];
+    const supportsUnits = dataTypeSupportsUnits(dataType);
     setValues((current) => ({
       ...current,
       data_type: dataType,
-      default_unit_id: dataType === "number" ? current.default_unit_id : "",
+      default_unit_id: supportsUnits ? current.default_unit_id : "",
       options:
         dataType === "enum" && current.options.length === 0
           ? [emptyOptionForm()]
           : current.options,
       unit_dimension:
-        dataType === "number" ? current.unit_dimension || DEFAULT_UNIT_DIMENSION : "",
+        supportsUnits ? current.unit_dimension || DEFAULT_UNIT_DIMENSION : "",
     }));
   }
 
@@ -554,12 +556,16 @@ function AssetParameterEditor({
     const payload: AssetParameterPayload = {
       code: values.code.trim(),
       data_type: values.data_type,
-      default_unit_id: values.data_type === "number" ? values.default_unit_id || null : null,
+      default_unit_id: dataTypeSupportsUnits(values.data_type)
+        ? values.default_unit_id || null
+        : null,
       description: optionalText(values.description),
       is_archived: values.is_archived,
       name: values.name.trim(),
       options: optionsResult.options,
-      unit_dimension: values.data_type === "number" ? optionalText(values.unit_dimension) : null,
+      unit_dimension: dataTypeSupportsUnits(values.data_type)
+        ? optionalText(values.unit_dimension)
+        : null,
     };
 
     if (!payload.name || !payload.code) {
@@ -600,7 +606,7 @@ function AssetParameterEditor({
   return (
     <Dialog
       sidePanel
-      description="数字参数可设置单位维度和默认单位；枚举参数需要至少一个启用选项。"
+      description="数字和范围参数可设置单位维度和默认单位；枚举参数需要至少一个启用选项。"
       onOpenChange={(nextOpen) => {
         if (!nextOpen && !isSaving) onClose();
       }}
@@ -646,7 +652,7 @@ function AssetParameterEditor({
               onValueChange={updateDataType}
             />
           </FormField>
-          {values.data_type === "number" ? (
+          {dataTypeSupportsUnits(values.data_type) ? (
             <FormField htmlFor="asset-parameter-unit-dimension" label="单位维度">
               <Select
                 id="asset-parameter-unit-dimension"
@@ -658,7 +664,7 @@ function AssetParameterEditor({
             </FormField>
           ) : null}
         </div>
-        {values.data_type === "number" ? (
+        {dataTypeSupportsUnits(values.data_type) ? (
           <FormField htmlFor="asset-parameter-default-unit" label="默认单位">
             <select
               className="input"
@@ -953,9 +959,14 @@ function dataTypeLabel(dataType: AssetParameter["data_type"]) {
 
 function dataTypeTone(dataType: AssetParameter["data_type"]) {
   if (dataType === "number") return "accent";
+  if (dataType === "range") return "accent";
   if (dataType === "enum") return "warning";
   if (dataType === "boolean") return "success";
   return "default";
+}
+
+function dataTypeSupportsUnits(dataType: AssetParameter["data_type"]) {
+  return dataType === "number" || dataType === "range";
 }
 
 function defaultUnitLabel(unitId: string | null, unitsById: Map<string, Unit>) {

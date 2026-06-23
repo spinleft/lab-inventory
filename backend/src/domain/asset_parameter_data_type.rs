@@ -2,6 +2,7 @@
 pub enum AssetParameterDataType {
     Text,
     Number,
+    Range,
     Boolean,
     Date,
     Enum,
@@ -12,6 +13,7 @@ impl AssetParameterDataType {
         match s.trim() {
             "text" => Ok(Self::Text),
             "number" => Ok(Self::Number),
+            "range" => Ok(Self::Range),
             "boolean" => Ok(Self::Boolean),
             "date" => Ok(Self::Date),
             "enum" => Ok(Self::Enum),
@@ -23,6 +25,7 @@ impl AssetParameterDataType {
         match self {
             Self::Text => "text",
             Self::Number => "number",
+            Self::Range => "range",
             Self::Boolean => "boolean",
             Self::Date => "date",
             Self::Enum => "enum",

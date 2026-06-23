@@ -233,10 +233,13 @@ async fn normalize_unit_configuration(
     unit_dimension: Option<&str>,
     default_unit_id: Option<Uuid>,
 ) -> Result<Option<String>, CreateAssetParameterError> {
-    if data_type != AssetParameterDataType::Number {
+    if !matches!(
+        data_type,
+        AssetParameterDataType::Number | AssetParameterDataType::Range
+    ) {
         if unit_dimension.is_some() || default_unit_id.is_some() {
             return Err(CreateAssetParameterError::ValidationError(
-                "Units are only allowed for number asset parameters".into(),
+                "Units are only allowed for number or range asset parameters".into(),
             ));
         }
         return Ok(None);

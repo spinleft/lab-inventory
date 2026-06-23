@@ -52,20 +52,20 @@ describe("admin api schemas", () => {
   it("parses asset parameters from the backend", () => {
     expect(
       assetParameterSchema.parse({
-        code: "max_load",
+        code: "wavelength_range",
         created_at: "2026-06-17T00:00:00Z",
-        data_type: "number",
+        data_type: "range",
         default_unit_id: "00000000-0000-4000-8000-000000000051",
-        description: "Maximum load",
+        description: "Visible spectrum",
         is_archived: false,
         laboratory_id: "00000000-0000-4000-8000-000000000011",
-        name: "最大载荷",
+        name: "波长范围",
         options: [],
         parameter_type_id: "00000000-0000-4000-8000-000000000061",
-        unit_dimension: "mass",
+        unit_dimension: "length",
         updated_at: "2026-06-17T00:00:00Z",
-      }).unit_dimension,
-    ).toBe("mass");
+      }).data_type,
+    ).toBe("range");
   });
 
   it("parses locations from the backend", () => {

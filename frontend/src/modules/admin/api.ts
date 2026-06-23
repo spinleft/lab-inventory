@@ -45,7 +45,7 @@ export const assetParameterSchema = z.object({
   laboratory_id: z.string().uuid(),
   code: z.string(),
   name: z.string(),
-  data_type: z.enum(["text", "number", "boolean", "date", "enum"]),
+  data_type: z.enum(["text", "number", "range", "boolean", "date", "enum"]),
   unit_dimension: z.string().nullable(),
   default_unit_id: z.string().uuid().nullable(),
   description: z.string().nullable(),
