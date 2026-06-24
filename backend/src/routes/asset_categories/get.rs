@@ -1,4 +1,6 @@
-use super::model::{AssetCategoryResponse, fetch_asset_category};
+use super::model::{
+    AssetCategoryResponse, fetch_asset_category, fetch_asset_category_parameter_assignments,
+};
 use crate::access_control::{Actor, get_actor};
 use crate::domain::{AssetCategoryId, LaboratoryId, UserId};
 use crate::utils::error_chain_fmt;
@@ -59,8 +61,13 @@ pub async fn get_asset_category(
     let laboratory_id = LaboratoryId::parse(category.laboratory_id)
         .map_err(|e| GetAssetCategoryError::UnexpectedError(anyhow!("{e}")))?;
     validate_read_permission(&actor, &laboratory_id)?;
+    let parameter_assignments =
+        fetch_asset_category_parameter_assignments(&pool, category.category_id).await?;
 
-    Ok(HttpResponse::Ok().json(AssetCategoryResponse::from(category)))
+    Ok(HttpResponse::Ok().json(AssetCategoryResponse::from_parts(
+        category,
+        parameter_assignments,
+    )))
 }
 
 fn validate_read_permission(

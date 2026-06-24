@@ -1,5 +1,6 @@
 use super::model::{
     delete_asset_category_rollback_details, fetch_asset_category_for_update,
+    fetch_asset_category_parameter_assignments_for_categories_for_update,
     fetch_asset_category_tree_for_update,
 };
 use crate::access_control::{Actor, get_actor};
@@ -74,6 +75,16 @@ pub async fn delete_asset_category(
     let categories =
         fetch_asset_category_tree_for_update(&mut transaction, laboratory_id, &existing.path)
             .await?;
+    let category_ids: Vec<_> = categories
+        .iter()
+        .map(|category| category.category_id)
+        .collect();
+    let parameter_assignments =
+        fetch_asset_category_parameter_assignments_for_categories_for_update(
+            &mut transaction,
+            &category_ids,
+        )
+        .await?;
     let cleared_asset_ids =
         clear_asset_category_references(&mut transaction, laboratory_id, &existing.path).await?;
     delete_asset_category_tree(&mut transaction, laboratory_id, &existing.path).await?;
@@ -84,7 +95,11 @@ pub async fn delete_asset_category(
         AuditAction::Delete,
         AuditResource::AssetCategory,
         Some(existing.category_id),
-        delete_asset_category_rollback_details(&categories, &cleared_asset_ids),
+        delete_asset_category_rollback_details(
+            &categories,
+            &cleared_asset_ids,
+            &parameter_assignments,
+        ),
     )
     .await?;
     transaction

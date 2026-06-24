@@ -121,6 +121,145 @@ async fn list_and_get_asset_categories_are_laboratory_scoped() {
 }
 
 #[tokio::test]
+async fn create_list_get_and_update_asset_category_parameter_assignments() {
+    let app = spawn_app().await;
+    app.test_user.login(&app).await;
+    let laboratory_id = app
+        .create_laboratory("Asset Category Parameter Assignment Lab")
+        .await;
+    let required_parameter =
+        create_text_parameter(&app, laboratory_id, "serial_number", "Serial Number").await;
+    let optional_parameter =
+        create_text_parameter(&app, laboratory_id, "manufacturer", "Manufacturer").await;
+    let replacement_parameter =
+        create_text_parameter(&app, laboratory_id, "calibration_date", "Calibration Date").await;
+    let required_parameter_id = parameter_id(&required_parameter);
+    let optional_parameter_id = parameter_id(&optional_parameter);
+    let replacement_parameter_id = parameter_id(&replacement_parameter);
+
+    let response = app
+        .post_asset_category(
+            laboratory_id,
+            &serde_json::json!({
+                "name": "Microscopes",
+                "code": "microscopes",
+                "parameter_assignments": [
+                    {
+                        "parameter_type_id": required_parameter_id,
+                        "is_required": true,
+                        "applies_to_descendants": true,
+                        "sort_order": 2
+                    },
+                    {
+                        "parameter_type_id": optional_parameter_id,
+                        "is_required": false,
+                        "applies_to_descendants": false,
+                        "sort_order": 1
+                    }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 201);
+    let category: serde_json::Value = response.json().await.unwrap();
+    let category_id = category_id(&category);
+    assert_eq!(
+        assignment_parameter_ids(&category),
+        vec![optional_parameter_id, required_parameter_id]
+    );
+    assert_eq!(category["parameter_assignments"][0]["is_required"], false);
+    assert_eq!(
+        category["parameter_assignments"][0]["applies_to_descendants"],
+        false
+    );
+
+    let response = app.get_asset_category(category_id).await;
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(assignment_parameter_ids(&body).len(), 2);
+
+    let response = app.get_asset_categories(laboratory_id).await;
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(
+        assignment_parameter_ids(&body.as_array().unwrap()[0]),
+        vec![optional_parameter_id, required_parameter_id]
+    );
+
+    let assignment_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM asset_parameter_assignments WHERE category_id = $1",
+    )
+    .bind(category_id)
+    .fetch_one(&app.db_pool)
+    .await
+    .unwrap();
+    assert_eq!(assignment_count, 2);
+
+    let response = app
+        .patch_asset_category(
+            category_id,
+            &serde_json::json!({
+                "parameter_assignments": [
+                    {
+                        "parameter_type_id": replacement_parameter_id,
+                        "is_required": true,
+                        "applies_to_descendants": false,
+                        "sort_order": 1
+                    },
+                    {
+                        "parameter_type_id": optional_parameter_id,
+                        "is_required": true,
+                        "applies_to_descendants": true,
+                        "sort_order": 3
+                    }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let updated: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(
+        assignment_parameter_ids(&updated),
+        vec![replacement_parameter_id, optional_parameter_id]
+    );
+    assert_eq!(updated["parameter_assignments"][0]["is_required"], true);
+    assert_eq!(
+        updated["parameter_assignments"][0]["applies_to_descendants"],
+        false
+    );
+    assert_eq!(updated["parameter_assignments"][1]["sort_order"], 3);
+
+    let response = app
+        .patch_asset_category(
+            category_id,
+            &serde_json::json!({ "name": "Optical Microscopes" }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let updated_without_assignments: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(
+        assignment_parameter_ids(&updated_without_assignments),
+        vec![replacement_parameter_id, optional_parameter_id]
+    );
+
+    let audit_details = latest_audit_details(
+        &app,
+        app.test_user.user_id,
+        category_id,
+        "update",
+        "asset_category",
+    )
+    .await;
+    assert!(
+        audit_details["rollback"]["values"]["parameter_assignments"]
+            .as_array()
+            .unwrap()
+            .len()
+            >= 2
+    );
+}
+
+#[tokio::test]
 async fn create_asset_category_rejects_invalid_or_conflicting_input() {
     let app = spawn_app().await;
     app.test_user.login(&app).await;
@@ -182,6 +321,80 @@ async fn create_asset_category_rejects_invalid_or_conflicting_input() {
                 "parent_category_id": category_id(&other_parent),
                 "name": "Cross Lab Child",
                 "code": "cross_lab_child"
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+}
+
+#[tokio::test]
+async fn create_asset_category_rejects_invalid_parameter_assignments() {
+    let app = spawn_app().await;
+    app.test_user.login(&app).await;
+    let laboratory_id = app
+        .create_laboratory("Asset Category Invalid Assignment Lab")
+        .await;
+    let other_laboratory_id = app
+        .create_laboratory("Asset Category Invalid Assignment Other Lab")
+        .await;
+    let parameter =
+        create_text_parameter(&app, laboratory_id, "serial_number", "Serial Number").await;
+    let other_parameter =
+        create_text_parameter(&app, other_laboratory_id, "serial_number", "Serial Number").await;
+    let own_parameter_id = parameter_id(&parameter);
+    let other_parameter_id = parameter_id(&other_parameter);
+    let category = create_category(&app, laboratory_id, None, "Equipment", "equipment").await;
+    let category_id = category_id(&category);
+
+    let response = app
+        .post_asset_category(
+            laboratory_id,
+            &serde_json::json!({
+                "name": "Duplicate Parameter",
+                "code": "duplicate_parameter",
+                "parameter_assignments": [
+                    { "parameter_type_id": own_parameter_id },
+                    { "parameter_type_id": own_parameter_id }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+
+    let response = app
+        .patch_asset_category(
+            category_id,
+            &serde_json::json!({
+                "parameter_assignments": [
+                    { "parameter_type_id": own_parameter_id },
+                    { "parameter_type_id": own_parameter_id }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+
+    let response = app
+        .post_asset_category(
+            laboratory_id,
+            &serde_json::json!({
+                "name": "Cross Lab Parameter",
+                "code": "cross_lab_parameter",
+                "parameter_assignments": [
+                    { "parameter_type_id": other_parameter_id }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+
+    let response = app
+        .patch_asset_category(
+            category_id,
+            &serde_json::json!({
+                "parameter_assignments": [
+                    { "parameter_type_id": other_parameter_id }
+                ]
             }),
         )
         .await;
@@ -447,8 +660,54 @@ async fn create_category(
     response.json().await.unwrap()
 }
 
+async fn create_text_parameter(
+    app: &TestApp,
+    laboratory_id: Uuid,
+    code: &str,
+    name: &str,
+) -> serde_json::Value {
+    let response = app
+        .post_asset_parameter(
+            laboratory_id,
+            &serde_json::json!({
+                "code": code,
+                "name": name,
+                "data_type": "text",
+                "description": null,
+                "is_archived": false,
+                "options": []
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 201);
+    response.json().await.unwrap()
+}
+
 fn category_id(category: &serde_json::Value) -> Uuid {
     category["category_id"].as_str().unwrap().parse().unwrap()
+}
+
+fn parameter_id(parameter: &serde_json::Value) -> Uuid {
+    parameter["parameter_type_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap()
+}
+
+fn assignment_parameter_ids(category: &serde_json::Value) -> Vec<Uuid> {
+    category["parameter_assignments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|assignment| {
+            assignment["parameter_type_id"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap()
+        })
+        .collect()
 }
 
 fn category_paths(body: &serde_json::Value) -> Vec<&str> {

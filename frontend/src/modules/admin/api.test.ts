@@ -43,10 +43,19 @@ describe("admin api schemas", () => {
         laboratory_id: "00000000-0000-4000-8000-000000000011",
         name: "显微镜",
         parent_category_id: null,
+        parameter_assignments: [
+          {
+            applies_to_descendants: true,
+            assignment_id: "00000000-0000-4000-8000-000000000071",
+            is_required: true,
+            parameter_type_id: "00000000-0000-4000-8000-000000000061",
+            sort_order: 1,
+          },
+        ],
         path: "microscope",
         updated_at: "2026-06-17T00:00:00Z",
-      }).path,
-    ).toBe("microscope");
+      }).parameter_assignments[0].sort_order,
+    ).toBe(1);
   });
 
   it("parses asset parameters from the backend", () => {

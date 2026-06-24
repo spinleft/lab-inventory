@@ -16,6 +16,14 @@ export const laboratorySchema = z.object({
 
 const laboratoriesSchema = z.array(laboratorySchema);
 
+export const assetCategoryParameterAssignmentSchema = z.object({
+  assignment_id: z.string().uuid(),
+  parameter_type_id: z.string().uuid(),
+  applies_to_descendants: z.boolean(),
+  is_required: z.boolean(),
+  sort_order: z.number(),
+});
+
 export const assetCategorySchema = z.object({
   category_id: z.string().uuid(),
   laboratory_id: z.string().uuid(),
@@ -25,6 +33,7 @@ export const assetCategorySchema = z.object({
   path: z.string(),
   depth: z.number(),
   description: z.string().nullable(),
+  parameter_assignments: z.array(assetCategoryParameterAssignmentSchema),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -108,6 +117,9 @@ const usersSchema = z.array(userSchema);
 
 export type Laboratory = z.infer<typeof laboratorySchema>;
 export type AssetCategory = z.infer<typeof assetCategorySchema>;
+export type AssetCategoryParameterAssignment = z.infer<
+  typeof assetCategoryParameterAssignmentSchema
+>;
 export type AssetParameter = z.infer<typeof assetParameterSchema>;
 export type AssetParameterOption = z.infer<typeof assetParameterOptionSchema>;
 export type Location = z.infer<typeof locationSchema>;
@@ -126,6 +138,14 @@ export type AssetCategoryPayload = {
   name: string;
   code: string;
   description: string | null;
+  parameter_assignments?: AssetCategoryParameterAssignmentPayload[];
+};
+
+export type AssetCategoryParameterAssignmentPayload = {
+  parameter_type_id: string;
+  applies_to_descendants: boolean;
+  is_required: boolean;
+  sort_order: number;
 };
 
 export type AssetParameterOptionPayload = {

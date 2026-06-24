@@ -1,6 +1,8 @@
 use super::model::{
-    AssetCategoryResponse, AssetCategoryRow, create_asset_category_rollback_details,
-    fetch_asset_category_for_update, map_database_conflict,
+    AssetCategoryParameterAssignmentInput, AssetCategoryResponse, AssetCategoryRow,
+    create_asset_category_rollback_details, fetch_asset_category_for_update,
+    fetch_asset_parameter_ids_for_laboratory, insert_asset_category_parameter_assignments,
+    map_database_conflict,
 };
 use crate::access_control::{Actor, get_actor};
 use crate::audit::{AuditAction, AuditResource, record_audit};
@@ -12,6 +14,7 @@ use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use serde::Deserialize;
 use sqlx::{PgPool, Postgres, Transaction};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -21,6 +24,16 @@ pub struct JsonData {
     name: String,
     code: String,
     description: Option<String>,
+    parameter_assignments: Option<Vec<ParameterAssignmentJsonData>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParameterAssignmentJsonData {
+    parameter_type_id: Uuid,
+    applies_to_descendants: Option<bool>,
+    is_required: Option<bool>,
+    sort_order: Option<i32>,
 }
 
 impl TryFrom<JsonData> for NewAssetCategory {
@@ -86,8 +99,12 @@ pub async fn create_asset_category(
         .ok_or(CreateAssetCategoryError::Forbidden(
             "Actor not found in the database".into(),
         ))?;
-    let new_category = NewAssetCategory::try_from(payload.into_inner())
-        .map_err(CreateAssetCategoryError::ValidationError)?;
+    let payload = payload.into_inner();
+    let parameter_assignments =
+        parse_parameter_assignments(payload.parameter_assignments.as_deref().unwrap_or(&[]))
+            .map_err(CreateAssetCategoryError::ValidationError)?;
+    let new_category =
+        NewAssetCategory::try_from(payload).map_err(CreateAssetCategoryError::ValidationError)?;
     validate_create_permission(&actor, &laboratory_id)?;
 
     let mut transaction = pool
@@ -96,6 +113,8 @@ pub async fn create_asset_category(
         .context("Failed to acquire a Postgres connection from the pool")?;
     let parent = fetch_parent_category(&mut transaction, new_category.parent_category_id).await?;
     validate_parent(&parent, &laboratory_id)?;
+    validate_parameter_assignments(&mut transaction, *laboratory_id, &parameter_assignments)
+        .await?;
     let parent_category_id = new_category.parent_category_id;
     let (path, depth) = build_path_and_depth(parent.as_ref(), new_category.code.as_ref());
     let category = insert_asset_category(
@@ -107,6 +126,13 @@ pub async fn create_asset_category(
         &path,
         depth,
         new_category.description.as_deref(),
+    )
+    .await?;
+    let parameter_assignments = insert_asset_category_parameter_assignments(
+        &mut transaction,
+        category.laboratory_id,
+        category.category_id,
+        &parameter_assignments,
     )
     .await?;
 
@@ -124,7 +150,12 @@ pub async fn create_asset_category(
         .await
         .context("Failed to commit SQL transaction to store a new user.")?;
 
-    Ok(HttpResponse::Created().json(AssetCategoryResponse::from(category)))
+    Ok(
+        HttpResponse::Created().json(AssetCategoryResponse::from_parts(
+            category,
+            parameter_assignments,
+        )),
+    )
 }
 
 fn validate_create_permission(
@@ -170,6 +201,50 @@ fn validate_parent(
             ));
         }
     }
+    Ok(())
+}
+
+fn parse_parameter_assignments(
+    assignments: &[ParameterAssignmentJsonData],
+) -> Result<Vec<AssetCategoryParameterAssignmentInput>, String> {
+    let mut seen_parameter_ids = HashSet::new();
+    let mut parsed = Vec::with_capacity(assignments.len());
+
+    for assignment in assignments {
+        if !seen_parameter_ids.insert(assignment.parameter_type_id) {
+            return Err("Asset parameter assignments must be unique".into());
+        }
+
+        parsed.push(AssetCategoryParameterAssignmentInput {
+            parameter_type_id: assignment.parameter_type_id,
+            applies_to_descendants: assignment.applies_to_descendants.unwrap_or(true),
+            is_required: assignment.is_required.unwrap_or(true),
+            sort_order: assignment.sort_order.unwrap_or(0),
+        });
+    }
+
+    Ok(parsed)
+}
+
+async fn validate_parameter_assignments(
+    transaction: &mut Transaction<'_, Postgres>,
+    laboratory_id: Uuid,
+    assignments: &[AssetCategoryParameterAssignmentInput],
+) -> Result<(), CreateAssetCategoryError> {
+    let parameter_type_ids: Vec<_> = assignments
+        .iter()
+        .map(|assignment| assignment.parameter_type_id)
+        .collect();
+    let valid_parameter_type_ids =
+        fetch_asset_parameter_ids_for_laboratory(transaction, laboratory_id, &parameter_type_ids)
+            .await?;
+
+    if valid_parameter_type_ids.len() != parameter_type_ids.len() {
+        return Err(CreateAssetCategoryError::ValidationError(
+            "Asset parameter does not belong to this laboratory".into(),
+        ));
+    }
+
     Ok(())
 }
 

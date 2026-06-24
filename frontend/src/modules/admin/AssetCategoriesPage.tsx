@@ -35,10 +35,13 @@ import {
 import {
   adminQueryKeys,
   type AssetCategory,
+  type AssetCategoryParameterAssignmentPayload,
   type AssetCategoryPayload,
+  type AssetParameter,
   type Laboratory,
   optionalText,
   useAssetCategories,
+  useAssetParameters,
   useCreateAssetCategory,
   useDeleteAssetCategory,
   useLaboratories,
@@ -59,7 +62,17 @@ type CategoryForm = {
   code: string;
   description: string;
   name: string;
+  parameter_assignments: CategoryParameterAssignmentForm[];
   parent_category_id: string;
+};
+
+type CategoryParameterAssignmentForm = {
+  applies_to_descendants: boolean;
+  assignment_id?: string;
+  client_id: string;
+  is_required: boolean;
+  parameter_type_id: string;
+  sort_order: string;
 };
 
 type CategoryTreeRow = {
@@ -69,6 +82,7 @@ type CategoryTreeRow = {
 
 const EMPTY_CATEGORIES: AssetCategory[] = [];
 const EMPTY_LABORATORIES: Laboratory[] = [];
+const EMPTY_PARAMETERS: AssetParameter[] = [];
 
 export function AssetCategoriesPage() {
   const { currentUser } = useAuth();
@@ -87,12 +101,17 @@ export function AssetCategoriesPage() {
     enabled: canManage && Boolean(selectedLaboratoryId),
     laboratoryId: selectedLaboratoryId,
   });
+  const parametersQuery = useAssetParameters({
+    enabled: canManage && Boolean(selectedLaboratoryId),
+    laboratoryId: selectedLaboratoryId,
+  });
   const createCategory = useCreateAssetCategory();
   const updateCategory = useUpdateAssetCategory();
   const deleteCategory = useDeleteAssetCategory();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const [editing, setEditing] = useState<CategoryEditorState | null>(null);
   const categories = categoriesQuery.data ?? EMPTY_CATEGORIES;
+  const parameters = parametersQuery.data ?? EMPTY_PARAMETERS;
   const childrenByParentId = useMemo(() => buildCategoryChildren(categories), [categories]);
   const visibleRows = useMemo(
     () => flattenVisibleCategories(childrenByParentId, expandedIds),
@@ -237,6 +256,8 @@ export function AssetCategoriesPage() {
         editing={editing}
         laboratoryId={selectedLaboratoryId}
         open={editing !== null}
+        parameters={parameters}
+        parametersLoading={parametersQuery.isLoading}
         updateCategory={updateCategory}
         onClose={() => setEditing(null)}
         onSaved={(parentCategoryId) => {
@@ -298,6 +319,7 @@ function CategoryTreeTable({
           <tr>
             <th>分类</th>
             <th>代码</th>
+            <th>参数</th>
             <th>描述</th>
             <th>更新时间</th>
             <th style={{ textAlign: "right" }}>操作</th>
@@ -344,6 +366,11 @@ function CategoryTreeTable({
                 </td>
                 <td>
                   <Badge>{category.code}</Badge>
+                </td>
+                <td>
+                  <Badge tone={category.parameter_assignments.length > 0 ? "accent" : "default"}>
+                    {category.parameter_assignments.length} 个
+                  </Badge>
                 </td>
                 <td>{category.description ?? "未填写"}</td>
                 <td>{formatDate(category.updated_at)}</td>
@@ -400,6 +427,8 @@ function CategoryEditor({
   onClose,
   onSaved,
   open,
+  parameters,
+  parametersLoading,
   updateCategory,
 }: {
   categories: AssetCategory[];
@@ -409,6 +438,8 @@ function CategoryEditor({
   onClose: () => void;
   onSaved: (parentCategoryId: string | null) => void;
   open: boolean;
+  parameters: AssetParameter[];
+  parametersLoading: boolean;
   updateCategory: ReturnType<typeof useUpdateAssetCategory>;
 }) {
   const toast = useToast();
@@ -436,12 +467,70 @@ function CategoryEditor({
       code: editing.category.code,
       description: editing.category.description ?? "",
       name: editing.category.name,
+      parameter_assignments: editing.category.parameter_assignments.map((assignment) => ({
+        applies_to_descendants: assignment.applies_to_descendants,
+        assignment_id: assignment.assignment_id,
+        client_id: assignment.assignment_id,
+        is_required: assignment.is_required,
+        parameter_type_id: assignment.parameter_type_id,
+        sort_order: String(assignment.sort_order),
+      })),
       parent_category_id: editing.category.parent_category_id ?? "",
     });
   }, [editing]);
 
-  function updateField(field: keyof CategoryForm, value: string) {
+  function updateField<K extends keyof Omit<CategoryForm, "parameter_assignments">>(
+    field: K,
+    value: CategoryForm[K],
+  ) {
     setValues((current) => ({ ...current, [field]: value }));
+  }
+
+  function addParameterAssignment() {
+    const selectedParameterIds = new Set(
+      values.parameter_assignments
+        .map((assignment) => assignment.parameter_type_id)
+        .filter(Boolean),
+    );
+    const nextParameter = parameters.find(
+      (parameter) =>
+        !parameter.is_archived && !selectedParameterIds.has(parameter.parameter_type_id),
+    );
+
+    if (!nextParameter) {
+      toast.error({ title: "没有可添加的启用参数" });
+      return;
+    }
+
+    setValues((current) => ({
+      ...current,
+      parameter_assignments: [
+        ...current.parameter_assignments,
+        emptyParameterAssignmentForm(nextParameter.parameter_type_id),
+      ],
+    }));
+  }
+
+  function updateParameterAssignment<K extends keyof CategoryParameterAssignmentForm>(
+    index: number,
+    field: K,
+    value: CategoryParameterAssignmentForm[K],
+  ) {
+    setValues((current) => ({
+      ...current,
+      parameter_assignments: current.parameter_assignments.map((assignment, assignmentIndex) =>
+        assignmentIndex === index ? { ...assignment, [field]: value } : assignment,
+      ),
+    }));
+  }
+
+  function removeParameterAssignment(index: number) {
+    setValues((current) => ({
+      ...current,
+      parameter_assignments: current.parameter_assignments.filter(
+        (_, assignmentIndex) => assignmentIndex !== index,
+      ),
+    }));
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -455,6 +544,7 @@ function CategoryEditor({
       code: values.code.trim(),
       description: optionalText(values.description),
       name: values.name.trim(),
+      parameter_assignments: [],
       parent_category_id: values.parent_category_id || null,
     };
 
@@ -462,6 +552,13 @@ function CategoryEditor({
       toast.error({ title: "请填写分类名和分类代码" });
       return;
     }
+
+    const assignmentsResult = normalizeParameterAssignments(values.parameter_assignments);
+    if (!assignmentsResult.ok) {
+      toast.error({ title: assignmentsResult.message });
+      return;
+    }
+    payload.parameter_assignments = assignmentsResult.parameter_assignments;
 
     if (isNew) {
       createCategory.mutate(
@@ -546,8 +643,151 @@ function CategoryEditor({
             onChange={(event) => updateField("description", event.target.value)}
           />
         </FormField>
+        <CategoryParameterAssignmentsEditor
+          assignments={values.parameter_assignments}
+          loading={parametersLoading}
+          parameters={parameters}
+          onAdd={addParameterAssignment}
+          onRemove={removeParameterAssignment}
+          onUpdate={updateParameterAssignment}
+        />
       </form>
     </Dialog>
+  );
+}
+
+function CategoryParameterAssignmentsEditor({
+  assignments,
+  loading,
+  onAdd,
+  onRemove,
+  onUpdate,
+  parameters,
+}: {
+  assignments: CategoryParameterAssignmentForm[];
+  loading: boolean;
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+  onUpdate: <K extends keyof CategoryParameterAssignmentForm>(
+    index: number,
+    field: K,
+    value: CategoryParameterAssignmentForm[K],
+  ) => void;
+  parameters: AssetParameter[];
+}) {
+  const selectedParameterIds = new Set(
+    assignments.map((assignment) => assignment.parameter_type_id).filter(Boolean),
+  );
+
+  return (
+    <div className="category-parameter-assignments-field">
+      <div className="parameter-options-header">
+        <div>
+          <h3>附带参数</h3>
+          <p>选择该分类资产需要维护的参数。</p>
+        </div>
+        <Button disabled={loading} type="button" onClick={onAdd}>
+          <Plus size={15} />
+          添加参数
+        </Button>
+      </div>
+      {assignments.length === 0 ? (
+        <div className="category-parameter-empty">未绑定参数</div>
+      ) : (
+        <div className="category-parameter-assignments-list">
+          {assignments.map((assignment, index) => {
+            const availableParameters = parameters.filter(
+              (parameter) =>
+                parameter.parameter_type_id === assignment.parameter_type_id ||
+                (!parameter.is_archived &&
+                  !selectedParameterIds.has(parameter.parameter_type_id)),
+            );
+
+            return (
+              <div className="category-parameter-assignment-row" key={assignment.client_id}>
+                <FormField
+                  htmlFor={`asset-category-parameter-${assignment.client_id}`}
+                  label="参数"
+                >
+                  <select
+                    className="input"
+                    id={`asset-category-parameter-${assignment.client_id}`}
+                    value={assignment.parameter_type_id}
+                    onChange={(event) =>
+                      onUpdate(index, "parameter_type_id", event.target.value)
+                    }
+                  >
+                    <option value="">请选择参数</option>
+                    {availableParameters.map((parameter) => (
+                      <option
+                        key={parameter.parameter_type_id}
+                        value={parameter.parameter_type_id}
+                      >
+                        {parameter.name}（{parameter.code}）
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+                <label
+                  className="checkbox-field category-parameter-assignment-toggle"
+                  htmlFor={`asset-category-parameter-required-${assignment.client_id}`}
+                >
+                  <input
+                    checked={assignment.is_required}
+                    id={`asset-category-parameter-required-${assignment.client_id}`}
+                    type="checkbox"
+                    onChange={(event) =>
+                      onUpdate(index, "is_required", event.target.checked)
+                    }
+                  />
+                  <span>
+                    <strong>必填</strong>
+                  </span>
+                </label>
+                <label
+                  className="checkbox-field category-parameter-assignment-toggle"
+                  htmlFor={`asset-category-parameter-descendants-${assignment.client_id}`}
+                >
+                  <input
+                    checked={assignment.applies_to_descendants}
+                    id={`asset-category-parameter-descendants-${assignment.client_id}`}
+                    type="checkbox"
+                    onChange={(event) =>
+                      onUpdate(index, "applies_to_descendants", event.target.checked)
+                    }
+                  />
+                  <span>
+                    <strong>适用于子分类</strong>
+                  </span>
+                </label>
+                <FormField
+                  htmlFor={`asset-category-parameter-sort-${assignment.client_id}`}
+                  label="排序"
+                >
+                  <input
+                    className="input"
+                    id={`asset-category-parameter-sort-${assignment.client_id}`}
+                    type="number"
+                    value={assignment.sort_order}
+                    onChange={(event) => onUpdate(index, "sort_order", event.target.value)}
+                  />
+                </FormField>
+                <Button
+                  aria-label="删除附带参数"
+                  className="category-parameter-assignment-delete"
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                  onClick={() => onRemove(index)}
+                >
+                  <Trash2 size={15} />
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -699,6 +939,59 @@ function emptyCategoryForm(parentCategoryId = ""): CategoryForm {
     code: "",
     description: "",
     name: "",
+    parameter_assignments: [],
     parent_category_id: parentCategoryId,
   };
+}
+
+function emptyParameterAssignmentForm(parameterTypeId = ""): CategoryParameterAssignmentForm {
+  return {
+    applies_to_descendants: true,
+    client_id: makeClientId(),
+    is_required: true,
+    parameter_type_id: parameterTypeId,
+    sort_order: "0",
+  };
+}
+
+function normalizeParameterAssignments(
+  assignments: CategoryParameterAssignmentForm[],
+):
+  | {
+      ok: true;
+      parameter_assignments: AssetCategoryParameterAssignmentPayload[];
+    }
+  | { ok: false; message: string } {
+  const parameterAssignments = assignments.map((assignment) => {
+    const sortOrder = Number(assignment.sort_order);
+
+    return {
+      applies_to_descendants: assignment.applies_to_descendants,
+      is_required: assignment.is_required,
+      parameter_type_id: assignment.parameter_type_id,
+      sort_order: sortOrder,
+    };
+  });
+
+  if (parameterAssignments.some((assignment) => !assignment.parameter_type_id)) {
+    return { ok: false, message: "请选择附带参数" };
+  }
+
+  if (parameterAssignments.some((assignment) => !Number.isInteger(assignment.sort_order))) {
+    return { ok: false, message: "附带参数排序必须是整数" };
+  }
+
+  const parameterIds = new Set<string>();
+  for (const assignment of parameterAssignments) {
+    if (parameterIds.has(assignment.parameter_type_id)) {
+      return { ok: false, message: "同一分类不能重复绑定同一个参数" };
+    }
+    parameterIds.add(assignment.parameter_type_id);
+  }
+
+  return { ok: true, parameter_assignments: parameterAssignments };
+}
+
+function makeClientId() {
+  return globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
 }

@@ -1,4 +1,7 @@
-use super::model::{AssetCategoryResponse, AssetCategoryRow, fetch_asset_category};
+use super::model::{
+    AssetCategoryResponse, AssetCategoryRow, fetch_asset_category,
+    fetch_asset_category_parameter_assignments_for_categories,
+};
 use crate::access_control::{Actor, get_actor};
 use crate::domain::{AssetCategoryId, LaboratoryId, UserId};
 use crate::utils::error_chain_fmt;
@@ -76,10 +79,21 @@ pub async fn list_asset_categories(
         None => None,
     };
 
-    let categories: Vec<_> = fetch_asset_categories(&pool, laboratory_id, root_path.as_deref())
-        .await?
+    let categories = fetch_asset_categories(&pool, laboratory_id, root_path.as_deref()).await?;
+    let category_ids: Vec<_> = categories
+        .iter()
+        .map(|category| category.category_id)
+        .collect();
+    let mut assignments_by_category_id =
+        fetch_asset_category_parameter_assignments_for_categories(&pool, &category_ids).await?;
+    let categories: Vec<_> = categories
         .into_iter()
-        .map(AssetCategoryResponse::from)
+        .map(|category| {
+            let parameter_assignments = assignments_by_category_id
+                .remove(&category.category_id)
+                .unwrap_or_default();
+            AssetCategoryResponse::from_parts(category, parameter_assignments)
+        })
         .collect();
 
     Ok(HttpResponse::Ok().json(categories))

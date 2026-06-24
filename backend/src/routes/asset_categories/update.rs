@@ -1,6 +1,8 @@
 use super::model::{
-    AssetCategoryResponse, AssetCategoryRow, fetch_asset_category_for_update,
-    map_database_conflict, update_asset_category_rollback_details,
+    AssetCategoryParameterAssignmentInput, AssetCategoryResponse, AssetCategoryRow,
+    fetch_asset_category_for_update, fetch_asset_category_parameter_assignments_for_update,
+    fetch_asset_parameter_ids_for_laboratory, map_database_conflict,
+    replace_asset_category_parameter_assignments, update_asset_category_rollback_details,
 };
 use crate::access_control::{Actor, get_actor};
 use crate::audit::{AuditAction, AuditResource, record_audit};
@@ -14,6 +16,7 @@ use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use serde::{Deserialize, Deserializer};
 use sqlx::{PgPool, Postgres, Transaction};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -25,6 +28,16 @@ pub struct JsonData {
     code: Option<String>,
     #[serde(default, deserialize_with = "deserialize_nullable")]
     description: Option<Option<String>>,
+    parameter_assignments: Option<Vec<ParameterAssignmentJsonData>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParameterAssignmentJsonData {
+    parameter_type_id: Uuid,
+    applies_to_descendants: Option<bool>,
+    is_required: Option<bool>,
+    sort_order: Option<i32>,
 }
 
 impl TryFrom<JsonData> for UpdateAssetCategory {
@@ -113,7 +126,14 @@ pub async fn update_asset_category(
         .ok_or(UpdateAssetCategoryError::Forbidden(
             "Actor not found in the database".into(),
         ))?;
-    let update_category = UpdateAssetCategory::try_from(payload.into_inner())
+    let payload = payload.into_inner();
+    let parameter_assignments = payload
+        .parameter_assignments
+        .as_deref()
+        .map(parse_parameter_assignments)
+        .transpose()
+        .map_err(UpdateAssetCategoryError::ValidationError)?;
+    let update_category = UpdateAssetCategory::try_from(payload)
         .map_err(UpdateAssetCategoryError::ValidationError)?;
 
     let mut transaction = pool
@@ -128,6 +148,19 @@ pub async fn update_asset_category(
     let laboratory_id = LaboratoryId::parse(existing.laboratory_id)
         .map_err(|e| UpdateAssetCategoryError::UnexpectedError(anyhow::anyhow!("{e}")))?;
     validate_update_permission(&actor, &laboratory_id)?;
+    let existing_parameter_assignments = fetch_asset_category_parameter_assignments_for_update(
+        &mut transaction,
+        existing.category_id,
+    )
+    .await?;
+    if let Some(parameter_assignments) = parameter_assignments.as_deref() {
+        validate_parameter_assignments(
+            &mut transaction,
+            existing.laboratory_id,
+            parameter_assignments,
+        )
+        .await?;
+    }
 
     let name = update_category
         .name
@@ -178,6 +211,18 @@ pub async fn update_asset_category(
         )
         .await?;
     }
+    let parameter_assignments = match parameter_assignments {
+        Some(parameter_assignments) => {
+            replace_asset_category_parameter_assignments(
+                &mut transaction,
+                updated.laboratory_id,
+                updated.category_id,
+                &parameter_assignments,
+            )
+            .await?
+        }
+        None => existing_parameter_assignments.clone(),
+    };
 
     record_audit(
         &mut transaction,
@@ -185,7 +230,7 @@ pub async fn update_asset_category(
         AuditAction::Update,
         AuditResource::AssetCategory,
         Some(updated.category_id),
-        update_asset_category_rollback_details(&existing),
+        update_asset_category_rollback_details(&existing, &existing_parameter_assignments),
     )
     .await?;
     transaction
@@ -193,7 +238,10 @@ pub async fn update_asset_category(
         .await
         .context("Failed to commit SQL transaction to update an asset category.")?;
 
-    Ok(HttpResponse::Ok().json(AssetCategoryResponse::from(updated)))
+    Ok(HttpResponse::Ok().json(AssetCategoryResponse::from_parts(
+        updated,
+        parameter_assignments,
+    )))
 }
 
 fn validate_update_permission(
@@ -207,6 +255,50 @@ fn validate_update_permission(
             "You don't have permission to update asset categories for this laboratory.".into(),
         ))
     }
+}
+
+fn parse_parameter_assignments(
+    assignments: &[ParameterAssignmentJsonData],
+) -> Result<Vec<AssetCategoryParameterAssignmentInput>, String> {
+    let mut seen_parameter_ids = HashSet::new();
+    let mut parsed = Vec::with_capacity(assignments.len());
+
+    for assignment in assignments {
+        if !seen_parameter_ids.insert(assignment.parameter_type_id) {
+            return Err("Asset parameter assignments must be unique".into());
+        }
+
+        parsed.push(AssetCategoryParameterAssignmentInput {
+            parameter_type_id: assignment.parameter_type_id,
+            applies_to_descendants: assignment.applies_to_descendants.unwrap_or(true),
+            is_required: assignment.is_required.unwrap_or(true),
+            sort_order: assignment.sort_order.unwrap_or(0),
+        });
+    }
+
+    Ok(parsed)
+}
+
+async fn validate_parameter_assignments(
+    transaction: &mut Transaction<'_, Postgres>,
+    laboratory_id: Uuid,
+    assignments: &[AssetCategoryParameterAssignmentInput],
+) -> Result<(), UpdateAssetCategoryError> {
+    let parameter_type_ids: Vec<_> = assignments
+        .iter()
+        .map(|assignment| assignment.parameter_type_id)
+        .collect();
+    let valid_parameter_type_ids =
+        fetch_asset_parameter_ids_for_laboratory(transaction, laboratory_id, &parameter_type_ids)
+            .await?;
+
+    if valid_parameter_type_ids.len() != parameter_type_ids.len() {
+        return Err(UpdateAssetCategoryError::ValidationError(
+            "Asset parameter does not belong to this laboratory".into(),
+        ));
+    }
+
+    Ok(())
 }
 
 async fn fetch_new_parent(
