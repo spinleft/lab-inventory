@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Pencil } from "lucide-react";
+import { ArrowLeft, Pencil, Plus } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../app/auth-context";
@@ -31,6 +31,8 @@ import {
   useUpdateAsset,
 } from "./api";
 import { AssetEditor } from "./AssetsPage";
+import { useCreateInventoryItems, useUpdateInventoryItem } from "../inventory/api";
+import { InventoryEditor } from "../inventory/InventoryPage";
 
 const EMPTY_CATEGORIES: AssetCategory[] = [];
 const EMPTY_UNITS: Unit[] = [];
@@ -42,6 +44,7 @@ export function AssetDetailPage() {
   const navigate = useNavigate();
   const { assetId = "" } = useParams();
   const [editing, setEditing] = useState(false);
+  const [creatingInventory, setCreatingInventory] = useState(false);
   const assetQuery = useAsset({ assetId, includeParameters: true });
   const asset = assetQuery.data;
   const canManage = canManageLaboratoryAssets(currentUser, asset?.laboratory_id);
@@ -60,6 +63,8 @@ export function AssetDetailPage() {
   const unitsQuery = useUnits();
   const createAsset = useCreateAsset();
   const updateAsset = useUpdateAsset();
+  const createInventoryItems = useCreateInventoryItems();
+  const updateInventoryItem = useUpdateInventoryItem();
   const categories = categoriesQuery.data ?? EMPTY_CATEGORIES;
   const units = unitsQuery.data ?? EMPTY_UNITS;
   const categoryById = new Map(categories.map((category) => [category.category_id, category]));
@@ -108,7 +113,7 @@ export function AssetDetailPage() {
       render: (item) => (
         <span className="asset-name-cell">
           <strong>{item.serial_number ?? item.batch_number ?? item.inventory_item_id}</strong>
-          <span>{trackingModeLabel(item.tracking_mode)}</span>
+          <span>{item.batch_number ? `批号 ${item.batch_number}` : "库存项"}</span>
         </span>
       ),
     },
@@ -137,7 +142,7 @@ export function AssetDetailPage() {
       header: "位置",
       key: "location",
       render: (item) =>
-        item.location_id ? locationsById.get(item.location_id)?.name ?? "未知位置" : "未设置",
+        locationLabel(item.location_id, locationsById),
     },
     { header: "更新时间", key: "updated", render: (item) => formatDate(item.updated_at) },
   ];
@@ -182,6 +187,14 @@ export function AssetDetailPage() {
               <Pencil size={15} />
               编辑资产/参数
             </Button>
+            <Button
+              disabled={!canManage}
+              onClick={() => setCreatingInventory(true)}
+              variant="primary"
+            >
+              <Plus size={15} />
+              添加库存项
+            </Button>
           </>
         }
       />
@@ -194,9 +207,6 @@ export function AssetDetailPage() {
             <h2 className="panel-title">基本信息</h2>
             <p className="panel-description">资产标识、分类、管理模式和库存汇总。</p>
           </div>
-          <Badge tone={asset.is_archived ? "warning" : "success"}>
-            {asset.is_archived ? "已归档" : "正常"}
-          </Badge>
         </div>
         <div className="panel-body">
           <dl className="asset-detail-grid">
@@ -281,6 +291,21 @@ export function AssetDetailPage() {
           queryClient.invalidateQueries({ queryKey: assetQueryKeys.root(apiBaseUrl) });
         }}
       />
+      <InventoryEditor
+        categories={categories}
+        createInventoryItems={createInventoryItems}
+        editor={creatingInventory ? { asset, mode: "create" } : null}
+        laboratoryId={asset.laboratory_id}
+        locations={locationsQuery.data ?? []}
+        open={creatingInventory}
+        units={units}
+        updateInventoryItem={updateInventoryItem}
+        onClose={() => setCreatingInventory(false)}
+        onSaved={() => {
+          setCreatingInventory(false);
+          queryClient.invalidateQueries({ queryKey: assetQueryKeys.root(apiBaseUrl) });
+        }}
+      />
     </main>
   );
 }
@@ -323,13 +348,17 @@ function buildCategoryBreadcrumbs(categoryId: string | null, categories: AssetCa
   }
 
   const breadcrumbs = [{ categoryId: "", label: "全部资产" }];
-  const segments = selected.path.split(".");
-  for (let index = 0; index < segments.length; index += 1) {
-    const path = segments.slice(0, index + 1).join(".");
-    const category = categories.find((candidate) => candidate.path === path);
-    if (category) {
-      breadcrumbs.push({ categoryId: category.category_id, label: category.name });
-    }
+  const byId = new Map(categories.map((category) => [category.category_id, category]));
+  const chain: AssetCategory[] = [];
+  let current: AssetCategory | undefined = selected;
+  const seen = new Set<string>();
+  while (current && !seen.has(current.category_id)) {
+    seen.add(current.category_id);
+    chain.unshift(current);
+    current = current.parent_category_id ? byId.get(current.parent_category_id) : undefined;
+  }
+  for (const category of chain) {
+    breadcrumbs.push({ categoryId: category.category_id, label: category.name });
   }
   return breadcrumbs;
 }
@@ -338,8 +367,36 @@ function categoryLabel(categoryId: string | null, categoryById: Map<string, Asse
   if (!categoryId) {
     return "未分类";
   }
-  const category = categoryById.get(categoryId);
-  return category ? category.path.replaceAll(".", " / ") : "未知分类";
+  return categoryNamePath(categoryId, categoryById) ?? "未知分类";
+}
+
+function categoryNamePath(categoryId: string, categoryById: Map<string, AssetCategory>) {
+  const names: string[] = [];
+  let current = categoryById.get(categoryId);
+  const seen = new Set<string>();
+  while (current && !seen.has(current.category_id)) {
+    seen.add(current.category_id);
+    names.unshift(current.name);
+    current = current.parent_category_id
+      ? categoryById.get(current.parent_category_id)
+      : undefined;
+  }
+  return names.length > 0 ? names.join(" / ") : null;
+}
+
+function locationLabel(locationId: string | null, locationById: Map<string, { location_id: string; name: string; parent_location_id: string | null }>) {
+  if (!locationId) {
+    return "未设置";
+  }
+  const names: string[] = [];
+  let current = locationById.get(locationId);
+  const seen = new Set<string>();
+  while (current && !seen.has(current.location_id)) {
+    seen.add(current.location_id);
+    names.unshift(current.name);
+    current = current.parent_location_id ? locationById.get(current.parent_location_id) : undefined;
+  }
+  return names.length > 0 ? names.join(" / ") : "未知位置";
 }
 
 function trackingModeLabel(mode: AssetTrackingMode) {

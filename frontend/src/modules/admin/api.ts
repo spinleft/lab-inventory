@@ -46,7 +46,6 @@ export const assetParameterOptionSchema = z.object({
   code: z.string(),
   label: z.string(),
   sort_order: z.number(),
-  is_archived: z.boolean(),
 });
 
 export const assetParameterSchema = z.object({
@@ -58,7 +57,6 @@ export const assetParameterSchema = z.object({
   unit_dimension: z.string().nullable(),
   default_unit_id: z.string().uuid().nullable(),
   description: z.string().nullable(),
-  is_archived: z.boolean(),
   options: z.array(assetParameterOptionSchema),
   created_at: z.string(),
   updated_at: z.string(),
@@ -153,7 +151,6 @@ export type AssetParameterOptionPayload = {
   code: string;
   label: string;
   sort_order: number;
-  is_archived: boolean;
 };
 
 export type AssetParameterPayload = {
@@ -163,7 +160,6 @@ export type AssetParameterPayload = {
   unit_dimension: string | null;
   default_unit_id: string | null;
   description: string | null;
-  is_archived: boolean;
   options: AssetParameterOptionPayload[];
 };
 

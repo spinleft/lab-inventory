@@ -453,7 +453,7 @@ function CategoryEditor({
     );
     const nextParameter = parameters.find(
       (parameter) =>
-        !parameter.is_archived && !selectedParameterIds.has(parameter.parameter_type_id),
+        !selectedParameterIds.has(parameter.parameter_type_id),
     );
 
     if (!nextParameter) {
@@ -658,8 +658,7 @@ function CategoryParameterAssignmentsEditor({
             const availableParameters = parameters.filter(
               (parameter) =>
                 parameter.parameter_type_id === assignment.parameter_type_id ||
-                (!parameter.is_archived &&
-                  !selectedParameterIds.has(parameter.parameter_type_id)),
+                (!selectedParameterIds.has(parameter.parameter_type_id)),
             );
 
             return (

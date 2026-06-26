@@ -20,6 +20,7 @@ use uuid::Uuid;
 #[serde(deny_unknown_fields)]
 pub struct JsonData {
     serial_numbers: Option<Vec<String>>,
+    serial_items: Option<Vec<SerialItemJsonData>>,
     count: Option<i64>,
     batch_number: Option<String>,
     quantity_on_hand: Option<f64>,
@@ -29,6 +30,13 @@ pub struct JsonData {
     status: Option<String>,
     public_notes: Option<String>,
     internal_notes: Option<String>,
+    attachments: Option<Vec<AttachmentClaimInput>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SerialItemJsonData {
+    serial_number: String,
     attachments: Option<Vec<AttachmentClaimInput>>,
 }
 
@@ -47,6 +55,8 @@ pub async fn create_inventory_items(
     let mut payload = payload.into_inner();
     let attachment_claims =
         parse_attachment_claims(payload.attachments.take().unwrap_or_default())?;
+    let serial_item_attachment_claims =
+        parse_serial_item_attachment_claims(payload.serial_items.as_deref().unwrap_or_default())?;
     let mut transaction = pool
         .begin()
         .await
@@ -72,6 +82,14 @@ pub async fn create_inventory_items(
         }
     };
     if !attachment_claims.is_empty() {
+        if serial_item_attachment_claims
+            .iter()
+            .any(|claims| !claims.is_empty())
+        {
+            return Err(InventoryItemError::ValidationError(
+                "attachments cannot be combined with serial_items attachments".into(),
+            ));
+        }
         if created.len() != 1 {
             return Err(InventoryItemError::ValidationError(
                 "attachments can only be supplied when exactly one inventory item is created"
@@ -87,6 +105,27 @@ pub async fn create_inventory_items(
         )
         .await
         .map_err(map_attachment_error)?;
+    }
+    if serial_item_attachment_claims
+        .iter()
+        .any(|claims| !claims.is_empty())
+    {
+        if created.len() != serial_item_attachment_claims.len() {
+            return Err(InventoryItemError::ValidationError(
+                "serial_items attachments must match created inventory items".into(),
+            ));
+        }
+        for (item, claims) in created.iter().zip(serial_item_attachment_claims.iter()) {
+            claim_inventory_item_attachments(
+                &mut transaction,
+                &actor,
+                laboratory_id,
+                item.inventory_item_id,
+                claims,
+            )
+            .await
+            .map_err(map_attachment_error)?;
+        }
     }
 
     record_inventory_item_audit(
@@ -129,6 +168,15 @@ fn parse_attachment_claims(
         .map_err(InventoryItemError::ValidationError)
 }
 
+fn parse_serial_item_attachment_claims(
+    serial_items: &[SerialItemJsonData],
+) -> Result<Vec<Vec<AttachmentClaim>>, InventoryItemError> {
+    serial_items
+        .iter()
+        .map(|item| parse_attachment_claims(item.attachments.clone().unwrap_or_default()))
+        .collect()
+}
+
 async fn create_serialized_items(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     asset: &super::model::AssetForInventoryRow,
@@ -143,17 +191,25 @@ async fn create_serialized_items(
             "Serialized inventory items cannot specify quantity fields".into(),
         ));
     }
-    let serial_numbers = match (payload.serial_numbers, payload.count) {
-        (Some(serial_numbers), None) => normalize_serial_numbers(serial_numbers)?,
-        (None, Some(count)) => next_serial_numbers(transaction, asset.asset_id, count).await?,
-        (Some(_), Some(_)) => {
+    let serial_numbers = match (payload.serial_items, payload.serial_numbers, payload.count) {
+        (Some(serial_items), None, None) => normalize_serial_numbers(
+            serial_items
+                .into_iter()
+                .map(|item| item.serial_number)
+                .collect(),
+        )?,
+        (None, Some(serial_numbers), None) => normalize_serial_numbers(serial_numbers)?,
+        (None, None, Some(count)) => {
+            next_serial_numbers(transaction, asset.asset_id, count).await?
+        }
+        (Some(_), Some(_), _) | (Some(_), _, Some(_)) | (None, Some(_), Some(_)) => {
             return Err(InventoryItemError::ValidationError(
-                "serialized creation accepts serial_numbers or count, not both".into(),
+                "serialized creation accepts serial_items, serial_numbers, or count, not more than one".into(),
             ));
         }
-        (None, None) => {
+        (None, None, None) => {
             return Err(InventoryItemError::ValidationError(
-                "serialized creation requires serial_numbers or count".into(),
+                "serialized creation requires serial_items, serial_numbers, or count".into(),
             ));
         }
     };
@@ -188,9 +244,10 @@ async fn create_quantity_item(
     payload: JsonData,
     status: &str,
 ) -> Result<Vec<super::model::InventoryItemRow>, InventoryItemError> {
-    if payload.serial_numbers.is_some() || payload.count.is_some() {
+    if payload.serial_items.is_some() || payload.serial_numbers.is_some() || payload.count.is_some()
+    {
         return Err(InventoryItemError::ValidationError(
-            "Quantity-tracked inventory items cannot specify serial_numbers or count".into(),
+            "Quantity-tracked inventory items cannot specify serial_items, serial_numbers, or count".into(),
         ));
     }
     let quantity_on_hand = payload.quantity_on_hand.ok_or_else(|| {

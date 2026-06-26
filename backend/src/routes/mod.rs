@@ -9,6 +9,7 @@ mod inventory_items;
 mod laboratories;
 mod locations;
 mod pagination;
+pub(crate) mod parameter_filters;
 mod units;
 mod users;
 

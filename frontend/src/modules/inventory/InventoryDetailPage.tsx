@@ -277,7 +277,7 @@ function DetailLocationPath({
       {breadcrumbs.map((breadcrumb, index) => (
         <span className="asset-category-path-item" key={breadcrumb.locationId || "all"}>
           {index > 0 ? <span className="asset-category-path-separator">/</span> : null}
-          <Link to={breadcrumb.locationId ? `/assets?location_id=${breadcrumb.locationId}` : "/assets"}>
+          <Link to={breadcrumb.locationId ? `/inventory?location_id=${breadcrumb.locationId}` : "/inventory"}>
             {breadcrumb.label}
           </Link>
         </span>
@@ -306,13 +306,17 @@ function buildLocationBreadcrumbs(locationId: string | null, locations: Location
   }
 
   const breadcrumbs = [{ label: "全部位置", locationId: "" }];
-  const segments = selected.path.split(".");
-  for (let index = 0; index < segments.length; index += 1) {
-    const path = segments.slice(0, index + 1).join(".");
-    const location = locations.find((candidate) => candidate.path === path);
-    if (location) {
-      breadcrumbs.push({ label: location.name, locationId: location.location_id });
-    }
+  const byId = mapById(locations, "location_id");
+  const chain: Location[] = [];
+  let current: Location | undefined = selected;
+  const seen = new Set<string>();
+  while (current && !seen.has(current.location_id)) {
+    seen.add(current.location_id);
+    chain.unshift(current);
+    current = current.parent_location_id ? byId.get(current.parent_location_id) : undefined;
+  }
+  for (const location of chain) {
+    breadcrumbs.push({ label: location.name, locationId: location.location_id });
   }
   return breadcrumbs;
 }

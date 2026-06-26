@@ -11,7 +11,6 @@ pub struct NewAsset {
     pub default_unit_id: Uuid,
     pub public_notes: Option<String>,
     pub internal_notes: Option<String>,
-    pub is_archived: bool,
 }
 
 impl NewAsset {
@@ -25,7 +24,6 @@ impl NewAsset {
         default_unit_id: Uuid,
         public_notes: Option<String>,
         internal_notes: Option<String>,
-        is_archived: bool,
     ) -> Self {
         Self {
             category_id,
@@ -36,7 +34,6 @@ impl NewAsset {
             default_unit_id,
             public_notes,
             internal_notes,
-            is_archived,
         }
     }
 }

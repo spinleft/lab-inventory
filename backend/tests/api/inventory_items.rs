@@ -59,6 +59,138 @@ async fn serialized_inventory_items_can_be_bulk_created_with_explicit_or_default
 }
 
 #[tokio::test]
+async fn serialized_inventory_items_can_claim_attachments_per_serial_item() {
+    let app = spawn_app().await;
+    let laboratory_id = app.create_laboratory("Serialized Attachment Lab").await;
+    let other_laboratory_id = app
+        .create_laboratory("Other Serialized Attachment Lab")
+        .await;
+    let unit_id = app.unit_id("pcs").await;
+    app.test_user.login(&app).await;
+
+    let asset_id = create_asset(
+        &app,
+        laboratory_id,
+        unit_id,
+        "serialized",
+        "Attached Serial Asset",
+    )
+    .await;
+    let first_upload = upload(&app, laboratory_id, "serial-a.txt", b"serial a").await;
+    let second_upload = upload(&app, laboratory_id, "serial-b.txt", b"serial b").await;
+
+    let response = app
+        .post_inventory_items(
+            asset_id,
+            &serde_json::json!({
+                "serial_items": [
+                    {
+                        "serial_number": "SN-A",
+                        "attachments": [
+                            {
+                                "upload_id": upload_id(&first_upload),
+                                "display_name": "Serial A Manual",
+                                "visibility": "internal"
+                            }
+                        ]
+                    },
+                    {
+                        "serial_number": "SN-B",
+                        "attachments": [
+                            {
+                                "upload_id": upload_id(&second_upload),
+                                "display_name": "Serial B Manual",
+                                "visibility": "public"
+                            }
+                        ]
+                    }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 201);
+    let items: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(items.as_array().unwrap().len(), 2);
+
+    let first_response = app
+        .get_inventory_item_attachments(value_uuid(&items[0]["inventory_item_id"]))
+        .await;
+    assert_eq!(first_response.status().as_u16(), 200);
+    let first_attachments: serde_json::Value = first_response.json().await.unwrap();
+    assert_eq!(first_attachments.as_array().unwrap().len(), 1);
+    assert_eq!(first_attachments[0]["display_name"], "Serial A Manual");
+    assert_eq!(first_attachments[0]["visibility"], "internal");
+    assert_eq!(
+        first_attachments[0]["sha256_hex"],
+        first_upload["sha256_hex"]
+    );
+
+    let second_response = app
+        .get_inventory_item_attachments(value_uuid(&items[1]["inventory_item_id"]))
+        .await;
+    assert_eq!(second_response.status().as_u16(), 200);
+    let second_attachments: serde_json::Value = second_response.json().await.unwrap();
+    assert_eq!(second_attachments.as_array().unwrap().len(), 1);
+    assert_eq!(second_attachments[0]["display_name"], "Serial B Manual");
+    assert_eq!(second_attachments[0]["visibility"], "public");
+    assert_eq!(
+        second_attachments[0]["sha256_hex"],
+        second_upload["sha256_hex"]
+    );
+
+    let duplicate_upload = upload(&app, laboratory_id, "duplicate.txt", b"duplicate").await;
+    let response = app
+        .post_inventory_items(
+            asset_id,
+            &serde_json::json!({
+                "serial_items": [
+                    {
+                        "serial_number": "SN-C",
+                        "attachments": [{ "upload_id": upload_id(&duplicate_upload) }]
+                    },
+                    {
+                        "serial_number": "SN-D",
+                        "attachments": [{ "upload_id": upload_id(&duplicate_upload) }]
+                    }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+
+    let response = app
+        .post_inventory_items(
+            asset_id,
+            &serde_json::json!({
+                "serial_items": [
+                    {
+                        "serial_number": "SN-E",
+                        "attachments": [{ "upload_id": Uuid::new_v4() }]
+                    }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+
+    let other_upload = upload(&app, other_laboratory_id, "other.txt", b"other").await;
+    let response = app
+        .post_inventory_items(
+            asset_id,
+            &serde_json::json!({
+                "serial_items": [
+                    {
+                        "serial_number": "SN-F",
+                        "attachments": [{ "upload_id": upload_id(&other_upload) }]
+                    }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+}
+
+#[tokio::test]
 async fn quantity_inventory_items_can_be_created_queried_updated_and_batch_updated() {
     let app = spawn_app().await;
     let laboratory_id = app.create_laboratory("Quantity Inventory Lab").await;
@@ -534,4 +666,25 @@ async fn insert_quantity_item(
 
 fn inventory_item_id(item: &serde_json::Value) -> Uuid {
     Uuid::parse_str(item["inventory_item_id"].as_str().unwrap()).unwrap()
+}
+
+async fn upload(
+    app: &TestApp,
+    laboratory_id: Uuid,
+    file_name: &str,
+    bytes: &[u8],
+) -> serde_json::Value {
+    let response = app
+        .upload_attachment(laboratory_id, file_name, "text/plain", bytes.to_vec())
+        .await;
+    assert_eq!(response.status().as_u16(), 201);
+    response.json().await.unwrap()
+}
+
+fn upload_id(upload: &serde_json::Value) -> Uuid {
+    value_uuid(&upload["upload_id"])
+}
+
+fn value_uuid(value: &serde_json::Value) -> Uuid {
+    Uuid::parse_str(value.as_str().unwrap()).unwrap()
 }

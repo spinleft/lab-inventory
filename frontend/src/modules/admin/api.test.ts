@@ -66,7 +66,6 @@ describe("admin api schemas", () => {
         data_type: "range",
         default_unit_id: "00000000-0000-4000-8000-000000000051",
         description: "Visible spectrum",
-        is_archived: false,
         laboratory_id: "00000000-0000-4000-8000-000000000011",
         name: "波长范围",
         options: [],

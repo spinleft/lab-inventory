@@ -69,6 +69,7 @@ export type InventoryItemQuery = {
   limit: number;
   location_id?: string;
   offset: number;
+  parameter_filters?: string;
   serial_number?: string;
   status?: InventoryStatus;
   tracking_mode?: AssetTrackingMode;
@@ -83,6 +84,10 @@ export type CreateInventoryItemsPayload = {
   public_notes?: string | null;
   quantity_allocated?: number;
   quantity_on_hand?: number;
+  serial_items?: Array<{
+    attachments?: AttachmentClaim[];
+    serial_number: string;
+  }>;
   serial_numbers?: string[];
   status?: InventoryStatus;
 };

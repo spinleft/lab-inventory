@@ -88,7 +88,6 @@ async fn fetch_asset_parameters(
             unit_dimension,
             default_unit_id,
             description,
-            is_archived,
             created_at,
             updated_at
         FROM asset_parameter_types

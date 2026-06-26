@@ -37,21 +37,11 @@ pub async fn delete_attachment(
     let storage_key = AttachmentStorageKey::parse(row.storage_key.clone())
         .map_err(|e| AttachmentError::UnexpectedError(anyhow!("{e}")))?;
 
-    sqlx::query(
-        r#"
-        UPDATE attachments
-        SET deleted_at = now(),
-            deleted_by_user_id = $2,
-            updated_at = now()
-        WHERE attachment_id = $1
-          AND deleted_at IS NULL
-        "#,
-    )
-    .bind(row.attachment_id)
-    .bind(*actor.user_id)
-    .execute(transaction.as_mut())
-    .await
-    .map_err(|e| AttachmentError::UnexpectedError(e.into()))?;
+    sqlx::query("DELETE FROM attachments WHERE attachment_id = $1")
+        .bind(row.attachment_id)
+        .execute(transaction.as_mut())
+        .await
+        .map_err(|e| AttachmentError::UnexpectedError(e.into()))?;
 
     record_audit(
         &mut transaction,

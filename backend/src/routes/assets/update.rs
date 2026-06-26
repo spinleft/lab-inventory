@@ -36,7 +36,6 @@ pub struct JsonData {
     public_notes: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_nullable")]
     internal_notes: Option<Option<String>>,
-    is_archived: Option<bool>,
     parameters: Option<Vec<ParameterValueJsonData>>,
 }
 
@@ -71,7 +70,6 @@ impl TryFrom<JsonData> for UpdateAsset {
             value.default_unit_id,
             parse_nullable_string(value.public_notes),
             parse_nullable_string(value.internal_notes),
-            value.is_archived,
         ))
     }
 }
@@ -216,7 +214,6 @@ pub async fn update_asset(
             .internal_notes
             .resolve(existing.internal_notes.clone())
             .as_deref(),
-        update_asset.is_archived.unwrap_or(existing.is_archived),
     )
     .await?;
 
@@ -302,7 +299,6 @@ async fn update_asset_in_database(
     default_unit_id: Uuid,
     public_notes: Option<&str>,
     internal_notes: Option<&str>,
-    is_archived: bool,
 ) -> Result<(), UpdateAssetError> {
     sqlx::query(
         r#"
@@ -316,7 +312,6 @@ async fn update_asset_in_database(
             default_unit_id = $7,
             public_notes = $8,
             internal_notes = $9,
-            is_archived = $10,
             updated_at = now()
         WHERE asset_id = $1
         "#,
@@ -330,7 +325,6 @@ async fn update_asset_in_database(
     .bind(default_unit_id)
     .bind(public_notes)
     .bind(internal_notes)
-    .bind(is_archived)
     .execute(transaction.as_mut())
     .await
     .map_err(|e| map_model_error(map_database_error(e)))?;

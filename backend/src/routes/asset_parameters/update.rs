@@ -31,7 +31,6 @@ pub struct JsonData {
     default_unit_id: Option<Option<Uuid>>,
     #[serde(default, deserialize_with = "deserialize_nullable")]
     description: Option<Option<String>>,
-    is_archived: Option<bool>,
     options: Option<Vec<OptionJsonData>>,
 }
 
@@ -42,7 +41,6 @@ pub struct OptionJsonData {
     code: String,
     label: String,
     sort_order: Option<i32>,
-    is_archived: Option<bool>,
 }
 
 impl TryFrom<OptionJsonData> for UpdateAssetParameterOption {
@@ -54,7 +52,6 @@ impl TryFrom<OptionJsonData> for UpdateAssetParameterOption {
             AssetParameterCode::parse(value.code)?,
             AssetParameterOptionLabel::parse(value.label)?,
             value.sort_order.unwrap_or(0),
-            value.is_archived.unwrap_or(false),
         ))
     }
 }
@@ -101,7 +98,6 @@ impl TryFrom<JsonData> for UpdateAssetParameter {
             unit_dimension,
             default_unit_id,
             description,
-            value.is_archived,
             options,
         ))
     }
@@ -228,8 +224,6 @@ pub async fn update_asset_parameter(
     let description = update_parameter
         .description
         .resolve(existing.description.clone());
-    let is_archived = update_parameter.is_archived.unwrap_or(existing.is_archived);
-
     let updated = update_asset_parameter_in_database(
         &mut transaction,
         existing.parameter_type_id,
@@ -239,7 +233,6 @@ pub async fn update_asset_parameter(
         unit_dimension.as_deref(),
         default_unit_id,
         description.as_deref(),
-        is_archived,
     )
     .await?;
     let options = if data_type == AssetParameterDataType::Enum {
@@ -307,12 +300,12 @@ fn validate_options(
     match update_options {
         Some(options) => validate_update_options(options),
         None => {
-            if existing_options.iter().any(|option| !option.is_archived) {
-                Ok(())
-            } else {
+            if existing_options.is_empty() {
                 Err(UpdateAssetParameterError::ValidationError(
-                    "Enum asset parameters require at least one active option".into(),
+                    "Enum asset parameters require at least one option".into(),
                 ))
+            } else {
+                Ok(())
             }
         }
     }
@@ -321,9 +314,9 @@ fn validate_options(
 fn validate_update_options(
     options: &[UpdateAssetParameterOption],
 ) -> Result<(), UpdateAssetParameterError> {
-    if !options.iter().any(|option| !option.is_archived) {
+    if options.is_empty() {
         return Err(UpdateAssetParameterError::ValidationError(
-            "Enum asset parameters require at least one active option".into(),
+            "Enum asset parameters require at least one option".into(),
         ));
     }
 
@@ -400,7 +393,6 @@ async fn update_asset_parameter_in_database(
     unit_dimension: Option<&str>,
     default_unit_id: Option<Uuid>,
     description: Option<&str>,
-    is_archived: bool,
 ) -> Result<AssetParameterRow, UpdateAssetParameterError> {
     sqlx::query_as::<_, AssetParameterRow>(
         r#"
@@ -412,7 +404,6 @@ async fn update_asset_parameter_in_database(
             unit_dimension = $5,
             default_unit_id = $6,
             description = $7,
-            is_archived = $8,
             updated_at = now()
         WHERE parameter_type_id = $1
         RETURNING
@@ -424,7 +415,6 @@ async fn update_asset_parameter_in_database(
             unit_dimension,
             default_unit_id,
             description,
-            is_archived,
             created_at,
             updated_at
         "#,
@@ -436,7 +426,6 @@ async fn update_asset_parameter_in_database(
     .bind(unit_dimension)
     .bind(default_unit_id)
     .bind(description)
-    .bind(is_archived)
     .fetch_one(transaction.as_mut())
     .await
     .map_err(map_error)
@@ -467,7 +456,23 @@ async fn replace_asset_parameter_options(
         }
     }
 
-    archive_asset_parameter_options(transaction, parameter_id).await?;
+    let retained_existing_option_ids = options
+        .iter()
+        .filter_map(|option| {
+            option.option_id.or_else(|| {
+                existing_by_code
+                    .get(option.code.as_ref())
+                    .map(|existing| existing.option_id)
+            })
+        })
+        .collect::<HashSet<_>>();
+
+    delete_removed_asset_parameter_options(
+        transaction,
+        parameter_id,
+        &retained_existing_option_ids,
+    )
+    .await?;
     for option in options {
         if let Some(option_id) = option.option_id {
             update_asset_parameter_option(transaction, option_id, option).await?;
@@ -483,21 +488,23 @@ async fn replace_asset_parameter_options(
         .map_err(UpdateAssetParameterError::UnexpectedError)
 }
 
-async fn archive_asset_parameter_options(
+async fn delete_removed_asset_parameter_options(
     transaction: &mut Transaction<'_, Postgres>,
     parameter_id: Uuid,
+    retained_option_ids: &HashSet<Uuid>,
 ) -> Result<(), UpdateAssetParameterError> {
     sqlx::query(
         r#"
-        UPDATE asset_parameter_options
-        SET is_archived = true
+        DELETE FROM asset_parameter_options
         WHERE parameter_type_id = $1
+          AND option_id <> ALL($2)
         "#,
     )
     .bind(parameter_id)
+    .bind(retained_option_ids.iter().copied().collect::<Vec<_>>())
     .execute(transaction.as_mut())
     .await
-    .map_err(map_error)?;
+    .map_err(map_option_delete_error)?;
 
     Ok(())
 }
@@ -513,8 +520,7 @@ async fn update_asset_parameter_option(
         SET
             code = $2,
             label = $3,
-            sort_order = $4,
-            is_archived = $5
+            sort_order = $4
         WHERE option_id = $1
         "#,
     )
@@ -522,7 +528,6 @@ async fn update_asset_parameter_option(
     .bind(option.code.as_ref())
     .bind(option.label.as_ref())
     .bind(option.sort_order)
-    .bind(option.is_archived)
     .execute(transaction.as_mut())
     .await
     .map_err(map_error)?;
@@ -542,10 +547,9 @@ async fn insert_asset_parameter_option(
             parameter_type_id,
             code,
             label,
-            sort_order,
-            is_archived
+            sort_order
         )
-        VALUES ($1, $2, $3, $4, $5, $6)
+        VALUES ($1, $2, $3, $4, $5)
         "#,
     )
     .bind(Uuid::new_v4())
@@ -553,7 +557,6 @@ async fn insert_asset_parameter_option(
     .bind(option.code.as_ref())
     .bind(option.label.as_ref())
     .bind(option.sort_order)
-    .bind(option.is_archived)
     .execute(transaction.as_mut())
     .await
     .map_err(map_error)?;
@@ -569,9 +572,20 @@ async fn delete_asset_parameter_options(
         .bind(parameter_id)
         .execute(transaction.as_mut())
         .await
-        .map_err(map_error)?;
+        .map_err(map_option_delete_error)?;
 
     Ok(())
+}
+
+fn map_option_delete_error(error: sqlx::Error) -> UpdateAssetParameterError {
+    if let sqlx::Error::Database(database_error) = &error {
+        if database_error.code().as_deref() == Some("23503") {
+            return UpdateAssetParameterError::ConflictError(
+                "Asset parameter option is referenced by asset values".into(),
+            );
+        }
+    }
+    map_error(error)
 }
 
 fn map_error(error: sqlx::Error) -> UpdateAssetParameterError {

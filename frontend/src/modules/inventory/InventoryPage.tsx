@@ -11,12 +11,16 @@ import {
   Pencil,
   Plus,
   RotateCcw,
+  Search,
   Settings2,
   Trash2,
+  X,
 } from "lucide-react";
 import {
+  type Dispatch,
   type FormEvent,
   type ReactNode,
+  type SetStateAction,
   useEffect,
   useMemo,
   useState,
@@ -93,11 +97,47 @@ type FilterForm = {
   has_location: "all" | "true" | "false";
   keyword: string;
   location_id: string;
-  parameter_keyword: string;
-  parameter_type_id: string;
+  parameter_filters: ParameterFilterDraft[];
   serial_number: string;
   status: "all" | InventoryStatus;
-  tracking_mode: "all" | AssetTrackingMode;
+};
+
+type InventoryFilterKey =
+  | "category"
+  | "status"
+  | "location"
+  | "serial_number"
+  | "batch_number"
+  | "has_batch"
+  | "has_location";
+
+type ParameterFilterDraft = {
+  boolean: "all" | "true" | "false";
+  date_end: string;
+  date_start: string;
+  id: string;
+  number_max: string;
+  number_min: string;
+  option_id: string;
+  parameter_type_id: string;
+  range_end: string;
+  range_start: string;
+  text: string;
+  unit_id: string;
+};
+
+type SerializedParameterFilter = {
+  boolean?: boolean;
+  date_end?: string;
+  date_start?: string;
+  number_max?: number;
+  number_min?: number;
+  option_id?: string;
+  parameter_type_id: string;
+  range_end?: number;
+  range_start?: number;
+  text?: string;
+  unit_id?: string;
 };
 
 type SortState = {
@@ -115,7 +155,7 @@ type InventoryColumn = {
 };
 
 type InventoryEditorState =
-  | { mode: "create" }
+  | { asset?: Asset; mode: "create" }
   | { item: InventoryItem; mode: "edit" }
   | null;
 
@@ -150,12 +190,20 @@ const DEFAULT_BASIC_COLUMNS = [
   "updated_at",
 ];
 const DEFAULT_PARAMETER_BASE_COLUMNS = ["asset", "item", "status", "location"];
+const INVENTORY_FILTER_OPTIONS: Array<{ label: string; value: InventoryFilterKey }> = [
+  { label: "资产分类", value: "category" },
+  { label: "库存状态", value: "status" },
+  { label: "位置", value: "location" },
+  { label: "序列号", value: "serial_number" },
+  { label: "批号", value: "batch_number" },
+  { label: "是否有批号", value: "has_batch" },
+  { label: "是否有位置", value: "has_location" },
+];
 
 export function InventoryPage() {
   const {
     canManageSelectedLaboratoryAssets,
     selectedLaboratoryId,
-    selectedLaboratoryName,
   } = useLaboratorySelection();
   const { apiBaseUrl } = useBackendConfig();
   const toast = useToast();
@@ -173,6 +221,9 @@ export function InventoryPage() {
   const [draftFilters, setDraftFilters] = useState<FilterForm>(() =>
     emptyFilters(categoryFromUrl, exactCategoryFromUrl, locationFromUrl),
   );
+  const [filterDialogOpen, setFilterDialogOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchValue, setSearchValue] = useState("");
   const [sort, setSort] = useState<SortState>({ direction: "asc", key: "updated_at" });
   const [visibleBasicColumns, setVisibleBasicColumns] = useState<Set<string>>(
     () => new Set(DEFAULT_BASIC_COLUMNS),
@@ -207,6 +258,10 @@ export function InventoryPage() {
   const categoryById = useMemo(() => mapById(categories, "category_id"), [categories]);
   const locationById = useMemo(() => mapById(locations, "location_id"), [locations]);
   const unitsById = useMemo(() => mapById(units, "unit_id"), [units]);
+  const serializedParameterFilters = useMemo(
+    () => serializeParameterFilters(filters.parameter_filters, parameters),
+    [filters.parameter_filters, parameters],
+  );
   useEffect(() => {
     setFilters((current) => ({
       ...current,
@@ -226,6 +281,10 @@ export function InventoryPage() {
   useEffect(() => {
     setOffset(0);
   }, [selectedLaboratoryId]);
+
+  useEffect(() => {
+    setSearchValue(filters.keyword);
+  }, [filters.keyword]);
 
   useEffect(() => {
     const parameterKeys = parameters.map((parameter) =>
@@ -257,12 +316,11 @@ export function InventoryPage() {
       limit: PAGE_SIZE,
       location_id: optional(filters.location_id),
       offset,
+      parameter_filters: serializedParameterFilters,
       serial_number: optional(filters.serial_number),
       status: filters.status === "all" ? undefined : filters.status,
-      tracking_mode:
-        filters.tracking_mode === "all" ? undefined : filters.tracking_mode,
     }),
-    [filters, offset],
+    [filters, offset, serializedParameterFilters],
   );
   const inventoryQuery = useInventoryItems({
     enabled: Boolean(selectedLaboratoryId),
@@ -273,10 +331,8 @@ export function InventoryPage() {
   const total = response?.total ?? 0;
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const maxPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const parameterFilterActive = Boolean(
-    filters.parameter_type_id || filters.parameter_keyword.trim(),
-  );
-  const needsAssetDetails = viewMode === "parameters" || parameterFilterActive;
+  const parameterFilterActive = filters.parameter_filters.length > 0;
+  const needsAssetDetails = viewMode === "parameters";
   const currentPageAssetIds = useMemo(
     () => Array.from(new Set((response?.items ?? []).map((item) => item.asset_id))),
     [response?.items],
@@ -306,24 +362,17 @@ export function InventoryPage() {
     needsAssetDetails &&
     assetDetailQueries.some((queryResult) => queryResult.isLoading || queryResult.isFetching);
 
-  const parameterFilteredItems = useMemo(
-    () =>
-      (response?.items ?? []).filter((item) =>
-        itemMatchesParameterFilters(item, filters, assetDetailsById, unitsById),
-      ),
-    [assetDetailsById, filters, response?.items, unitsById],
-  );
   const visibleItems = useMemo(
     () =>
       sortInventoryItems(
-        parameterFilteredItems,
+        response?.items ?? [],
         sort,
         categoryById,
         locationById,
         unitsById,
         assetDetailsById,
       ),
-    [assetDetailsById, categoryById, locationById, parameterFilteredItems, sort, unitsById],
+    [assetDetailsById, categoryById, locationById, response?.items, sort, unitsById],
   );
   const locationBreadcrumbs = useMemo(
     () => buildLocationBreadcrumbs(filters.location_id, locations),
@@ -351,19 +400,39 @@ export function InventoryPage() {
     (column) => column.locked || visibleColumnKeys.has(column.key),
   );
 
-  function submitFilters(event: FormEvent<HTMLFormElement>) {
+  function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const keyword = searchValue.trim();
+    const next = { ...filters, keyword };
     setOffset(0);
-    setFilters(draftFilters);
-    syncInventorySearch(
-      draftFilters.category_id,
-      draftFilters.exact_category,
-      draftFilters.location_id,
-    );
+    setFilters(next);
+    setDraftFilters(next);
+  }
+
+  function clearSearch() {
+    const next = { ...filters, keyword: "" };
+    setSearchValue("");
+    setOffset(0);
+    setFilters(next);
+    setDraftFilters(next);
+  }
+
+  function applyDraftFilters() {
+    const validation = validateParameterFilters(draftFilters.parameter_filters, parameters);
+    if (!validation.ok) {
+      toast.error({ title: validation.message });
+      return;
+    }
+    const next = { ...draftFilters, keyword: filters.keyword };
+    setOffset(0);
+    setFilters(next);
+    setDraftFilters(next);
+    syncInventorySearch(next.category_id, next.exact_category, next.location_id);
+    setFilterDialogOpen(false);
   }
 
   function resetFilters() {
-    const next = emptyFilters();
+    const next = { ...emptyFilters(), keyword: filters.keyword };
     setDraftFilters(next);
     setFilters(next);
     setOffset(0);
@@ -390,10 +459,6 @@ export function InventoryPage() {
     setSearchParams(next, { replace: true });
   }
 
-  function updateDraftFilter<K extends keyof FilterForm>(key: K, value: FilterForm[K]) {
-    setDraftFilters((current) => ({ ...current, [key]: value }));
-  }
-
   function handleSort(key: string) {
     setSort((current) =>
       current.key === key
@@ -402,18 +467,10 @@ export function InventoryPage() {
     );
   }
 
-  function toggleColumn(key: string, visible: boolean) {
+  function applyColumns(nextColumns: Set<string>) {
     const setter =
       viewMode === "basic" ? setVisibleBasicColumns : setVisibleParameterColumns;
-    setter((current) => {
-      const next = new Set(current);
-      if (visible) {
-        next.add(key);
-      } else {
-        next.delete(key);
-      }
-      return next;
-    });
+    setter(nextColumns);
   }
 
   function confirmDelete() {
@@ -451,204 +508,12 @@ export function InventoryPage() {
       <LocationPathNav breadcrumbs={locationBreadcrumbs} />
 
       <section className="panel">
-        <div className="panel-header">
-          <div>
-            <h2 className="panel-title">查询条件</h2>
-            <p className="panel-description">
-              {selectedLaboratoryName || "请选择实验室"} · 参数筛选作用于当前页库存关联资产
-            </p>
-          </div>
-        </div>
-        <div className="panel-body">
-          <form className="asset-filter-form" onSubmit={submitFilters}>
-            <div className="asset-filter-grid">
-              <FormField htmlFor="inventory-keyword" label="关键词">
-                <input
-                  className="input"
-                  id="inventory-keyword"
-                  placeholder="资产、型号、厂商、序列号、批号或备注"
-                  value={draftFilters.keyword}
-                  onChange={(event) => updateDraftFilter("keyword", event.target.value)}
-                />
-              </FormField>
-              <FormField htmlFor="inventory-category" label="资产分类">
-                <Select
-                  id="inventory-category"
-                  label="资产分类"
-                  options={[
-                    { label: "全部分类", value: "all" },
-                    ...categories.map((category) => ({
-                      label: `${"　".repeat(category.depth)}${category.name}`,
-                      value: category.category_id,
-                    })),
-                  ]}
-                  value={draftFilters.category_id || "all"}
-                  onValueChange={(value) =>
-                    updateDraftFilter("category_id", value === "all" ? "" : value)
-                  }
-                />
-              </FormField>
-              <FormField htmlFor="inventory-tracking-mode" label="管理模式">
-                <Select
-                  id="inventory-tracking-mode"
-                  label="管理模式"
-                  options={[
-                    { label: "全部模式", value: "all" },
-                    { label: "序列号管理", value: "serialized" },
-                    { label: "数量管理", value: "quantity" },
-                  ]}
-                  value={draftFilters.tracking_mode}
-                  onValueChange={(value) =>
-                    updateDraftFilter("tracking_mode", value as FilterForm["tracking_mode"])
-                  }
-                />
-              </FormField>
-              <FormField htmlFor="inventory-status" label="库存状态">
-                <Select
-                  id="inventory-status"
-                  label="库存状态"
-                  options={[
-                    { label: "全部状态", value: "all" },
-                    { label: "可用", value: "available" },
-                    { label: "预留", value: "reserved" },
-                    { label: "退役", value: "retired" },
-                    { label: "丢失", value: "lost" },
-                    { label: "已消耗", value: "consumed" },
-                  ]}
-                  value={draftFilters.status}
-                  onValueChange={(value) =>
-                    updateDraftFilter("status", value as FilterForm["status"])
-                  }
-                />
-              </FormField>
-              <FormField htmlFor="inventory-location" label="位置">
-                <Select
-                  id="inventory-location"
-                  label="位置"
-                  options={[
-                    { label: "全部位置", value: "all" },
-                    ...locations.map((location) => ({
-                      label: `${"　".repeat(location.depth)}${location.name}`,
-                      value: location.location_id,
-                    })),
-                  ]}
-                  value={draftFilters.location_id || "all"}
-                  onValueChange={(value) =>
-                    updateDraftFilter("location_id", value === "all" ? "" : value)
-                  }
-                />
-              </FormField>
-              <FormField htmlFor="inventory-serial" label="序列号">
-                <input
-                  className="input"
-                  id="inventory-serial"
-                  value={draftFilters.serial_number}
-                  onChange={(event) => updateDraftFilter("serial_number", event.target.value)}
-                />
-              </FormField>
-              <FormField htmlFor="inventory-batch" label="批号">
-                <input
-                  className="input"
-                  id="inventory-batch"
-                  value={draftFilters.batch_number}
-                  onChange={(event) => updateDraftFilter("batch_number", event.target.value)}
-                />
-              </FormField>
-              <FormField htmlFor="inventory-has-batch" label="是否有批号">
-                <Select
-                  id="inventory-has-batch"
-                  label="是否有批号"
-                  options={[
-                    { label: "全部", value: "all" },
-                    { label: "有批号", value: "true" },
-                    { label: "无批号", value: "false" },
-                  ]}
-                  value={draftFilters.has_batch}
-                  onValueChange={(value) =>
-                    updateDraftFilter("has_batch", value as FilterForm["has_batch"])
-                  }
-                />
-              </FormField>
-              <FormField htmlFor="inventory-has-location" label="是否有位置">
-                <Select
-                  id="inventory-has-location"
-                  label="是否有位置"
-                  options={[
-                    { label: "全部", value: "all" },
-                    { label: "有位置", value: "true" },
-                    { label: "无位置", value: "false" },
-                  ]}
-                  value={draftFilters.has_location}
-                  onValueChange={(value) =>
-                    updateDraftFilter("has_location", value as FilterForm["has_location"])
-                  }
-                />
-              </FormField>
-              <FormField htmlFor="inventory-parameter-type" label="参数类型">
-                <Select
-                  id="inventory-parameter-type"
-                  label="参数类型"
-                  options={[
-                    { label: "全部参数", value: "all" },
-                    ...parameters.map((parameter) => ({
-                      label: `${parameter.name} (${parameter.code})`,
-                      value: parameter.parameter_type_id,
-                    })),
-                  ]}
-                  value={draftFilters.parameter_type_id || "all"}
-                  onValueChange={(value) =>
-                    updateDraftFilter("parameter_type_id", value === "all" ? "" : value)
-                  }
-                />
-              </FormField>
-              <FormField htmlFor="inventory-parameter-keyword" label="参数搜索">
-                <input
-                  className="input"
-                  id="inventory-parameter-keyword"
-                  placeholder="参数名、代码或值"
-                  value={draftFilters.parameter_keyword}
-                  onChange={(event) =>
-                    updateDraftFilter("parameter_keyword", event.target.value)
-                  }
-                />
-              </FormField>
-            </div>
-            <label className="checkbox-field asset-filter-checkbox" htmlFor="inventory-exact-category">
-              <input
-                checked={draftFilters.exact_category}
-                disabled={!draftFilters.category_id}
-                id="inventory-exact-category"
-                type="checkbox"
-                onChange={(event) =>
-                  updateDraftFilter("exact_category", event.target.checked)
-                }
-              />
-              <span>
-                <strong>精确分类</strong>
-                <small>关闭时包含所选分类的所有子分类库存。</small>
-              </span>
-            </label>
-            <div className="toolbar-group">
-              <Button type="submit" variant="primary">
-                <Filter size={15} />
-                应用筛选
-              </Button>
-              <Button onClick={resetFilters}>
-                <RotateCcw size={15} />
-                重置
-              </Button>
-            </div>
-          </form>
-        </div>
-      </section>
-
-      <section className="panel">
         <div className="panel-header asset-table-header">
           <div>
             <h2 className="panel-title">库存列表</h2>
             <p className="panel-description">
               第 {page} / {maxPage} 页，共 {total} 条
-              {parameterFilterActive ? `，当前页参数匹配 ${visibleItems.length} 条` : ""}
+              {parameterFilterActive ? "，已应用参数过滤" : ""}
             </p>
           </div>
           <div className="toolbar-group">
@@ -672,10 +537,47 @@ export function InventoryPage() {
                 参数信息
               </button>
             </div>
+            {searchOpen ? (
+              <form className="list-search" onSubmit={submitSearch}>
+                <input
+                  aria-label="搜索库存"
+                  className="input list-search-input"
+                  placeholder="搜索库存"
+                  value={searchValue}
+                  onChange={(event) => setSearchValue(event.target.value)}
+                />
+                <Button size="icon" variant="ghost" aria-label="应用搜索" type="submit">
+                  <Search size={16} />
+                </Button>
+                <Button size="icon" variant="ghost" aria-label="清空搜索" onClick={clearSearch}>
+                  <X size={16} />
+                </Button>
+              </form>
+            ) : (
+              <Button
+                size="icon"
+                variant={filters.keyword ? "default" : "ghost"}
+                aria-label="搜索"
+                onClick={() => setSearchOpen(true)}
+              >
+                <Search size={16} />
+              </Button>
+            )}
+            <Button
+              size="icon"
+              variant={hasActiveInventoryFilters(filters) ? "default" : "ghost"}
+              aria-label="过滤条件"
+              onClick={() => {
+                setDraftFilters(filters);
+                setFilterDialogOpen(true);
+              }}
+            >
+              <Filter size={16} />
+            </Button>
             <ColumnSelector
               columns={activeColumns}
               visibleColumns={visibleColumnKeys}
-              onToggle={toggleColumn}
+              onApply={applyColumns}
             />
             <Button
               disabled={offset <= 0 || inventoryQuery.isFetching}
@@ -729,6 +631,18 @@ export function InventoryPage() {
         onClose={() => setEditor(null)}
         onSaved={() => setEditor(null)}
       />
+      <InventoryFilterDialog
+        categories={categories}
+        filters={draftFilters}
+        locations={locations}
+        open={filterDialogOpen}
+        parameters={parameters}
+        units={units}
+        onApply={applyDraftFilters}
+        onChange={setDraftFilters}
+        onOpenChange={setFilterDialogOpen}
+        onReset={resetFilters}
+      />
       <DeleteInventoryDialog
         item={deletingItem}
         loading={deleteInventoryItem.isPending}
@@ -737,6 +651,454 @@ export function InventoryPage() {
       />
     </main>
   );
+}
+
+function InventoryFilterDialog({
+  categories,
+  filters,
+  locations,
+  onApply,
+  onChange,
+  onOpenChange,
+  onReset,
+  open,
+  parameters,
+  units,
+}: {
+  categories: AssetCategory[];
+  filters: FilterForm;
+  locations: Location[];
+  onApply: () => void;
+  onChange: (value: FilterForm | ((current: FilterForm) => FilterForm)) => void;
+  onOpenChange: (open: boolean) => void;
+  onReset: () => void;
+  open: boolean;
+  parameters: AssetParameter[];
+  units: Unit[];
+}) {
+  const [activeKeys, setActiveKeys] = useState<Set<InventoryFilterKey>>(
+    () => activeInventoryFilterKeys(filters),
+  );
+  const [conditionToAdd, setConditionToAdd] = useState<InventoryFilterKey | "none">("none");
+
+  useEffect(() => {
+    if (open) {
+      setActiveKeys(activeInventoryFilterKeys(filters));
+      setConditionToAdd("none");
+    }
+  }, [filters, open]);
+
+  const availableOptions = INVENTORY_FILTER_OPTIONS.filter(
+    (option) => !activeKeys.has(option.value),
+  );
+
+  function update<K extends keyof FilterForm>(key: K, value: FilterForm[K]) {
+    onChange((current) => ({ ...current, [key]: value }));
+  }
+
+  function removeCondition(key: InventoryFilterKey) {
+    setActiveKeys((current) => {
+      const next = new Set(current);
+      next.delete(key);
+      return next;
+    });
+    onChange((current) => resetInventoryFilterKey(current, key));
+  }
+
+  function updateParameterFilter(id: string, patch: Partial<ParameterFilterDraft>) {
+    onChange((current) => ({
+      ...current,
+      parameter_filters: current.parameter_filters.map((filter) =>
+        filter.id === id ? { ...filter, ...patch } : filter,
+      ),
+    }));
+  }
+
+  function removeParameterFilter(id: string) {
+    onChange((current) => ({
+      ...current,
+      parameter_filters: current.parameter_filters.filter((filter) => filter.id !== id),
+    }));
+  }
+
+  return (
+    <Dialog
+      open={open}
+      title="过滤库存"
+      description="逐项添加条件；多个条件会同时生效。"
+      onOpenChange={onOpenChange}
+      footer={
+        <>
+          <Button onClick={onReset}>
+            <RotateCcw size={15} />
+            重置
+          </Button>
+          <Button onClick={() => onOpenChange(false)}>取消</Button>
+          <Button variant="primary" onClick={onApply}>
+            应用过滤
+          </Button>
+        </>
+      }
+    >
+      <div className="filter-dialog-add-row">
+        <Select
+          label="添加过滤条件"
+          options={[
+            { label: "选择条件", value: "none" },
+            ...availableOptions.map((option) => ({
+              label: option.label,
+              value: option.value,
+            })),
+          ]}
+          value={conditionToAdd}
+          onValueChange={(value) =>
+            setConditionToAdd(value as InventoryFilterKey | "none")
+          }
+        />
+        <Button
+          disabled={conditionToAdd === "none"}
+          onClick={() => {
+            if (conditionToAdd === "none") return;
+            setActiveKeys((current) => new Set(current).add(conditionToAdd));
+            setConditionToAdd("none");
+          }}
+        >
+          <Plus size={15} />
+          添加条件
+        </Button>
+      </div>
+
+      <div className="filter-condition-list">
+        {[...activeKeys].map((key) => (
+          <div className="filter-condition-item" key={key}>
+            <div className="filter-condition-header">
+              <strong>{inventoryFilterLabel(key)}</strong>
+              <Button size="icon" variant="ghost" aria-label={`移除${inventoryFilterLabel(key)}`} onClick={() => removeCondition(key)}>
+                <X size={15} />
+              </Button>
+            </div>
+            {key === "category" ? (
+              <>
+                <Select
+                  label="资产分类"
+                  options={[
+                    { label: "全部分类", value: "all" },
+                    ...categories.map((category) => ({
+                      label: `${"　".repeat(category.depth)}${category.name}`,
+                      value: category.category_id,
+                    })),
+                  ]}
+                  value={filters.category_id || "all"}
+                  onValueChange={(value) =>
+                    update("category_id", value === "all" ? "" : value)
+                  }
+                />
+                <label className="checkbox-field">
+                  <input
+                    checked={filters.exact_category}
+                    disabled={!filters.category_id}
+                    type="checkbox"
+                    onChange={(event) => update("exact_category", event.target.checked)}
+                  />
+                  <span>
+                    <strong>精确分类</strong>
+                    <small>关闭时包含所选分类的所有子分类库存。</small>
+                  </span>
+                </label>
+              </>
+            ) : null}
+            {key === "status" ? (
+              <Select
+                label="库存状态"
+                options={[
+                  { label: "全部状态", value: "all" },
+                  ...inventoryStatusOptions(),
+                ]}
+                value={filters.status}
+                onValueChange={(value) => update("status", value as FilterForm["status"])}
+              />
+            ) : null}
+            {key === "location" ? (
+              <Select
+                label="位置"
+                options={[
+                  { label: "全部位置", value: "all" },
+                  ...locations.map((location) => ({
+                    label: `${"　".repeat(location.depth)}${location.name}`,
+                    value: location.location_id,
+                  })),
+                ]}
+                value={filters.location_id || "all"}
+                onValueChange={(value) =>
+                  update("location_id", value === "all" ? "" : value)
+                }
+              />
+            ) : null}
+            {key === "serial_number" ? (
+              <FormField htmlFor="inventory-dialog-serial" label="序列号">
+                <input
+                  className="input"
+                  id="inventory-dialog-serial"
+                  value={filters.serial_number}
+                  onChange={(event) => update("serial_number", event.target.value)}
+                />
+              </FormField>
+            ) : null}
+            {key === "batch_number" ? (
+              <FormField htmlFor="inventory-dialog-batch" label="批号">
+                <input
+                  className="input"
+                  id="inventory-dialog-batch"
+                  value={filters.batch_number}
+                  onChange={(event) => update("batch_number", event.target.value)}
+                />
+              </FormField>
+            ) : null}
+            {key === "has_batch" ? (
+              <Select
+                label="是否有批号"
+                options={[
+                  { label: "全部", value: "all" },
+                  { label: "有批号", value: "true" },
+                  { label: "无批号", value: "false" },
+                ]}
+                value={filters.has_batch}
+                onValueChange={(value) =>
+                  update("has_batch", value as FilterForm["has_batch"])
+                }
+              />
+            ) : null}
+            {key === "has_location" ? (
+              <Select
+                label="是否有位置"
+                options={[
+                  { label: "全部", value: "all" },
+                  { label: "有位置", value: "true" },
+                  { label: "无位置", value: "false" },
+                ]}
+                value={filters.has_location}
+                onValueChange={(value) =>
+                  update("has_location", value as FilterForm["has_location"])
+                }
+              />
+            ) : null}
+          </div>
+        ))}
+
+        {filters.parameter_filters.map((filter, index) => (
+          <div className="filter-condition-item" key={filter.id}>
+            <div className="filter-condition-header">
+              <strong>资产参数 {index + 1}</strong>
+              <Button
+                size="icon"
+                variant="ghost"
+                aria-label={`移除资产参数 ${index + 1}`}
+                onClick={() => removeParameterFilter(filter.id)}
+              >
+                <X size={15} />
+              </Button>
+            </div>
+            <Select
+              label="参数"
+              options={[
+                { label: "选择参数", value: "none" },
+                ...parameters.map((parameter) => ({
+                  label: parameter.name,
+                  value: parameter.parameter_type_id,
+                })),
+              ]}
+              value={filter.parameter_type_id || "none"}
+              onValueChange={(value) =>
+                updateParameterFilter(filter.id, {
+                  ...emptyParameterFilterDraft(),
+                  id: filter.id,
+                  parameter_type_id: value === "none" ? "" : value,
+                })
+              }
+            />
+            <ParameterFilterFields
+              filter={filter}
+              parameters={parameters}
+              units={units}
+              onChange={(patch) => updateParameterFilter(filter.id, patch)}
+            />
+          </div>
+        ))}
+      </div>
+
+      <Button
+        onClick={() =>
+          onChange((current) => ({
+            ...current,
+            parameter_filters: [
+              ...current.parameter_filters,
+              emptyParameterFilterDraft(),
+            ],
+          }))
+        }
+      >
+        <Plus size={15} />
+        添加参数条件
+      </Button>
+    </Dialog>
+  );
+}
+
+function ParameterFilterFields({
+  filter,
+  onChange,
+  parameters,
+  units,
+}: {
+  filter: ParameterFilterDraft;
+  onChange: (patch: Partial<ParameterFilterDraft>) => void;
+  parameters: AssetParameter[];
+  units: Unit[];
+}) {
+  const parameter = parameters.find(
+    (item) => item.parameter_type_id === filter.parameter_type_id,
+  );
+  if (!parameter) {
+    return null;
+  }
+  const unitOptions = units.filter((unit) => unit.dimension === parameter.unit_dimension);
+  const unitSelect =
+    parameter.data_type === "number" || parameter.data_type === "range" ? (
+      <Select
+        label="单位"
+        options={[
+          { label: "默认单位", value: "default" },
+          ...unitOptions.map((unit) => ({
+            label: `${unit.name} (${unit.symbol})`,
+            value: unit.unit_id,
+          })),
+        ]}
+        value={filter.unit_id || "default"}
+        onValueChange={(value) => onChange({ unit_id: value === "default" ? "" : value })}
+      />
+    ) : null;
+
+  if (parameter.data_type === "text") {
+    return (
+      <FormField htmlFor={`inventory-parameter-filter-text-${filter.id}`} label="包含文本">
+        <input
+          className="input"
+          id={`inventory-parameter-filter-text-${filter.id}`}
+          value={filter.text}
+          onChange={(event) => onChange({ text: event.target.value })}
+        />
+      </FormField>
+    );
+  }
+  if (parameter.data_type === "number") {
+    return (
+      <div className="form-grid form-grid-2">
+        <FormField htmlFor={`inventory-parameter-filter-number-min-${filter.id}`} label="最小值">
+          <input
+            className="input"
+            id={`inventory-parameter-filter-number-min-${filter.id}`}
+            type="number"
+            step="any"
+            value={filter.number_min}
+            onChange={(event) => onChange({ number_min: event.target.value })}
+          />
+        </FormField>
+        <FormField htmlFor={`inventory-parameter-filter-number-max-${filter.id}`} label="最大值">
+          <input
+            className="input"
+            id={`inventory-parameter-filter-number-max-${filter.id}`}
+            type="number"
+            step="any"
+            value={filter.number_max}
+            onChange={(event) => onChange({ number_max: event.target.value })}
+          />
+        </FormField>
+        {unitSelect}
+      </div>
+    );
+  }
+  if (parameter.data_type === "range") {
+    return (
+      <div className="form-grid form-grid-2">
+        <FormField htmlFor={`inventory-parameter-filter-range-start-${filter.id}`} label="范围起点">
+          <input
+            className="input"
+            id={`inventory-parameter-filter-range-start-${filter.id}`}
+            type="number"
+            step="any"
+            value={filter.range_start}
+            onChange={(event) => onChange({ range_start: event.target.value })}
+          />
+        </FormField>
+        <FormField htmlFor={`inventory-parameter-filter-range-end-${filter.id}`} label="范围终点">
+          <input
+            className="input"
+            id={`inventory-parameter-filter-range-end-${filter.id}`}
+            type="number"
+            step="any"
+            value={filter.range_end}
+            onChange={(event) => onChange({ range_end: event.target.value })}
+          />
+        </FormField>
+        {unitSelect}
+      </div>
+    );
+  }
+  if (parameter.data_type === "boolean") {
+    return (
+      <Select
+        label="布尔值"
+        options={[
+          { label: "选择值", value: "all" },
+          { label: "是", value: "true" },
+          { label: "否", value: "false" },
+        ]}
+        value={filter.boolean}
+        onValueChange={(value) => onChange({ boolean: value as ParameterFilterDraft["boolean"] })}
+      />
+    );
+  }
+  if (parameter.data_type === "date") {
+    return (
+      <div className="form-grid form-grid-2">
+        <FormField htmlFor={`inventory-parameter-filter-date-start-${filter.id}`} label="开始日期">
+          <input
+            className="input"
+            id={`inventory-parameter-filter-date-start-${filter.id}`}
+            type="date"
+            value={filter.date_start}
+            onChange={(event) => onChange({ date_start: event.target.value })}
+          />
+        </FormField>
+        <FormField htmlFor={`inventory-parameter-filter-date-end-${filter.id}`} label="结束日期">
+          <input
+            className="input"
+            id={`inventory-parameter-filter-date-end-${filter.id}`}
+            type="date"
+            value={filter.date_end}
+            onChange={(event) => onChange({ date_end: event.target.value })}
+          />
+        </FormField>
+      </div>
+    );
+  }
+  if (parameter.data_type === "enum") {
+    return (
+      <Select
+        label="选项"
+        options={[
+          { label: "选择选项", value: "none" },
+          ...parameter.options.map((option) => ({
+              label: option.label,
+              value: option.option_id,
+            })),
+        ]}
+        value={filter.option_id || "none"}
+        onValueChange={(value) => onChange({ option_id: value === "none" ? "" : value })}
+      />
+    );
+  }
+  return null;
 }
 
 function LocationPathNav({
@@ -749,7 +1111,7 @@ function LocationPathNav({
       {breadcrumbs.map((breadcrumb, index) => (
         <span className="asset-category-path-item" key={breadcrumb.locationId || "all"}>
           {index > 0 ? <span className="asset-category-path-separator">/</span> : null}
-          <Link to={breadcrumb.locationId ? `/assets?location_id=${breadcrumb.locationId}` : "/assets"}>
+          <Link to={breadcrumb.locationId ? `/inventory?location_id=${breadcrumb.locationId}` : "/inventory"}>
             {breadcrumb.label}
           </Link>
         </span>
@@ -760,36 +1122,78 @@ function LocationPathNav({
 
 function ColumnSelector({
   columns,
-  onToggle,
+  onApply,
   visibleColumns,
 }: {
   columns: InventoryColumn[];
-  onToggle: (key: string, visible: boolean) => void;
+  onApply: (columns: Set<string>) => void;
   visibleColumns: Set<string>;
 }) {
+  const [open, setOpen] = useState(false);
+  const [draftColumns, setDraftColumns] = useState<Set<string>>(() => new Set(visibleColumns));
+
+  function openDialog() {
+    setDraftColumns(new Set(visibleColumns));
+    setOpen(true);
+  }
+
+  function toggleDraftColumn(key: string, visible: boolean) {
+    setDraftColumns((current) => {
+      const next = new Set(current);
+      if (visible) {
+        next.add(key);
+      } else {
+        next.delete(key);
+      }
+      return next;
+    });
+  }
+
   return (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
-        <Button aria-label="选择列" size="icon" variant="ghost">
-          <Settings2 size={16} />
-        </Button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content className="dropdown-content asset-column-menu" align="end">
-          {columns.map((column) => (
-            <DropdownMenu.CheckboxItem
-              checked={column.locked || visibleColumns.has(column.key)}
-              className="dropdown-item"
-              disabled={column.locked}
-              key={column.key}
-              onCheckedChange={(checked) => onToggle(column.key, checked === true)}
+    <>
+      <Button aria-label="选择列" size="icon" variant="ghost" onClick={openDialog}>
+        <Settings2 size={16} />
+      </Button>
+      <Dialog
+        open={open}
+        title="选择列"
+        description="勾选本视图要显示的列。"
+        onOpenChange={setOpen}
+        footer={
+          <>
+            <Button onClick={() => setOpen(false)}>取消</Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                onApply(draftColumns);
+                setOpen(false);
+              }}
             >
-              {column.label}
-            </DropdownMenu.CheckboxItem>
+              确认
+            </Button>
+          </>
+        }
+      >
+        <div className="column-dialog-list">
+          {columns.map((column) => (
+            <label className="checkbox-field" key={column.key}>
+              <input
+                checked={column.locked || draftColumns.has(column.key)}
+                disabled={column.locked}
+                type="checkbox"
+                onChange={(event) =>
+                  toggleDraftColumn(column.key, event.currentTarget.checked)
+                }
+              />
+              <span>
+                <strong>{column.label}</strong>
+                {column.locked ? <small>固定显示</small> : null}
+              </span>
+            </label>
           ))}
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+        </div>
+      </Dialog>
+    </>
   );
 }
 
@@ -966,14 +1370,17 @@ export function InventoryEditor({
 }) {
   const toast = useToast();
   const isCreate = editor?.mode === "create";
+  const fixedAsset = editor?.mode === "create" ? editor.asset : undefined;
   const editingItem = editor?.mode === "edit" ? editor.item : null;
   const [assetSearch, setAssetSearch] = useState("");
   const [values, setValues] = useState<InventoryForm>(() => emptyInventoryForm());
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [serialAttachments, setSerialAttachments] = useState<Record<string, PendingAttachment[]>>(
+    {},
+  );
   const unitsById = useMemo(() => mapById(units, "unit_id"), [units]);
   const assetQuery = useMemo<AssetQuery>(
     () => ({
-      is_archived: false,
       keyword: optional(assetSearch),
       limit: 50,
       offset: 0,
@@ -981,13 +1388,13 @@ export function InventoryEditor({
     [assetSearch],
   );
   const assetsQuery = useAssets({
-    enabled: open && isCreate && Boolean(laboratoryId),
+    enabled: open && isCreate && !fixedAsset && Boolean(laboratoryId),
     laboratoryId,
     query: assetQuery,
   });
   const assetOptions = assetsQuery.data?.items ?? [];
   const selectedAsset = isCreate
-    ? assetOptions.find((asset) => asset.asset_id === values.asset_id)
+    ? fixedAsset ?? assetOptions.find((asset) => asset.asset_id === values.asset_id)
     : null;
   const trackingMode = editingItem?.tracking_mode ?? selectedAsset?.tracking_mode ?? null;
   const quantityUnitId =
@@ -999,17 +1406,24 @@ export function InventoryEditor({
       setAssetSearch("");
       setValues(emptyInventoryForm());
       setPendingAttachments([]);
+      setSerialAttachments({});
       return;
     }
 
     if (editor.mode === "create") {
-      setValues(emptyInventoryForm());
+      setValues({
+        ...emptyInventoryForm(),
+        asset_id: editor.asset?.asset_id ?? "",
+        quantity_unit_id: editor.asset?.default_unit_id ?? "",
+      });
       setPendingAttachments([]);
+      setSerialAttachments({});
       return;
     }
 
     setValues(formFromInventoryItem(editor.item));
     setPendingAttachments([]);
+    setSerialAttachments({});
   }, [editor]);
 
   useEffect(() => {
@@ -1038,7 +1452,21 @@ export function InventoryEditor({
         toast.error({ title: payloadResult.message });
         return;
       }
-      const attachmentClaims = attachmentClaimsFromPending(pendingAttachments);
+      const serialNumbers =
+        selectedAsset.tracking_mode === "serialized" && values.serial_mode === "serials"
+          ? splitSerialNumbers(values.serial_numbers)
+          : [];
+      const serialAttachmentClaims = buildSerialItemAttachmentClaims(
+        serialNumbers,
+        serialAttachments,
+      );
+      if (!serialAttachmentClaims.ok) {
+        toast.error({ title: serialAttachmentClaims.message });
+        return;
+      }
+      const attachmentClaims = serialAttachmentClaims.hasClaims
+        ? attachmentClaimsFromPending([])
+        : attachmentClaimsFromPending(pendingAttachments);
       if (!attachmentClaims.ok) {
         toast.error({ title: attachmentClaims.message });
         return;
@@ -1053,17 +1481,19 @@ export function InventoryEditor({
       createInventoryItems.mutate(
         {
           assetId: selectedAsset.asset_id,
-          payload: {
-            ...payloadResult.payload,
-            attachments:
-              attachmentClaims.claims.length > 0 ? attachmentClaims.claims : undefined,
-          },
+          payload: buildInventoryCreateRequestPayload(
+            payloadResult.payload,
+            attachmentClaims.claims,
+            serialAttachmentClaims.items,
+            serialAttachmentClaims.hasClaims,
+          ),
         },
         {
           onError: (error) =>
             toast.error({ title: "创建库存失败", description: toErrorMessage(error) }),
           onSuccess: () => {
             setPendingAttachments([]);
+            setSerialAttachments({});
             toast.success({ title: "库存已创建" });
             onSaved();
           },
@@ -1118,33 +1548,37 @@ export function InventoryEditor({
       <form className="form-grid" id="inventory-form" onSubmit={handleSubmit}>
         {isCreate ? (
           <>
-            <FormField htmlFor="inventory-asset-search" label="搜索资产">
-              <input
-                className="input"
-                id="inventory-asset-search"
-                placeholder="资产名称、型号或厂商"
-                value={assetSearch}
-                onChange={(event) => setAssetSearch(event.target.value)}
-              />
-            </FormField>
-            <FormField htmlFor="inventory-editor-asset" label="资产">
-              <Select
-                disabled={assetsQuery.isLoading || assetOptions.length === 0}
-                id="inventory-editor-asset"
-                label="资产"
-                options={[
-                  { label: "选择资产", value: "none" },
-                  ...assetOptions.map((asset) => ({
-                    label: `${asset.name}${asset.model ? ` · ${asset.model}` : ""}`,
-                    value: asset.asset_id,
-                  })),
-                ]}
-                value={values.asset_id || "none"}
-                onValueChange={(value) =>
-                  updateField("asset_id", value === "none" ? "" : value)
-                }
-              />
-            </FormField>
+            {!fixedAsset ? (
+              <>
+                <FormField htmlFor="inventory-asset-search" label="搜索资产">
+                  <input
+                    className="input"
+                    id="inventory-asset-search"
+                    placeholder="资产名称、型号或厂商"
+                    value={assetSearch}
+                    onChange={(event) => setAssetSearch(event.target.value)}
+                  />
+                </FormField>
+                <FormField htmlFor="inventory-editor-asset" label="资产">
+                  <Select
+                    disabled={assetsQuery.isLoading || assetOptions.length === 0}
+                    id="inventory-editor-asset"
+                    label="资产"
+                    options={[
+                      { label: "选择资产", value: "none" },
+                      ...assetOptions.map((asset) => ({
+                        label: `${asset.name}${asset.model ? ` · ${asset.model}` : ""}`,
+                        value: asset.asset_id,
+                      })),
+                    ]}
+                    value={values.asset_id || "none"}
+                    onValueChange={(value) =>
+                      updateField("asset_id", value === "none" ? "" : value)
+                    }
+                  />
+                </FormField>
+              </>
+            ) : null}
             {selectedAsset ? (
               <div className="asset-detail-item">
                 <dt>所选资产</dt>
@@ -1168,6 +1602,16 @@ export function InventoryEditor({
             editing={Boolean(editingItem)}
             values={values}
             onChange={updateField}
+          />
+        ) : null}
+
+        {isCreate && trackingMode === "serialized" && values.serial_mode === "serials" ? (
+          <SerialItemAttachmentEditors
+            disabled={isSaving}
+            laboratoryId={laboratoryId}
+            pendingBySerial={serialAttachments}
+            serialNumbers={splitSerialNumbers(values.serial_numbers)}
+            onChange={setSerialAttachments}
           />
         ) : null}
 
@@ -1234,7 +1678,7 @@ export function InventoryEditor({
                 onChange={(event) => updateField("internal_notes", event.target.value)}
               />
             </FormField>
-            {isCreate ? (
+            {isCreate && !(trackingMode === "serialized" && values.serial_mode === "serials") ? (
               <PendingAttachmentUploader
                 disabled={isSaving}
                 laboratoryId={laboratoryId}
@@ -1308,6 +1752,57 @@ function SerializedInventoryFields({
         </FormField>
       )}
     </>
+  );
+}
+
+function SerialItemAttachmentEditors({
+  disabled,
+  laboratoryId,
+  onChange,
+  pendingBySerial,
+  serialNumbers,
+}: {
+  disabled: boolean;
+  laboratoryId: string;
+  onChange: Dispatch<SetStateAction<Record<string, PendingAttachment[]>>>;
+  pendingBySerial: Record<string, PendingAttachment[]>;
+  serialNumbers: string[];
+}) {
+  if (serialNumbers.length === 0) {
+    return null;
+  }
+
+  function updateSerialAttachments(
+    serialNumber: string,
+    update: SetStateAction<PendingAttachment[]>,
+  ) {
+    onChange((current) => {
+      const previous = current[serialNumber] ?? [];
+      const nextValue =
+        typeof update === "function"
+          ? (update as (current: PendingAttachment[]) => PendingAttachment[])(previous)
+          : update;
+      return { ...current, [serialNumber]: nextValue };
+    });
+  }
+
+  return (
+    <div className="serial-attachment-list">
+      {serialNumbers.map((serialNumber) => (
+        <div className="serial-attachment-item" key={serialNumber}>
+          <div className="serial-attachment-title">
+            <strong>{serialNumber}</strong>
+            <span>独立附件</span>
+          </div>
+          <PendingAttachmentUploader
+            disabled={disabled}
+            laboratoryId={laboratoryId}
+            pendingAttachments={pendingBySerial[serialNumber] ?? []}
+            onChange={(update) => updateSerialAttachments(serialNumber, update)}
+          />
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -1421,12 +1916,6 @@ function buildBasicColumns(
       label: "分类",
       render: (item) => categoryLabel(item.asset.category_id, categoryById),
       sortKey: "category",
-    },
-    {
-      key: "tracking_mode",
-      label: "模式",
-      render: (item) => <Badge tone="accent">{trackingModeLabel(item.tracking_mode)}</Badge>,
-      sortKey: "tracking_mode",
     },
     {
       key: "status",
@@ -1560,7 +2049,7 @@ function InventoryItemCell({
   return (
     <span className="asset-name-cell">
       <strong>{inventoryItemLabel(item)}</strong>
-      <span>{trackingModeLabel(item.tracking_mode)}</span>
+      <span>{item.batch_number ? `批号 ${item.batch_number}` : "单件库存"}</span>
     </span>
   );
 }
@@ -1571,43 +2060,6 @@ function InventoryAssetCell({ item }: { item: InventoryItem }) {
       <strong>{item.asset.name}</strong>
       <span>{item.asset.model ?? item.asset.manufacturer ?? item.asset.asset_id}</span>
     </span>
-  );
-}
-
-function itemMatchesParameterFilters(
-  item: InventoryItem,
-  filters: FilterForm,
-  assetDetailsById: Map<string, Asset>,
-  unitsById: Map<string, Unit>,
-) {
-  const parameterTypeId = filters.parameter_type_id;
-  const keyword = filters.parameter_keyword.trim().toLowerCase();
-  if (!parameterTypeId && !keyword) {
-    return true;
-  }
-
-  const values = assetDetailsById.get(item.asset_id)?.parameters ?? [];
-  const candidates = parameterTypeId
-    ? values.filter((value) => value.parameter_type_id === parameterTypeId)
-    : values;
-
-  if (parameterTypeId && candidates.length === 0) {
-    return false;
-  }
-  if (!keyword) {
-    return true;
-  }
-
-  return candidates.some((value) =>
-    [
-      value.name,
-      value.code,
-      value.data_type,
-      formatParameterValue(value, unitsById),
-    ]
-      .join(" ")
-      .toLowerCase()
-      .includes(keyword),
   );
 }
 
@@ -1676,13 +2128,17 @@ function buildLocationBreadcrumbs(locationId: string, locations: Location[]) {
   }
 
   const breadcrumbs = [{ label: "全部位置", locationId: "" }];
-  const segments = selected.path.split(".");
-  for (let index = 0; index < segments.length; index += 1) {
-    const path = segments.slice(0, index + 1).join(".");
-    const location = locations.find((candidate) => candidate.path === path);
-    if (location) {
-      breadcrumbs.push({ label: location.name, locationId: location.location_id });
-    }
+  const byId = mapById(locations, "location_id");
+  const chain: Location[] = [];
+  let current: Location | undefined = selected;
+  const seen = new Set<string>();
+  while (current && !seen.has(current.location_id)) {
+    seen.add(current.location_id);
+    chain.unshift(current);
+    current = current.parent_location_id ? byId.get(current.parent_location_id) : undefined;
+  }
+  for (const location of chain) {
+    breadcrumbs.push({ label: location.name, locationId: location.location_id });
   }
   return breadcrumbs;
 }
@@ -1707,6 +2163,52 @@ function canAttachToCreatedInventoryItem(values: InventoryForm, asset: Asset) {
     return parsePositiveNumber(values.count) === 1;
   }
   return splitSerialNumbers(values.serial_numbers).length === 1;
+}
+
+function buildSerialItemAttachmentClaims(
+  serialNumbers: string[],
+  pendingBySerial: Record<string, PendingAttachment[]>,
+):
+  | {
+      hasClaims: boolean;
+      items: NonNullable<CreateInventoryItemsPayload["serial_items"]>;
+      ok: true;
+    }
+  | { message: string; ok: false } {
+  const items: NonNullable<CreateInventoryItemsPayload["serial_items"]> = [];
+  let hasClaims = false;
+  for (const serialNumber of serialNumbers) {
+    const claims = attachmentClaimsFromPending(pendingBySerial[serialNumber] ?? []);
+    if (!claims.ok) {
+      return { message: `${serialNumber}: ${claims.message}`, ok: false };
+    }
+    hasClaims = hasClaims || claims.claims.length > 0;
+    items.push({
+      attachments: claims.claims.length > 0 ? claims.claims : undefined,
+      serial_number: serialNumber,
+    });
+  }
+  return { hasClaims, items, ok: true };
+}
+
+function buildInventoryCreateRequestPayload(
+  payload: CreateInventoryItemsPayload,
+  attachments: NonNullable<CreateInventoryItemsPayload["attachments"]>,
+  serialItems: NonNullable<CreateInventoryItemsPayload["serial_items"]>,
+  useSerialItems: boolean,
+): CreateInventoryItemsPayload {
+  if (useSerialItems) {
+    return {
+      ...payload,
+      attachments: undefined,
+      serial_items: serialItems,
+      serial_numbers: undefined,
+    };
+  }
+  return {
+    ...payload,
+    attachments: attachments.length > 0 ? attachments : undefined,
+  };
 }
 
 function buildCreatePayload(
@@ -1838,12 +2340,187 @@ function emptyFilters(categoryId = "", exactCategory = false, locationId = ""): 
     has_location: "all",
     keyword: "",
     location_id: locationId,
-    parameter_keyword: "",
-    parameter_type_id: "",
+    parameter_filters: [],
     serial_number: "",
     status: "all",
-    tracking_mode: "all",
   };
+}
+
+function activeInventoryFilterKeys(filters: FilterForm) {
+  const keys = new Set<InventoryFilterKey>();
+  if (filters.category_id || filters.exact_category) keys.add("category");
+  if (filters.status !== "all") keys.add("status");
+  if (filters.location_id) keys.add("location");
+  if (filters.serial_number.trim()) keys.add("serial_number");
+  if (filters.batch_number.trim()) keys.add("batch_number");
+  if (filters.has_batch !== "all") keys.add("has_batch");
+  if (filters.has_location !== "all") keys.add("has_location");
+  return keys;
+}
+
+function hasActiveInventoryFilters(filters: FilterForm) {
+  return activeInventoryFilterKeys(filters).size > 0 || filters.parameter_filters.length > 0;
+}
+
+function inventoryFilterLabel(key: InventoryFilterKey) {
+  return INVENTORY_FILTER_OPTIONS.find((option) => option.value === key)?.label ?? key;
+}
+
+function resetInventoryFilterKey(filters: FilterForm, key: InventoryFilterKey): FilterForm {
+  switch (key) {
+    case "category":
+      return { ...filters, category_id: "", exact_category: false };
+    case "status":
+      return { ...filters, status: "all" };
+    case "location":
+      return { ...filters, location_id: "" };
+    case "serial_number":
+      return { ...filters, serial_number: "" };
+    case "batch_number":
+      return { ...filters, batch_number: "" };
+    case "has_batch":
+      return { ...filters, has_batch: "all" };
+    case "has_location":
+      return { ...filters, has_location: "all" };
+    default:
+      return filters;
+  }
+}
+
+function emptyParameterFilterDraft(): ParameterFilterDraft {
+  return {
+    boolean: "all",
+    date_end: "",
+    date_start: "",
+    id: `parameter-filter-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    number_max: "",
+    number_min: "",
+    option_id: "",
+    parameter_type_id: "",
+    range_end: "",
+    range_start: "",
+    text: "",
+    unit_id: "",
+  };
+}
+
+function validateParameterFilters(
+  filters: ParameterFilterDraft[],
+  parameters: AssetParameter[],
+): { ok: true } | { message: string; ok: false } {
+  for (const filter of filters) {
+    const parameter = parameters.find(
+      (item) => item.parameter_type_id === filter.parameter_type_id,
+    );
+    if (!parameter) return { message: "请选择每个参数过滤条件的参数。", ok: false };
+    if (parameter.data_type === "text" && !filter.text.trim()) {
+      return { message: `${parameter.name} 需要填写包含文本。`, ok: false };
+    }
+    if (parameter.data_type === "number") {
+      const min = optionalNumber(filter.number_min);
+      const max = optionalNumber(filter.number_max);
+      if (!min.ok || !max.ok) return { message: `${parameter.name} 数值范围无效。`, ok: false };
+      if (min.value === null && max.value === null) {
+        return { message: `${parameter.name} 至少填写一个数值边界。`, ok: false };
+      }
+      if (min.value !== null && max.value !== null && min.value > max.value) {
+        return { message: `${parameter.name} 最小值不能大于最大值。`, ok: false };
+      }
+    }
+    if (parameter.data_type === "range") {
+      const start = optionalNumber(filter.range_start);
+      const end = optionalNumber(filter.range_end);
+      if (!start.ok || !end.ok || start.value === null || end.value === null) {
+        return { message: `${parameter.name} 需要填写完整范围。`, ok: false };
+      }
+      if (start.value > end.value) {
+        return { message: `${parameter.name} 范围起点不能大于终点。`, ok: false };
+      }
+    }
+    if (parameter.data_type === "boolean" && filter.boolean === "all") {
+      return { message: `${parameter.name} 需要选择布尔值。`, ok: false };
+    }
+    if (parameter.data_type === "date") {
+      if (!filter.date_start && !filter.date_end) {
+        return { message: `${parameter.name} 至少填写一个日期边界。`, ok: false };
+      }
+      if (filter.date_start && filter.date_end && filter.date_start > filter.date_end) {
+        return { message: `${parameter.name} 开始日期不能晚于结束日期。`, ok: false };
+      }
+    }
+    if (parameter.data_type === "enum" && !filter.option_id) {
+      return { message: `${parameter.name} 需要选择选项。`, ok: false };
+    }
+  }
+  return { ok: true };
+}
+
+function serializeParameterFilters(
+  filters: ParameterFilterDraft[],
+  parameters: AssetParameter[],
+) {
+  const payload: SerializedParameterFilter[] = [];
+  for (const filter of filters) {
+    const parameter = parameters.find(
+      (item) => item.parameter_type_id === filter.parameter_type_id,
+    );
+    if (!parameter) continue;
+    const base = {
+      parameter_type_id: filter.parameter_type_id,
+      unit_id: filter.unit_id || undefined,
+    };
+    if (parameter.data_type === "text" && filter.text.trim()) {
+      payload.push({ parameter_type_id: filter.parameter_type_id, text: filter.text.trim() });
+    }
+    if (parameter.data_type === "number") {
+      const min = optionalNumber(filter.number_min);
+      const max = optionalNumber(filter.number_max);
+      if (min.ok && max.ok && (min.value !== null || max.value !== null)) {
+        payload.push({
+          ...base,
+          number_max: max.value ?? undefined,
+          number_min: min.value ?? undefined,
+        });
+      }
+    }
+    if (parameter.data_type === "range") {
+      const start = optionalNumber(filter.range_start);
+      const end = optionalNumber(filter.range_end);
+      if (start.ok && end.ok && start.value !== null && end.value !== null) {
+        payload.push({
+          ...base,
+          range_end: end.value,
+          range_start: start.value,
+        });
+      }
+    }
+    if (parameter.data_type === "boolean" && filter.boolean !== "all") {
+      payload.push({
+        parameter_type_id: filter.parameter_type_id,
+        boolean: filter.boolean === "true",
+      });
+    }
+    if (parameter.data_type === "date" && (filter.date_start || filter.date_end)) {
+      payload.push({
+        parameter_type_id: filter.parameter_type_id,
+        date_end: filter.date_end || undefined,
+        date_start: filter.date_start || undefined,
+      });
+    }
+    if (parameter.data_type === "enum" && filter.option_id) {
+      payload.push({
+        parameter_type_id: filter.parameter_type_id,
+        option_id: filter.option_id,
+      });
+    }
+  }
+  return payload.length > 0 ? JSON.stringify(payload) : undefined;
+}
+
+function optionalNumber(value: string): { ok: true; value: number | null } | { ok: false } {
+  if (!value.trim()) return { ok: true, value: null };
+  const number = Number(value);
+  return Number.isFinite(number) ? { ok: true, value: number } : { ok: false };
 }
 
 function inventoryStatusOptions() {

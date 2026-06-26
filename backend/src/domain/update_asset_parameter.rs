@@ -10,7 +10,6 @@ pub struct UpdateAssetParameterOption {
     pub code: AssetParameterCode,
     pub label: AssetParameterOptionLabel,
     pub sort_order: i32,
-    pub is_archived: bool,
 }
 
 impl UpdateAssetParameterOption {
@@ -19,14 +18,12 @@ impl UpdateAssetParameterOption {
         code: AssetParameterCode,
         label: AssetParameterOptionLabel,
         sort_order: i32,
-        is_archived: bool,
     ) -> Self {
         Self {
             option_id,
             code,
             label,
             sort_order,
-            is_archived,
         }
     }
 }
@@ -39,7 +36,6 @@ pub struct UpdateAssetParameter {
     pub unit_dimension: NullableUpdate<UnitDimension>,
     pub default_unit_id: NullableUpdate<Uuid>,
     pub description: NullableUpdate<String>,
-    pub is_archived: Option<bool>,
     pub options: Option<Vec<UpdateAssetParameterOption>>,
 }
 
@@ -51,7 +47,6 @@ impl UpdateAssetParameter {
         unit_dimension: NullableUpdate<UnitDimension>,
         default_unit_id: NullableUpdate<Uuid>,
         description: NullableUpdate<String>,
-        is_archived: Option<bool>,
         options: Option<Vec<UpdateAssetParameterOption>>,
     ) -> Self {
         Self {
@@ -61,7 +56,6 @@ impl UpdateAssetParameter {
             unit_dimension,
             default_unit_id,
             description,
-            is_archived,
             options,
         }
     }

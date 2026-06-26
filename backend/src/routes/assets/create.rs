@@ -34,7 +34,6 @@ pub struct JsonData {
     default_unit_id: Uuid,
     public_notes: Option<String>,
     internal_notes: Option<String>,
-    is_archived: Option<bool>,
     inventory_items: Option<Vec<InventoryItemJsonData>>,
     parameters: Option<Vec<ParameterValueJsonData>>,
     attachments: Option<Vec<AttachmentClaimInput>>,
@@ -75,7 +74,6 @@ impl TryFrom<JsonData> for NewAsset {
             value.default_unit_id,
             empty_to_none(value.public_notes),
             empty_to_none(value.internal_notes),
-            value.is_archived.unwrap_or(false),
         ))
     }
 }
@@ -314,10 +312,9 @@ async fn insert_asset(
             manufacturer,
             default_unit_id,
             public_notes,
-            internal_notes,
-            is_archived
+            internal_notes
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING
             asset_id,
             laboratory_id,
@@ -329,7 +326,6 @@ async fn insert_asset(
             default_unit_id,
             public_notes,
             internal_notes,
-            is_archived,
             created_at,
             updated_at,
             0::bigint AS inventory_item_count,
@@ -347,7 +343,6 @@ async fn insert_asset(
     .bind(new_asset.default_unit_id)
     .bind(new_asset.public_notes.as_deref())
     .bind(new_asset.internal_notes.as_deref())
-    .bind(new_asset.is_archived)
     .fetch_one(transaction.as_mut())
     .await
     .map_err(|e| map_model_error(map_database_error(e)))

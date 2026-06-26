@@ -20,7 +20,6 @@ pub(super) struct AssetRow {
     pub(super) default_unit_id: Uuid,
     pub(super) public_notes: Option<String>,
     pub(super) internal_notes: Option<String>,
-    pub(super) is_archived: bool,
     pub(super) created_at: DateTime<Utc>,
     pub(super) updated_at: DateTime<Utc>,
     pub(super) inventory_item_count: i64,
@@ -115,7 +114,6 @@ pub(super) struct AssetResponse {
     default_unit_id: Uuid,
     public_notes: Option<String>,
     internal_notes: Option<String>,
-    is_archived: bool,
     inventory_summary: AssetInventorySummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     inventory_items: Option<Vec<AssetInventoryItemResponse>>,
@@ -191,7 +189,6 @@ impl AssetResponse {
             } else {
                 None
             },
-            is_archived: row.is_archived,
             inventory_summary: AssetInventorySummary {
                 item_count: row.inventory_item_count,
                 quantity_on_hand: row.quantity_on_hand,
@@ -348,7 +345,6 @@ pub(super) fn update_asset_rollback_details(
                 "default_unit_id": asset.default_unit_id,
                 "public_notes": asset.public_notes.as_deref(),
                 "internal_notes": asset.internal_notes.as_deref(),
-                "is_archived": asset.is_archived,
                 "parameter_values": parameter_values,
                 "updated_at": asset.updated_at,
             },
@@ -389,7 +385,6 @@ pub(super) fn asset_select() -> &'static str {
         assets.default_unit_id,
         assets.public_notes,
         assets.internal_notes,
-        assets.is_archived,
         assets.created_at,
         assets.updated_at,
         (
@@ -1230,7 +1225,6 @@ async fn validate_option(
         FROM asset_parameter_options
         WHERE parameter_type_id = $1
           AND option_id = $2
-          AND is_archived = false
         FOR UPDATE
         "#,
     )
@@ -1416,10 +1410,8 @@ pub(super) async fn delete_asset_attachments(
 ) -> Result<Vec<DeletedAttachmentRow>, AssetModelError> {
     let rows = sqlx::query_as::<_, DeletedAttachmentRow>(
         r#"
-        WITH updated AS (
-            UPDATE attachments
-            SET deleted_at = now(),
-                updated_at = now()
+        WITH deleted AS (
+            DELETE FROM attachments
             WHERE deleted_at IS NULL
               AND (
                   asset_id = $1
@@ -1428,7 +1420,7 @@ pub(super) async fn delete_asset_attachments(
             RETURNING attachment_id, storage_key
         )
         SELECT attachment_id, storage_key
-        FROM updated
+        FROM deleted
         ORDER BY attachment_id
         "#,
     )

@@ -91,6 +91,128 @@ async fn create_list_get_assets_with_inventory_parameters_and_audit() {
 }
 
 #[tokio::test]
+async fn asset_and_inventory_lists_support_compound_parameter_filters() {
+    let app = spawn_app().await;
+    let laboratory_id = app.create_laboratory("Parameter Filter Lab").await;
+    let pcs_unit_id = app.unit_id("pcs").await;
+    let cm_unit_id = app.unit_id("cm").await;
+    app.test_user.login(&app).await;
+
+    let color = create_parameter(&app, laboratory_id, "color", "text", None, None).await;
+    let power = create_parameter(
+        &app,
+        laboratory_id,
+        "power",
+        "number",
+        Some("count"),
+        Some(pcs_unit_id),
+    )
+    .await;
+    let span = create_parameter(
+        &app,
+        laboratory_id,
+        "span",
+        "range",
+        Some("length"),
+        Some(cm_unit_id),
+    )
+    .await;
+
+    let matching_asset = create_parameterized_asset(
+        &app,
+        laboratory_id,
+        pcs_unit_id,
+        "Matching Filter Asset",
+        &[
+            serde_json::json!({
+                "parameter_type_id": parameter_id(&color),
+                "value": { "text": "blue anodized" }
+            }),
+            serde_json::json!({
+                "parameter_type_id": parameter_id(&power),
+                "value": { "number": 10, "unit_id": pcs_unit_id }
+            }),
+            serde_json::json!({
+                "parameter_type_id": parameter_id(&span),
+                "value": { "range_start": 2, "range_end": 5, "unit_id": cm_unit_id }
+            }),
+        ],
+    )
+    .await;
+    let non_matching_asset = create_parameterized_asset(
+        &app,
+        laboratory_id,
+        pcs_unit_id,
+        "Non Matching Filter Asset",
+        &[
+            serde_json::json!({
+                "parameter_type_id": parameter_id(&color),
+                "value": { "text": "red" }
+            }),
+            serde_json::json!({
+                "parameter_type_id": parameter_id(&power),
+                "value": { "number": 20, "unit_id": pcs_unit_id }
+            }),
+            serde_json::json!({
+                "parameter_type_id": parameter_id(&span),
+                "value": { "range_start": 6, "range_end": 8, "unit_id": cm_unit_id }
+            }),
+        ],
+    )
+    .await;
+
+    let matching_inventory = create_inventory_item(
+        &app,
+        matching_asset,
+        serde_json::json!({ "batch_number": "MATCH", "quantity_on_hand": 1 }),
+    )
+    .await;
+    create_inventory_item(
+        &app,
+        non_matching_asset,
+        serde_json::json!({ "batch_number": "MISS", "quantity_on_hand": 1 }),
+    )
+    .await;
+
+    let filters = serde_json::json!([
+        {
+            "parameter_type_id": parameter_id(&color),
+            "text": "blue"
+        },
+        {
+            "parameter_type_id": parameter_id(&power),
+            "number_min": 5,
+            "number_max": 15,
+            "unit_id": pcs_unit_id
+        },
+        {
+            "parameter_type_id": parameter_id(&span),
+            "range_start": 3,
+            "range_end": 4,
+            "unit_id": cm_unit_id
+        }
+    ]);
+    let query = format!("parameter_filters={}", percent_encode(&filters.to_string()));
+
+    let response = app.get_assets_with_query(laboratory_id, &query).await;
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["items"][0]["asset_id"], matching_asset.to_string());
+
+    let response = app
+        .get_inventory_items_with_query(laboratory_id, &query)
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["total"], 1);
+    assert_eq!(
+        body["items"][0]["inventory_item_id"],
+        matching_inventory["inventory_item_id"]
+    );
+}
+
+#[tokio::test]
 async fn create_asset_rejects_invalid_inventory_required_parameters_and_duplicates() {
     let app = spawn_app().await;
     let laboratory_id = app.create_laboratory("Asset Validation Lab").await;
@@ -502,6 +624,64 @@ async fn create_text_parameter(
     response.json().await.unwrap()
 }
 
+async fn create_parameter(
+    app: &TestApp,
+    laboratory_id: Uuid,
+    code: &str,
+    data_type: &str,
+    unit_dimension: Option<&str>,
+    default_unit_id: Option<Uuid>,
+) -> serde_json::Value {
+    let response = app
+        .post_asset_parameter(
+            laboratory_id,
+            &serde_json::json!({
+                "code": code,
+                "name": format!("Parameter {code}"),
+                "data_type": data_type,
+                "unit_dimension": unit_dimension,
+                "default_unit_id": default_unit_id
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 201);
+    response.json().await.unwrap()
+}
+
+async fn create_parameterized_asset(
+    app: &TestApp,
+    laboratory_id: Uuid,
+    unit_id: Uuid,
+    name: &str,
+    parameters: &[serde_json::Value],
+) -> Uuid {
+    let response = app
+        .post_asset(
+            laboratory_id,
+            &serde_json::json!({
+                "tracking_mode": "quantity",
+                "name": name,
+                "default_unit_id": unit_id,
+                "parameters": parameters
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 201);
+    let asset: serde_json::Value = response.json().await.unwrap();
+    asset_id(&asset)
+}
+
+async fn create_inventory_item(
+    app: &TestApp,
+    asset_id: Uuid,
+    body: serde_json::Value,
+) -> serde_json::Value {
+    let response = app.post_inventory_items(asset_id, &body).await;
+    assert_eq!(response.status().as_u16(), 201);
+    let items: serde_json::Value = response.json().await.unwrap();
+    items[0].clone()
+}
+
 async fn create_category_with_required_parameter(
     app: &TestApp,
     laboratory_id: Uuid,
@@ -598,4 +778,16 @@ async fn latest_audit_details(app: &TestApp, resource_id: Uuid, action: &str) ->
     .fetch_one(&app.db_pool)
     .await
     .unwrap()
+}
+
+fn percent_encode(value: &str) -> String {
+    value
+        .bytes()
+        .flat_map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                vec![byte as char]
+            }
+            _ => format!("%{byte:02X}").chars().collect(),
+        })
+        .collect()
 }

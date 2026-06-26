@@ -3,6 +3,9 @@ use super::model::{
     inventory_item_select, validate_read_permission, validate_status,
 };
 use crate::domain::{AssetTrackingMode, LaboratoryId, UserId};
+use crate::routes::parameter_filters::{
+    ParameterFilter, ParameterFilterError, parse_parameter_filters, push_parameter_filters,
+};
 use crate::routes::{PaginatedResponse, Pagination};
 use actix_web::{HttpResponse, web};
 use serde::Deserialize;
@@ -24,6 +27,7 @@ pub struct ListInventoryItemsQuery {
     pub location_id: Option<Uuid>,
     pub has_batch: Option<bool>,
     pub has_location: Option<bool>,
+    pub parameter_filters: Option<String>,
 }
 
 #[tracing::instrument(
@@ -40,13 +44,18 @@ pub async fn list_inventory_items(
     validate_query(&query)?;
     let actor = actor_for_user(&pool, actor_user_id).await?;
     let laboratory_id = validate_read_permission(&actor, laboratory_id.into_inner())?;
+    let parameter_filters =
+        parse_parameter_filters(&pool, laboratory_id, query.parameter_filters.as_deref())
+            .await
+            .map_err(map_parameter_filter_error)?;
     let include_internal_notes = actor.can_read_laboratory_resource(&laboratory_id);
-    let total = fetch_inventory_item_count(&pool, laboratory_id, &query).await?;
+    let total =
+        fetch_inventory_item_count(&pool, laboratory_id, &query, &parameter_filters).await?;
     let limit = query.pagination.limit()?;
     let offset = query.pagination.offset()?;
 
     let mut builder = QueryBuilder::<Postgres>::new(inventory_item_select());
-    push_inventory_item_filters(&mut builder, laboratory_id, &query);
+    push_inventory_item_filters(&mut builder, laboratory_id, &query, &parameter_filters);
     builder.push(
         " ORDER BY asset_inventory_items.updated_at DESC, asset_inventory_items.inventory_item_id",
     );
@@ -79,6 +88,7 @@ async fn fetch_inventory_item_count(
     pool: &PgPool,
     laboratory_id: LaboratoryId,
     query: &ListInventoryItemsQuery,
+    parameter_filters: &[ParameterFilter],
 ) -> Result<i64, InventoryItemError> {
     let mut builder = QueryBuilder::<Postgres>::new(
         r#"
@@ -88,7 +98,7 @@ async fn fetch_inventory_item_count(
           ON assets.asset_id = asset_inventory_items.asset_id
         "#,
     );
-    push_inventory_item_filters(&mut builder, laboratory_id, query);
+    push_inventory_item_filters(&mut builder, laboratory_id, query, parameter_filters);
     builder
         .build_query_scalar()
         .fetch_one(pool)
@@ -100,6 +110,7 @@ pub(super) fn push_inventory_item_filters(
     builder: &mut QueryBuilder<'_, Postgres>,
     laboratory_id: LaboratoryId,
     query: &ListInventoryItemsQuery,
+    parameter_filters: &[ParameterFilter],
 ) {
     builder.push(" WHERE asset_inventory_items.laboratory_id = ");
     builder.push_bind(*laboratory_id);
@@ -212,5 +223,13 @@ pub(super) fn push_inventory_item_filters(
         } else {
             builder.push(" AND asset_inventory_items.location_id IS NULL");
         }
+    }
+    push_parameter_filters(builder, "asset_inventory_items.asset_id", parameter_filters);
+}
+
+fn map_parameter_filter_error(error: ParameterFilterError) -> InventoryItemError {
+    match error {
+        ParameterFilterError::Validation(message) => InventoryItemError::ValidationError(message),
+        ParameterFilterError::Unexpected(error) => InventoryItemError::UnexpectedError(error),
     }
 }

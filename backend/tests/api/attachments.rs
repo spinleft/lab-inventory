@@ -210,9 +210,9 @@ async fn delete_unconsumed_attachment_uploads_only_for_upload_owner() {
     let unit_id = app.unit_id("pcs").await;
     app.test_user.login(&app).await;
 
-    let upload = upload(&app, laboratory_id, "remove-me.txt", b"remove me").await;
-    let upload_id = upload_id(&upload);
-    let response = app.delete_attachment_upload(upload_id).await;
+    let deleted_upload = upload(&app, laboratory_id, "remove-me.txt", b"remove me").await;
+    let deleted_upload_id = upload_id(&deleted_upload);
+    let response = app.delete_attachment_upload(deleted_upload_id).await;
     assert_eq!(response.status().as_u16(), 204);
     let response = app.delete_attachment_upload(Uuid::new_v4()).await;
     assert_eq!(response.status().as_u16(), 404);
@@ -226,7 +226,7 @@ async fn delete_unconsumed_attachment_uploads_only_for_upload_owner() {
                 "default_unit_id": unit_id,
                 "attachments": [
                     {
-                        "upload_id": upload_id,
+                        "upload_id": deleted_upload_id,
                         "display_name": "Deleted Upload",
                         "visibility": "internal"
                     }

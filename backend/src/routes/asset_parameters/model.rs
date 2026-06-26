@@ -16,7 +16,6 @@ pub(super) struct AssetParameterResponse {
     unit_dimension: Option<String>,
     default_unit_id: Option<Uuid>,
     description: Option<String>,
-    is_archived: bool,
     options: Vec<AssetParameterOptionResponse>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -32,7 +31,6 @@ pub(super) struct AssetParameterRow {
     pub(super) unit_dimension: Option<String>,
     pub(super) default_unit_id: Option<Uuid>,
     pub(super) description: Option<String>,
-    pub(super) is_archived: bool,
     pub(super) created_at: DateTime<Utc>,
     pub(super) updated_at: DateTime<Utc>,
 }
@@ -44,7 +42,6 @@ pub(super) struct AssetParameterOptionResponse {
     code: String,
     label: String,
     sort_order: i32,
-    is_archived: bool,
 }
 
 #[derive(Clone, Serialize, sqlx::FromRow)]
@@ -54,7 +51,6 @@ pub(super) struct AssetParameterOptionRow {
     pub(super) code: String,
     pub(super) label: String,
     pub(super) sort_order: i32,
-    pub(super) is_archived: bool,
 }
 
 impl From<AssetParameterOptionRow> for AssetParameterOptionResponse {
@@ -65,7 +61,6 @@ impl From<AssetParameterOptionRow> for AssetParameterOptionResponse {
             code: row.code,
             label: row.label,
             sort_order: row.sort_order,
-            is_archived: row.is_archived,
         }
     }
 }
@@ -84,10 +79,15 @@ impl AssetParameterResponse {
             unit_dimension: row.unit_dimension,
             default_unit_id: row.default_unit_id,
             description: row.description,
-            is_archived: row.is_archived,
             options: options
                 .into_iter()
-                .map(AssetParameterOptionResponse::from)
+                .map(|o| AssetParameterOptionResponse {
+                    option_id: o.option_id,
+                    parameter_type_id: o.parameter_type_id,
+                    code: o.code,
+                    label: o.label,
+                    sort_order: o.sort_order,
+                })
                 .collect(),
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -126,7 +126,6 @@ pub(super) fn update_asset_parameter_rollback_details(
                 "unit_dimension": parameter.unit_dimension.as_deref(),
                 "default_unit_id": parameter.default_unit_id,
                 "description": parameter.description.as_deref(),
-                "is_archived": parameter.is_archived,
                 "options": options,
                 "updated_at": parameter.updated_at,
             },
@@ -165,7 +164,6 @@ pub(super) async fn fetch_asset_parameter(
             unit_dimension,
             default_unit_id,
             description,
-            is_archived,
             created_at,
             updated_at
         FROM asset_parameter_types
@@ -193,7 +191,6 @@ pub(super) async fn fetch_asset_parameter_for_update(
             unit_dimension,
             default_unit_id,
             description,
-            is_archived,
             created_at,
             updated_at
         FROM asset_parameter_types
@@ -218,8 +215,7 @@ pub(super) async fn fetch_asset_parameter_options(
             parameter_type_id,
             code,
             label,
-            sort_order,
-            is_archived
+            sort_order
         FROM asset_parameter_options
         WHERE parameter_type_id = $1
         ORDER BY sort_order, label, code
@@ -242,8 +238,7 @@ pub(super) async fn fetch_asset_parameter_options_for_update(
             parameter_type_id,
             code,
             label,
-            sort_order,
-            is_archived
+            sort_order
         FROM asset_parameter_options
         WHERE parameter_type_id = $1
         ORDER BY sort_order, label, code

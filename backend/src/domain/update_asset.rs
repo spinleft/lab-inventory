@@ -11,7 +11,6 @@ pub struct UpdateAsset {
     pub default_unit_id: Option<Uuid>,
     pub public_notes: NullableUpdate<String>,
     pub internal_notes: NullableUpdate<String>,
-    pub is_archived: Option<bool>,
 }
 
 impl UpdateAsset {
@@ -25,7 +24,6 @@ impl UpdateAsset {
         default_unit_id: Option<Uuid>,
         public_notes: NullableUpdate<String>,
         internal_notes: NullableUpdate<String>,
-        is_archived: Option<bool>,
     ) -> Self {
         Self {
             category_id,
@@ -36,7 +34,6 @@ impl UpdateAsset {
             default_unit_id,
             public_notes,
             internal_notes,
-            is_archived,
         }
     }
 }

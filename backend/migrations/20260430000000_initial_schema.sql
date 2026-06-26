@@ -240,7 +240,6 @@ CREATE TABLE assets (
     default_unit_id uuid NOT NULL REFERENCES units (unit_id),
     public_notes TEXT,
     internal_notes TEXT,
-    is_archived BOOLEAN NOT NULL DEFAULT false,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     CHECK (tracking_mode IN ('serialized', 'quantity')),
@@ -277,7 +276,6 @@ CREATE TABLE asset_parameter_types (
     unit_dimension text REFERENCES unit_dimensions(code),
     default_unit_id uuid REFERENCES units(unit_id),
     description text,
-    is_archived boolean NOT NULL DEFAULT false,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
 
@@ -297,7 +295,6 @@ CREATE TABLE asset_parameter_options (
     code text NOT NULL,
     label text NOT NULL,
     sort_order integer NOT NULL DEFAULT 0,
-    is_archived boolean NOT NULL DEFAULT false,
 
     UNIQUE (parameter_type_id, code),
     UNIQUE (parameter_type_id, option_id),

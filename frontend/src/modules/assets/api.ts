@@ -80,7 +80,6 @@ export const assetSchema = z.object({
   internal_notes: z.string().nullable(),
   inventory_items: z.array(assetInventoryItemSchema).optional(),
   inventory_summary: assetInventorySummarySchema,
-  is_archived: z.boolean(),
   laboratory_id: z.string().uuid(),
   manufacturer: z.string().nullable(),
   model: z.string().nullable(),
@@ -112,12 +111,12 @@ export type AssetQuery = {
   has_inventory?: boolean;
   include?: "parameters";
   inventory_status?: string;
-  is_archived?: boolean;
   keyword?: string;
   limit: number;
   location_id?: string;
   manufacturer?: string;
   offset: number;
+  parameter_filters?: string;
   tracking_mode?: AssetTrackingMode;
 };
 
@@ -159,7 +158,6 @@ export type AssetPayload = {
   default_unit_id?: string;
   internal_notes?: string | null;
   inventory_items?: AssetInventoryItemPayload[];
-  is_archived?: boolean;
   manufacturer?: string | null;
   model?: string | null;
   name?: string;

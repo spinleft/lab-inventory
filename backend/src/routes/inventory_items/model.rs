@@ -745,16 +745,14 @@ pub(super) async fn delete_inventory_item_attachments(
 ) -> Result<Vec<DeletedAttachmentRow>, InventoryItemError> {
     let rows = sqlx::query_as::<_, DeletedAttachmentRow>(
         r#"
-        WITH updated AS (
-            UPDATE attachments
-            SET deleted_at = now(),
-                updated_at = now()
+        WITH deleted AS (
+            DELETE FROM attachments
             WHERE inventory_item_id = $1
               AND deleted_at IS NULL
             RETURNING attachment_id, storage_key
         )
         SELECT attachment_id, storage_key
-        FROM updated
+        FROM deleted
         ORDER BY attachment_id
         "#,
     )

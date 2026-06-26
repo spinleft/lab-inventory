@@ -30,6 +30,7 @@ type InventoryFixture = Record<string, unknown> & {
 test("browse, filter, edit, create, delete, and open inventory detail", async ({ page }) => {
   let lastInventoryUrl: URL | null = null;
   let lastAssetsUrl: URL | null = null;
+  let postedSerializedInventory: Record<string, unknown> | null = null;
   let postedInventory: Record<string, unknown> | null = null;
   let patchedInventory: Record<string, unknown> | null = null;
   let deletedInventoryId = "";
@@ -81,7 +82,6 @@ test("browse, filter, edit, create, delete, and open inventory detail", async ({
           data_type: "number",
           default_unit_id: unitId,
           description: null,
-          is_archived: false,
           laboratory_id: laboratoryId,
           name: "功率",
           options: [],
@@ -188,6 +188,16 @@ test("browse, filter, edit, create, delete, and open inventory detail", async ({
     inventoryItems = [created, ...inventoryItems];
     await route.fulfill({ status: 201, json: [created] });
   });
+  await page.route(`**/api/v1/assets/${serializedAssetId}/inventory-items`, async (route) => {
+    postedSerializedInventory = route.request().postDataJSON() as Record<string, unknown>;
+    const created = {
+      ...serializedInventoryItem(),
+      inventory_item_id: "40000000-0000-4000-8000-000000000598",
+      serial_number: (postedSerializedInventory.serial_numbers as string[])[0],
+    };
+    inventoryItems = [created, ...inventoryItems];
+    await route.fulfill({ status: 201, json: [created] });
+  });
   await page.route(`**/api/v1/inventory-items/${serializedItemId}`, async (route) => {
     if (route.request().method() === "PATCH") {
       patchedInventory = route.request().postDataJSON() as Record<string, unknown>;
@@ -220,26 +230,47 @@ test("browse, filter, edit, create, delete, and open inventory detail", async ({
   await expect(page.getByText("显微镜 A")).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
-  await page.getByLabel("关键词").fill("SN-001");
-  await page.getByLabel("库存状态").click();
-  await page.getByRole("option", { name: "可用" }).click();
-  await page.getByRole("button", { name: "应用筛选" }).click();
+  await page.getByRole("main").getByRole("button", { name: "搜索" }).click();
+  await page.getByPlaceholder("搜索库存").fill("SN-001");
+  await page.getByRole("button", { name: "应用搜索" }).click();
   await expect.poll(() => lastInventoryUrl?.searchParams.get("keyword")).toBe("SN-001");
+
+  await page.getByRole("button", { name: "过滤条件" }).click();
+  const filterDialog = page.getByRole("dialog", { name: "过滤库存" });
+  await filterDialog.getByLabel("添加过滤条件").click();
+  await page.getByRole("option", { name: "库存状态" }).click();
+  await filterDialog.getByRole("button", { name: "添加条件" }).click();
+  await filterDialog.getByRole("combobox", { name: "库存状态" }).click();
+  await page.getByRole("option", { name: "可用" }).click();
+  await filterDialog.getByRole("button", { name: "应用过滤" }).click();
   await expect.poll(() => lastInventoryUrl?.searchParams.get("status")).toBe("available");
 
-  await page.getByRole("combobox", { exact: true, name: "位置" }).click();
+  await page.getByRole("button", { name: "过滤条件" }).click();
+  await filterDialog.getByLabel("添加过滤条件").click();
+  await page.getByRole("option", { exact: true, name: "位置" }).click();
+  await filterDialog.getByRole("button", { name: "添加条件" }).click();
+  await filterDialog.getByRole("combobox", { exact: true, name: "位置" }).click();
   await page.getByRole("option", { name: /A 架/ }).click();
-  await page.getByRole("button", { name: "应用筛选" }).click();
+  await filterDialog.getByRole("button", { name: "应用过滤" }).click();
   await expect.poll(() => lastInventoryUrl?.searchParams.get("location_id")).toBe(locationShelfId);
   await page
     .getByRole("navigation", { name: "库存位置路径" })
     .getByRole("link", { name: "A 架" })
     .click();
-  await expect(page).toHaveURL(new RegExp(`/assets\\?location_id=${locationShelfId}`));
-  await expect.poll(() => lastAssetsUrl?.searchParams.get("location_id")).toBe(locationShelfId);
+  await expect(page).toHaveURL(new RegExp(`/inventory\\?location_id=${locationShelfId}`));
+  await expect.poll(() => lastInventoryUrl?.searchParams.get("location_id")).toBe(locationShelfId);
 
   await page.goto(`/assets/${serializedAssetId}`);
   await expect(page.getByRole("heading", { name: "显微镜 A" })).toBeVisible();
+  await page.getByRole("button", { name: "添加库存项" }).click();
+  await expect(page.getByRole("heading", { name: "添加库存" })).toBeVisible();
+  await expect(page.getByText("显微镜 A · 序列号管理")).toBeVisible();
+  await expect(page.locator("#inventory-asset-search")).toHaveCount(0);
+  await page.locator("#inventory-editor-serial-numbers").fill("SN-ASSET-ADD");
+  await page.getByRole("button", { name: "保存" }).click();
+  await expect.poll(() => postedSerializedInventory).toMatchObject({
+    serial_numbers: ["SN-ASSET-ADD"],
+  });
   await page.getByText("SN-001").first().click();
   await expect(page).toHaveURL(new RegExp(`/inventory/${serializedItemId}`));
 
@@ -357,7 +388,6 @@ function assetDetail(assetId: string, name = "显微镜 A", trackingMode = "seri
       quantity_allocated: 0,
       quantity_on_hand: 1,
     },
-    is_archived: false,
     laboratory_id: laboratoryId,
     manufacturer: trackingMode === "serialized" ? "Olympus" : null,
     model: trackingMode === "serialized" ? "BX53" : "R-1",

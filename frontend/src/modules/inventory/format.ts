@@ -79,16 +79,42 @@ export function categoryLabel(categoryId: string | null, categoryById: Map<strin
   if (!categoryId) {
     return "未分类";
   }
-  const category = categoryById.get(categoryId);
-  return category ? category.name : "未知分类";
+  return categoryNamePath(categoryId, categoryById) ?? "未知分类";
 }
 
 export function locationLabel(locationId: string | null, locationById: Map<string, Location>) {
   if (!locationId) {
     return "未设置";
   }
-  const location = locationById.get(locationId);
-  return location ? location.name : "未知位置";
+  return locationNamePath(locationId, locationById) ?? "未知位置";
+}
+
+function categoryNamePath(categoryId: string, categoryById: Map<string, AssetCategory>) {
+  const names: string[] = [];
+  let current = categoryById.get(categoryId);
+  const seen = new Set<string>();
+  while (current && !seen.has(current.category_id)) {
+    seen.add(current.category_id);
+    names.unshift(current.name);
+    current = current.parent_category_id
+      ? categoryById.get(current.parent_category_id)
+      : undefined;
+  }
+  return names.length > 0 ? names.join(" / ") : null;
+}
+
+function locationNamePath(locationId: string, locationById: Map<string, Location>) {
+  const names: string[] = [];
+  let current = locationById.get(locationId);
+  const seen = new Set<string>();
+  while (current && !seen.has(current.location_id)) {
+    seen.add(current.location_id);
+    names.unshift(current.name);
+    current = current.parent_location_id
+      ? locationById.get(current.parent_location_id)
+      : undefined;
+  }
+  return names.length > 0 ? names.join(" / ") : null;
 }
 
 export function unitLabel(unitId: string, unitsById: Map<string, Unit>) {

@@ -386,8 +386,8 @@ async fn update_asset_parameter_replaces_options_and_delete_rejects_referenced_p
     let updated: serde_json::Value = response.json().await.unwrap();
     assert_eq!(updated["code"], "material_state");
     assert_eq!(option_label(&updated, "solid"), "Solid material");
-    assert!(!option_is_archived(&updated, "gas"));
-    assert!(option_is_archived(&updated, "liquid"));
+    assert!(option_exists(&updated, "gas"));
+    assert!(!option_exists(&updated, "liquid"));
 
     let audit_details = latest_audit_details(
         &app,
@@ -562,15 +562,12 @@ fn option_label<'a>(parameter: &'a serde_json::Value, code: &str) -> &'a str {
         .unwrap()
 }
 
-fn option_is_archived(parameter: &serde_json::Value, code: &str) -> bool {
+fn option_exists(parameter: &serde_json::Value, code: &str) -> bool {
     parameter["options"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|option| option["code"] == code)
-        .unwrap()["is_archived"]
-        .as_bool()
-        .unwrap()
+        .any(|option| option["code"] == code)
 }
 
 fn parameter_codes(body: &serde_json::Value) -> Vec<&str> {

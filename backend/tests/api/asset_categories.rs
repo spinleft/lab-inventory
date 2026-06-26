@@ -679,7 +679,6 @@ async fn create_text_parameter(
                 "name": name,
                 "data_type": "text",
                 "description": null,
-                "is_archived": false,
                 "options": []
             }),
         )

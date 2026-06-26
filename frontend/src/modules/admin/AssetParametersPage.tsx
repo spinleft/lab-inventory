@@ -41,7 +41,6 @@ type ParameterForm = {
   data_type: AssetParameter["data_type"];
   default_unit_id: string;
   description: string;
-  is_archived: boolean;
   name: string;
   options: ParameterOptionForm[];
   unit_dimension: string;
@@ -49,7 +48,6 @@ type ParameterForm = {
 
 type ParameterOptionForm = {
   code: string;
-  is_archived: boolean;
   label: string;
   option_id?: string;
   sort_order: string;
@@ -154,15 +152,6 @@ export function AssetParametersPage() {
       header: "默认单位",
       key: "default-unit",
       render: (item) => defaultUnitLabel(item.default_unit_id, unitsById),
-    },
-    {
-      header: "状态",
-      key: "status",
-      render: (item) => (
-        <Badge tone={item.is_archived ? "warning" : "success"}>
-          {item.is_archived ? "已归档" : "启用"}
-        </Badge>
-      ),
     },
     { header: "更新时间", key: "updated", render: (item) => formatDate(item.updated_at) },
     {
@@ -397,13 +386,11 @@ function AssetParameterEditor({
       data_type: parameter.data_type,
       default_unit_id: parameter.default_unit_id ?? "",
       description: parameter.description ?? "",
-      is_archived: parameter.is_archived,
       name: parameter.name,
       options:
         parameter.options.length > 0
           ? parameter.options.map((option) => ({
               code: option.code,
-              is_archived: option.is_archived,
               label: option.label,
               option_id: option.option_id,
               sort_order: String(option.sort_order),
@@ -468,7 +455,7 @@ function AssetParameterEditor({
   function updateOption(
     index: number,
     field: keyof ParameterOptionForm,
-    value: string | boolean,
+    value: string,
   ) {
     setValues((current) => ({
       ...current,
@@ -516,7 +503,6 @@ function AssetParameterEditor({
         ? values.default_unit_id || null
         : null,
       description: optionalText(values.description),
-      is_archived: values.is_archived,
       name: values.name.trim(),
       options: optionsResult.options,
       unit_dimension: dataTypeSupportsUnits(values.data_type)
@@ -653,18 +639,6 @@ function AssetParameterEditor({
             onChange={(event) => updateField("description", event.target.value)}
           />
         </FormField>
-        <label className="checkbox-field" htmlFor="asset-parameter-archived">
-          <input
-            checked={values.is_archived}
-            id="asset-parameter-archived"
-            type="checkbox"
-            onChange={(event) => updateField("is_archived", event.target.checked)}
-          />
-          <span>
-            <strong>归档参数</strong>
-            <small>归档后参数仍会保留历史记录，但不再作为新资产的优先选择。</small>
-          </span>
-        </label>
       </form>
     </Dialog>
   );
@@ -678,7 +652,7 @@ function ParameterOptionsEditor({
 }: {
   onAdd: () => void;
   onRemove: (index: number) => void;
-  onUpdate: (index: number, field: keyof ParameterOptionForm, value: string | boolean) => void;
+  onUpdate: (index: number, field: keyof ParameterOptionForm, value: string) => void;
   options: ParameterOptionForm[];
 }) {
   return (
@@ -686,7 +660,7 @@ function ParameterOptionsEditor({
       <div className="parameter-options-header">
         <div>
           <h3>枚举选项</h3>
-          <p>至少保留一个未归档选项。</p>
+          <p>至少保留一个选项。</p>
         </div>
         <Button type="button" onClick={onAdd}>
           <Plus size={15} />
@@ -721,20 +695,6 @@ function ParameterOptionsEditor({
                 onChange={(event) => onUpdate(index, "sort_order", event.target.value)}
               />
             </FormField>
-            <label
-              className="checkbox-field parameter-option-archived"
-              htmlFor={`asset-parameter-option-archived-${index}`}
-            >
-              <input
-                checked={option.is_archived}
-                id={`asset-parameter-option-archived-${index}`}
-                type="checkbox"
-                onChange={(event) => onUpdate(index, "is_archived", event.target.checked)}
-              />
-              <span>
-                <strong>归档</strong>
-              </span>
-            </label>
             <Button
               aria-label="删除选项"
               className="parameter-option-delete"
@@ -758,7 +718,6 @@ function emptyParameterForm(): ParameterForm {
     data_type: "number",
     default_unit_id: "",
     description: "",
-    is_archived: false,
     name: "",
     options: [emptyOptionForm()],
     unit_dimension: DEFAULT_UNIT_DIMENSION,
@@ -768,7 +727,6 @@ function emptyParameterForm(): ParameterForm {
 function emptyOptionForm(): ParameterOptionForm {
   return {
     code: "",
-    is_archived: false,
     label: "",
     sort_order: "0",
   };
@@ -787,7 +745,6 @@ function normalizeOptions(values: ParameterForm):
       const sortOrder = Number(option.sort_order);
       return {
         code: option.code.trim(),
-        is_archived: option.is_archived,
         label: option.label.trim(),
         option_id: option.option_id,
         sort_order: sortOrder,
@@ -806,8 +763,8 @@ function normalizeOptions(values: ParameterForm):
     return { ok: false, message: "枚举选项排序必须是数字" };
   }
 
-  if (!options.some((option) => !option.is_archived)) {
-    return { ok: false, message: "枚举参数至少需要一个启用选项" };
+  if (options.length === 0) {
+    return { ok: false, message: "枚举参数至少需要一个选项" };
   }
 
   return { ok: true, options };

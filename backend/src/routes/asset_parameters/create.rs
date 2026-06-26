@@ -27,7 +27,6 @@ pub struct JsonData {
     unit_dimension: Option<String>,
     default_unit_id: Option<Uuid>,
     description: Option<String>,
-    is_archived: Option<bool>,
     options: Option<Vec<OptionJsonData>>,
 }
 
@@ -37,7 +36,6 @@ pub struct OptionJsonData {
     code: String,
     label: String,
     sort_order: Option<i32>,
-    is_archived: Option<bool>,
 }
 
 impl TryFrom<OptionJsonData> for NewAssetParameterOption {
@@ -48,7 +46,6 @@ impl TryFrom<OptionJsonData> for NewAssetParameterOption {
             AssetParameterCode::parse(value.code)?,
             AssetParameterOptionLabel::parse(value.label)?,
             value.sort_order.unwrap_or(0),
-            value.is_archived.unwrap_or(false),
         ))
     }
 }
@@ -75,7 +72,6 @@ impl TryFrom<JsonData> for NewAssetParameter {
                 .transpose()?,
             value.default_unit_id,
             value.description,
-            value.is_archived.unwrap_or(false),
             options,
         ))
     }
@@ -158,7 +154,6 @@ pub async fn create_asset_parameter(
         unit_dimension.as_deref(),
         new_parameter.default_unit_id,
         new_parameter.description.as_deref(),
-        new_parameter.is_archived,
     )
     .await?;
     let options = insert_asset_parameter_options(
@@ -207,11 +202,9 @@ fn validate_options(
             "Options are only allowed for enum asset parameters".into(),
         ));
     }
-    if data_type == AssetParameterDataType::Enum
-        && !options.iter().any(|option| !option.is_archived)
-    {
+    if data_type == AssetParameterDataType::Enum && options.is_empty() {
         return Err(CreateAssetParameterError::ValidationError(
-            "Enum asset parameters require at least one active option".into(),
+            "Enum asset parameters require at least one option".into(),
         ));
     }
 
@@ -280,7 +273,6 @@ async fn insert_asset_parameter(
     unit_dimension: Option<&str>,
     default_unit_id: Option<Uuid>,
     description: Option<&str>,
-    is_archived: bool,
 ) -> Result<AssetParameterRow, CreateAssetParameterError> {
     sqlx::query_as::<_, AssetParameterRow>(
         r#"
@@ -292,10 +284,9 @@ async fn insert_asset_parameter(
             data_type,
             unit_dimension,
             default_unit_id,
-            description,
-            is_archived
+            description
         )
-        VALUES ($1, $2, $3, $4, $5::asset_parameter_data_type, $6, $7, $8, $9)
+        VALUES ($1, $2, $3, $4, $5::asset_parameter_data_type, $6, $7, $8)
         RETURNING
             parameter_type_id,
             laboratory_id,
@@ -305,7 +296,6 @@ async fn insert_asset_parameter(
             unit_dimension,
             default_unit_id,
             description,
-            is_archived,
             created_at,
             updated_at
         "#,
@@ -318,7 +308,6 @@ async fn insert_asset_parameter(
     .bind(unit_dimension)
     .bind(default_unit_id)
     .bind(description)
-    .bind(is_archived)
     .fetch_one(transaction.as_mut())
     .await
     .map_err(map_error)
@@ -338,11 +327,10 @@ async fn insert_asset_parameter_options(
                 parameter_type_id,
                 code,
                 label,
-                sort_order,
-                is_archived
+                sort_order
             )
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING option_id, parameter_type_id, code, label, sort_order, is_archived
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING option_id, parameter_type_id, code, label, sort_order
             "#,
         )
         .bind(Uuid::new_v4())
@@ -350,7 +338,6 @@ async fn insert_asset_parameter_options(
         .bind(option.code.as_ref())
         .bind(option.label.as_ref())
         .bind(option.sort_order)
-        .bind(option.is_archived)
         .fetch_one(transaction.as_mut())
         .await
         .map_err(map_error)?;

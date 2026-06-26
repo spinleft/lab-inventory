@@ -1,6 +1,9 @@
 use super::model::{AssetResponse, AssetRow, asset_select, fetch_parameter_values_for_assets};
 use crate::access_control::{Actor, get_actor};
 use crate::domain::{AssetInventoryStatus, AssetTrackingMode, LaboratoryId, UserId};
+use crate::routes::parameter_filters::{
+    ParameterFilter, ParameterFilterError, parse_parameter_filters, push_parameter_filters,
+};
 use crate::routes::{PaginatedResponse, Pagination, PaginationError};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
@@ -18,12 +21,12 @@ pub struct ListAssetsQuery {
     pub category_id: Option<Uuid>,
     pub exact_category: Option<bool>,
     pub tracking_mode: Option<String>,
-    pub is_archived: Option<bool>,
     pub manufacturer: Option<String>,
     pub inventory_status: Option<String>,
     pub location_id: Option<Uuid>,
     pub has_inventory: Option<bool>,
     pub include: Option<String>,
+    pub parameter_filters: Option<String>,
 }
 
 #[derive(thiserror::Error)]
@@ -79,14 +82,18 @@ pub async fn list_assets(
         ))?;
     validate_read_permission(&actor, &laboratory_id)?;
     validate_query(&query)?;
+    let parameter_filters =
+        parse_parameter_filters(&pool, laboratory_id, query.parameter_filters.as_deref())
+            .await
+            .map_err(map_parameter_filter_error)?;
     let include_internal_notes = actor.can_read_laboratory_resource(&laboratory_id);
 
-    let total = fetch_asset_count(&pool, laboratory_id, &query).await?;
+    let total = fetch_asset_count(&pool, laboratory_id, &query, &parameter_filters).await?;
     let limit = query.pagination.limit()?;
     let offset = query.pagination.offset()?;
 
     let mut builder = QueryBuilder::<Postgres>::new(asset_select());
-    push_asset_filters(&mut builder, laboratory_id, &query);
+    push_asset_filters(&mut builder, laboratory_id, &query, &parameter_filters);
     builder.push(" ORDER BY assets.updated_at DESC, assets.asset_id");
     builder.push(" LIMIT ");
     builder.push_bind(limit);
@@ -159,9 +166,10 @@ async fn fetch_asset_count(
     pool: &PgPool,
     laboratory_id: LaboratoryId,
     query: &ListAssetsQuery,
+    parameter_filters: &[ParameterFilter],
 ) -> Result<i64, ListAssetsError> {
     let mut builder = QueryBuilder::<Postgres>::new("SELECT COUNT(*) FROM assets");
-    push_asset_filters(&mut builder, laboratory_id, query);
+    push_asset_filters(&mut builder, laboratory_id, query, parameter_filters);
     builder
         .build_query_scalar()
         .fetch_one(pool)
@@ -173,6 +181,7 @@ fn push_asset_filters(
     builder: &mut QueryBuilder<'_, Postgres>,
     laboratory_id: LaboratoryId,
     query: &ListAssetsQuery,
+    parameter_filters: &[ParameterFilter],
 ) {
     builder.push(" WHERE assets.laboratory_id = ");
     builder.push_bind(*laboratory_id);
@@ -246,10 +255,6 @@ fn push_asset_filters(
         builder.push(" AND assets.tracking_mode = ");
         builder.push_bind(tracking_mode.to_string());
     }
-    if let Some(is_archived) = query.is_archived {
-        builder.push(" AND assets.is_archived = ");
-        builder.push_bind(is_archived);
-    }
     if let Some(manufacturer) = query
         .manufacturer
         .as_deref()
@@ -296,6 +301,8 @@ fn push_asset_filters(
             );
         }
     }
+
+    push_parameter_filters(builder, "assets.asset_id", parameter_filters);
 }
 
 fn include_parameters(query: &ListAssetsQuery) -> Result<bool, ListAssetsError> {
@@ -315,4 +322,11 @@ fn include_parameters(query: &ListAssetsQuery) -> Result<bool, ListAssetsError> 
         }
     }
     Ok(includes.contains(&"parameters"))
+}
+
+fn map_parameter_filter_error(error: ParameterFilterError) -> ListAssetsError {
+    match error {
+        ParameterFilterError::Validation(message) => ListAssetsError::ValidationError(message),
+        ParameterFilterError::Unexpected(error) => ListAssetsError::UnexpectedError(error),
+    }
 }
