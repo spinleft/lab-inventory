@@ -2,15 +2,14 @@ use super::model::{
     InventoryItemError, InventoryItemResponse, actor_for_user, add_quantities_to_item,
     delete_inventory_item_from_database, fetch_inventory_items_for_update,
     merge_inventory_items_rollback_details, move_inventory_item_attachments,
-    record_inventory_item_audit, record_inventory_transaction, validate_quantity_item,
-    validate_requested_ids, validate_write_permission,
+    record_inventory_item_audit, validate_quantity_item, validate_requested_ids,
+    validate_write_permission,
 };
 use crate::audit::AuditAction;
 use crate::domain::UserId;
 use actix_web::{HttpResponse, web};
 use anyhow::Context;
 use serde::Deserialize;
-use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -103,43 +102,8 @@ pub async fn merge_inventory_items(
     .await?;
 
     for source in &sources {
-        record_inventory_transaction(
-            &mut transaction,
-            &actor,
-            source,
-            "delete",
-            -source.quantity_on_hand,
-            -source.quantity_allocated,
-            source.location_id,
-            target_after.location_id,
-            json!({
-                "operation": "merge",
-                "role": "source",
-                "target_inventory_item_id": target_after.inventory_item_id,
-                "source": source,
-            }),
-        )
-        .await?;
         delete_inventory_item_from_database(&mut transaction, source.inventory_item_id).await?;
     }
-    record_inventory_transaction(
-        &mut transaction,
-        &actor,
-        &target_after,
-        "adjust",
-        quantity_delta,
-        allocated_delta,
-        target_before.location_id,
-        target_after.location_id,
-        json!({
-            "operation": "merge",
-            "role": "target",
-            "target_before": target_before,
-            "target_after": target_after,
-            "source_inventory_item_ids": source_ids,
-        }),
-    )
-    .await?;
     record_inventory_item_audit(
         &mut transaction,
         &actor,

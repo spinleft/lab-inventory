@@ -1,8 +1,8 @@
 use super::model::{
     InventoryItemError, InventoryItemPatch, InventoryItemResponse, actor_for_user,
     apply_inventory_item_patch, fetch_inventory_items_for_update, parse_nullable_string,
-    parse_nullable_uuid, record_inventory_item_audit, record_update_transaction,
-    update_inventory_item_rollback_details, validate_requested_ids, validate_write_permission,
+    parse_nullable_uuid, record_inventory_item_audit, update_inventory_item_rollback_details,
+    validate_requested_ids, validate_write_permission,
 };
 use crate::audit::AuditAction;
 use crate::domain::{NullableUpdate, UserId};
@@ -81,14 +81,6 @@ pub async fn batch_update_inventory_items(
     for existing in existing_items {
         let updated =
             apply_inventory_item_patch(&mut transaction, &existing, patch.clone()).await?;
-        record_update_transaction(
-            &mut transaction,
-            &actor,
-            &existing,
-            &updated,
-            "batch_update",
-        )
-        .await?;
         record_inventory_item_audit(
             &mut transaction,
             &actor,

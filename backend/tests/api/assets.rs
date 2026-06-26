@@ -364,7 +364,6 @@ async fn delete_asset_cascades_inventory_parameter_values_and_attachments() {
     let asset_attachment_id = insert_attachment(&app, laboratory_id, "asset", asset_id).await;
     let inventory_attachment_id =
         insert_attachment(&app, laboratory_id, "inventory_item", inventory_item_id).await;
-    insert_inventory_transaction(&app, laboratory_id, inventory_item_id).await;
 
     let response = app.delete_asset(asset_id).await;
     assert_eq!(response.status().as_u16(), 204);
@@ -399,13 +398,6 @@ async fn delete_asset_cascades_inventory_parameter_values_and_attachments() {
             .await
             .unwrap();
     assert_eq!(attachment_count, 0);
-
-    let transaction_inventory_item_id: Option<Uuid> =
-        sqlx::query_scalar("SELECT inventory_item_id FROM inventory_transactions LIMIT 1")
-            .fetch_one(&app.db_pool)
-            .await
-            .unwrap();
-    assert!(transaction_inventory_item_id.is_none());
 }
 
 #[tokio::test]
@@ -575,29 +567,6 @@ async fn insert_attachment(
     .fetch_one(&app.db_pool)
     .await
     .unwrap()
-}
-
-async fn insert_inventory_transaction(app: &TestApp, laboratory_id: Uuid, inventory_item_id: Uuid) {
-    sqlx::query(
-        r#"
-        INSERT INTO inventory_transactions (
-            transaction_id,
-            inventory_item_id,
-            laboratory_id,
-            actor_user_id,
-            action,
-            quantity_delta
-        )
-        VALUES ($1, $2, $3, $4, 'create', 1)
-        "#,
-    )
-    .bind(Uuid::new_v4())
-    .bind(inventory_item_id)
-    .bind(laboratory_id)
-    .bind(app.test_user.user_id)
-    .execute(&app.db_pool)
-    .await
-    .unwrap();
 }
 
 fn asset_id(asset: &serde_json::Value) -> Uuid {

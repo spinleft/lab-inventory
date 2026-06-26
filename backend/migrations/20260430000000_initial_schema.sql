@@ -527,29 +527,4 @@ CREATE INDEX idx_attachments_visibility_active
 CREATE INDEX idx_attachments_display_name_trgm
     ON attachments USING gin (display_name gin_trgm_ops);
 
-CREATE TABLE inventory_transactions (
-    transaction_id uuid PRIMARY KEY,
-    inventory_item_id uuid REFERENCES asset_inventory_items (inventory_item_id) ON DELETE SET NULL,
-    laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id),
-    actor_user_id uuid REFERENCES users (user_id) ON DELETE SET NULL,
-    actor_laboratory_id uuid REFERENCES laboratories (laboratory_id) ON DELETE SET NULL,
-    action TEXT NOT NULL,
-    quantity_delta NUMERIC NOT NULL DEFAULT 0,
-    allocated_delta NUMERIC NOT NULL DEFAULT 0,
-    from_location_id uuid REFERENCES locations (location_id) ON DELETE SET NULL,
-    to_location_id uuid REFERENCES locations (location_id) ON DELETE SET NULL,
-    related_resource_type TEXT,
-    related_resource_id uuid,
-    details jsonb NOT NULL DEFAULT '{}'::jsonb,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    CHECK (action IN ('create', 'update', 'delete', 'adjust', 'move', 'stocktake', 'allocate', 'release_allocation')),
-    CHECK (related_resource_type IS NULL)
-);
-
-CREATE INDEX idx_inventory_transactions_inventory_item_id ON inventory_transactions (inventory_item_id);
-CREATE INDEX idx_inventory_transactions_laboratory_id ON inventory_transactions (laboratory_id);
-CREATE INDEX idx_inventory_transactions_actor_user_id ON inventory_transactions (actor_user_id);
-CREATE INDEX idx_inventory_transactions_related_resource ON inventory_transactions (related_resource_type, related_resource_id);
-CREATE INDEX idx_inventory_transactions_created_at ON inventory_transactions (created_at);
-
 COMMIT;

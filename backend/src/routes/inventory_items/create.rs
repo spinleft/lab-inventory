@@ -2,8 +2,8 @@ use super::model::{
     InventoryItemError, InventoryItemResponse, actor_for_user,
     create_inventory_items_rollback_details, fetch_asset_for_inventory_for_update,
     insert_inventory_item, next_serial_numbers, normalize_serial_numbers,
-    record_inventory_item_audit, record_inventory_transaction, resolve_asset_quantity_unit,
-    validate_location, validate_quantities, validate_status, validate_write_permission,
+    record_inventory_item_audit, resolve_asset_quantity_unit, validate_location,
+    validate_quantities, validate_status, validate_write_permission,
 };
 use crate::audit::AuditAction;
 use crate::domain::{AssetTrackingMode, AttachmentClaim, UserId};
@@ -13,7 +13,6 @@ use crate::routes::attachments::{
 use actix_web::{HttpResponse, web};
 use anyhow::Context;
 use serde::Deserialize;
-use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -90,23 +89,6 @@ pub async fn create_inventory_items(
         .map_err(map_attachment_error)?;
     }
 
-    for item in &created {
-        record_inventory_transaction(
-            &mut transaction,
-            &actor,
-            item,
-            "create",
-            item.quantity_on_hand,
-            item.quantity_allocated,
-            None,
-            item.location_id,
-            json!({
-                "operation": "create",
-                "inventory_item": item,
-            }),
-        )
-        .await?;
-    }
     record_inventory_item_audit(
         &mut transaction,
         &actor,

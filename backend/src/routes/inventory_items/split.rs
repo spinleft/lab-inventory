@@ -1,16 +1,15 @@
 use super::model::{
     InventoryItemError, InventoryItemResponse, actor_for_user, convert_quantity_between_units,
     find_quantity_aggregate_for_update, insert_inventory_item, parse_nullable_string,
-    parse_nullable_uuid, record_inventory_item_audit, record_inventory_transaction,
-    resolve_asset_quantity_unit, set_quantity_on_hand, split_inventory_item_rollback_details,
-    validate_location, validate_quantity_item, validate_status, validate_write_permission,
+    parse_nullable_uuid, record_inventory_item_audit, resolve_asset_quantity_unit,
+    set_quantity_on_hand, split_inventory_item_rollback_details, validate_location,
+    validate_quantity_item, validate_status, validate_write_permission,
 };
 use crate::audit::AuditAction;
 use crate::domain::UserId;
 use actix_web::{HttpResponse, web};
 use anyhow::Context;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -163,46 +162,6 @@ pub async fn split_inventory_item(
         .await?
     };
 
-    record_inventory_transaction(
-        &mut transaction,
-        &actor,
-        &source_after,
-        "adjust",
-        -payload.quantity,
-        0.0,
-        source_before.location_id,
-        source_after.location_id,
-        json!({
-            "operation": "split",
-            "role": "source",
-            "source_before": source_before,
-            "source_after": source_after,
-            "target_inventory_item_id": target_after.inventory_item_id,
-        }),
-    )
-    .await?;
-    record_inventory_transaction(
-        &mut transaction,
-        &actor,
-        &target_after,
-        if target_before.is_some() {
-            "adjust"
-        } else {
-            "create"
-        },
-        target_quantity,
-        0.0,
-        None,
-        target_after.location_id,
-        json!({
-            "operation": "split",
-            "role": "target",
-            "source_inventory_item_id": source_after.inventory_item_id,
-            "target_before": target_before,
-            "target_after": target_after,
-        }),
-    )
-    .await?;
     record_inventory_item_audit(
         &mut transaction,
         &actor,

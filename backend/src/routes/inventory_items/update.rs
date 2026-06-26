@@ -1,8 +1,8 @@
 use super::model::{
     InventoryItemError, InventoryItemPatch, InventoryItemResponse, actor_for_user,
     apply_inventory_item_patch, fetch_inventory_item_for_update, parse_nullable_string,
-    parse_nullable_uuid, record_inventory_item_audit, record_update_transaction,
-    update_inventory_item_rollback_details, validate_write_permission,
+    parse_nullable_uuid, record_inventory_item_audit, update_inventory_item_rollback_details,
+    validate_write_permission,
 };
 use crate::audit::AuditAction;
 use crate::domain::UserId;
@@ -79,7 +79,6 @@ pub async fn update_inventory_item(
     let updated =
         apply_inventory_item_patch(&mut transaction, &existing, payload.into_inner().into())
             .await?;
-    record_update_transaction(&mut transaction, &actor, &existing, &updated, "update").await?;
     record_inventory_item_audit(
         &mut transaction,
         &actor,

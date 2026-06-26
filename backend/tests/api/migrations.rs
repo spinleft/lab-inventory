@@ -76,7 +76,6 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
         "asset_inventory_items",
         "attachment_uploads",
         "attachments",
-        "inventory_transactions",
         "idempotency",
     ];
     for table_name in required_tables {
@@ -154,24 +153,6 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
     .await
     .unwrap();
     assert!(asset_tag_column.is_none());
-
-    let related_resource_columns: Vec<String> = sqlx::query_scalar(
-        r#"
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name = 'inventory_transactions'
-          AND column_name IN ('related_resource_type', 'related_resource_id')
-        ORDER BY column_name
-        "#,
-    )
-    .fetch_all(&app.db_pool)
-    .await
-    .unwrap();
-    assert_eq!(
-        related_resource_columns,
-        vec!["related_resource_id", "related_resource_type"]
-    );
 
     let threshold_columns: Vec<String> = sqlx::query_scalar(
         r#"

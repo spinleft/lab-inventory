@@ -1,8 +1,8 @@
 use super::model::{
     InventoryItemError, actor_for_user, delete_inventory_item_attachments,
     delete_inventory_item_from_database, delete_inventory_item_rollback_details,
-    fetch_inventory_items_for_update, record_inventory_item_audit, record_inventory_transaction,
-    validate_requested_ids, validate_write_permission,
+    fetch_inventory_items_for_update, record_inventory_item_audit, validate_requested_ids,
+    validate_write_permission,
 };
 use crate::attachment_storage::AttachmentStorage;
 use crate::audit::AuditAction;
@@ -11,7 +11,6 @@ use crate::routes::attachments::delete_storage_objects;
 use actix_web::{HttpResponse, web};
 use anyhow::Context;
 use serde::Deserialize;
-use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -59,21 +58,6 @@ pub async fn batch_delete_inventory_items(
             .map(|row| row.attachment_id)
             .collect::<Vec<_>>();
         deleted_attachments.extend(item_deleted_attachments);
-        record_inventory_transaction(
-            &mut transaction,
-            &actor,
-            &item,
-            "delete",
-            -item.quantity_on_hand,
-            -item.quantity_allocated,
-            item.location_id,
-            None,
-            json!({
-                "operation": "batch_delete",
-                "inventory_item": item,
-            }),
-        )
-        .await?;
         delete_inventory_item_from_database(&mut transaction, item.inventory_item_id).await?;
         record_inventory_item_audit(
             &mut transaction,
