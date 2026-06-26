@@ -4,7 +4,7 @@ use crate::domain::UserEmail;
 use crate::domain::UserName;
 use crate::domain::UserType;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum NullableUpdate<T> {
     Unchanged,
     Set(T),

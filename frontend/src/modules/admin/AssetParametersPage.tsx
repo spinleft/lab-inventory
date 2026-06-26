@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
 import { Fragment, type FormEvent, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../app/auth-context";
+import { useLaboratorySelection } from "../../app/laboratory-selection-context";
 import { useBackendConfig } from "../../shared/api/backendConfig";
 import { formatDate } from "../../shared/lib/date";
 import { toErrorMessage } from "../../shared/lib/errors";
@@ -15,22 +16,17 @@ import { FormField } from "../../shared/ui/FormField";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { Select } from "../../shared/ui/Select";
 import { useToast } from "../../shared/ui/Toast";
-import {
-  canManageAssetParameters,
-  canSelectAssetParameterLaboratory,
-} from "../auth/permissions";
+import { canManageAssetParameters } from "../auth/permissions";
 import {
   adminQueryKeys,
   type AssetParameter,
   type AssetParameterOptionPayload,
   type AssetParameterPayload,
-  type Laboratory,
   type Unit,
   optionalText,
   useAssetParameters,
   useCreateAssetParameter,
   useDeleteAssetParameter,
-  useLaboratories,
   useUnits,
   useUpdateAssetParameter,
 } from "./api";
@@ -80,24 +76,21 @@ const UNIT_DIMENSION_SELECT_OPTIONS = [
   ...UNIT_DIMENSION_OPTIONS,
 ];
 const EMPTY_PARAMETERS: AssetParameter[] = [];
-const EMPTY_LABORATORIES: Laboratory[] = [];
 const EMPTY_UNITS: Unit[] = [];
 
 export function AssetParametersPage() {
   const { currentUser } = useAuth();
+  const {
+    canManageSelectedLaboratoryAssets,
+    selectedLaboratoryId,
+    selectedLaboratoryName,
+  } = useLaboratorySelection();
   const { apiBaseUrl } = useBackendConfig();
   const queryClient = useQueryClient();
   const toast = useToast();
   const canManage = canManageAssetParameters(currentUser);
-  const canSelectLaboratory = canSelectAssetParameterLaboratory(currentUser);
-  const laboratoriesQuery = useLaboratories({ enabled: canSelectLaboratory });
-  const laboratories = laboratoriesQuery.data ?? EMPTY_LABORATORIES;
-  const ownLaboratory = currentUser.laboratory;
-  const [selectedLaboratoryId, setSelectedLaboratoryId] = useState(
-    canSelectLaboratory ? "" : ownLaboratory?.laboratory_id ?? "",
-  );
   const parametersQuery = useAssetParameters({
-    enabled: canManage && Boolean(selectedLaboratoryId),
+    enabled: canManageSelectedLaboratoryAssets && Boolean(selectedLaboratoryId),
     laboratoryId: selectedLaboratoryId,
   });
   const unitsQuery = useUnits();
@@ -117,27 +110,6 @@ export function AssetParametersPage() {
     () => groupParametersByUnitDimension(filteredParameters),
     [filteredParameters],
   );
-  const selectedLaboratory = canSelectLaboratory
-    ? laboratories.find((laboratory) => laboratory.laboratory_id === selectedLaboratoryId)
-    : ownLaboratory;
-
-  useEffect(() => {
-    if (!canSelectLaboratory) {
-      setSelectedLaboratoryId(ownLaboratory?.laboratory_id ?? "");
-      return;
-    }
-
-    if (laboratories.length === 0) {
-      if (selectedLaboratoryId) {
-        setSelectedLaboratoryId("");
-      }
-      return;
-    }
-
-    if (!laboratories.some((lab) => lab.laboratory_id === selectedLaboratoryId)) {
-      setSelectedLaboratoryId(laboratories[0].laboratory_id);
-    }
-  }, [canSelectLaboratory, laboratories, ownLaboratory?.laboratory_id, selectedLaboratoryId]);
 
   function refresh() {
     if (!selectedLaboratoryId) return;
@@ -226,31 +198,14 @@ export function AssetParametersPage() {
   ];
 
   const pageActions = (
-    <>
-      {canSelectLaboratory ? (
-        <div className="category-laboratory-select">
-          <Select
-            disabled={laboratoriesQuery.isLoading || laboratories.length === 0}
-            label="选择实验室"
-            options={laboratories.map((laboratory) => ({
-              label: laboratory.name,
-              value: laboratory.laboratory_id,
-            }))}
-            placeholder="选择实验室"
-            value={selectedLaboratoryId}
-            onValueChange={setSelectedLaboratoryId}
-          />
-        </div>
-      ) : null}
-      <Button
-        disabled={!selectedLaboratoryId}
-        onClick={() => setEditing("new")}
-        variant="primary"
-      >
-        <Plus size={15} />
-        新建参数
-      </Button>
-    </>
+    <Button
+      disabled={!canManageSelectedLaboratoryAssets || !selectedLaboratoryId}
+      onClick={() => setEditing("new")}
+      variant="primary"
+    >
+      <Plus size={15} />
+      新建参数
+    </Button>
   );
 
   if (!canManage) {
@@ -268,8 +223,7 @@ export function AssetParametersPage() {
     );
   }
 
-  const loading =
-    parametersQuery.isLoading || laboratoriesQuery.isLoading || unitsQuery.isLoading;
+  const loading = parametersQuery.isLoading || unitsQuery.isLoading;
 
   return (
     <main className="page">
@@ -282,11 +236,13 @@ export function AssetParametersPage() {
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2 className="panel-title">{selectedLaboratory?.name ?? "未选择实验室"}</h2>
+            <h2 className="panel-title">{selectedLaboratoryName || "未选择实验室"}</h2>
             <p className="panel-description">
-              {selectedLaboratoryId
-                ? `${filteredParameters.length} 个参数`
-                : "请选择实验室后管理参数"}
+              {!selectedLaboratoryId
+                ? "请选择实验室后管理参数"
+                : canManageSelectedLaboratoryAssets
+                  ? `${filteredParameters.length} 个参数`
+                  : "当前账号不能管理该实验室"}
             </p>
           </div>
           <input

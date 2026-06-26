@@ -13,17 +13,20 @@ name = "lab-inventory"
 
 [dependencies]
 actix-cors = "0.7"
+actix-multipart = "0.7"
 actix-session = { version = "0.11", features = ["redis-session-rustls"] }
 actix-web = "4"
 anyhow = "1"
 argon2 = { version = "0.5", features = ["std"] }
 chrono = { version = "0.4.22", default-features = false, features = ["clock", "serde"] }
 config = { version = "0.15", default-features = false, features = ["yaml"] }
+futures-util = "0.3"
 rand = { version = "0.8", features = ["std_rng"] }
 secrecy = { version = "0.8", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde-aux = "4"
 serde_json = "1"
+sha2 = "0.10"
 sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio-rustls",
     "macros",
@@ -34,7 +37,7 @@ sqlx = { version = "0.8", default-features = false, features = [
     "json",
 ] }
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread"] }
 tracing = "0.1"
 tracing-actix-web = "0.7"
 tracing-bunyan-formatter = "0.3"
@@ -47,6 +50,7 @@ validator = "0.20"
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
+    "multipart",
     "rustls-tls",
     "cookies",
 ] }

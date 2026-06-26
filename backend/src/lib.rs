@@ -1,4 +1,5 @@
 pub mod access_control;
+pub mod attachment_storage;
 pub mod audit;
 pub mod authentication;
 pub mod configuration;

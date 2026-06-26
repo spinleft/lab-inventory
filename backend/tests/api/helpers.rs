@@ -34,6 +34,10 @@ pub async fn spawn_app() -> TestApp {
         c.database.database_name = Uuid::new_v4().to_string();
         c.application.port = 0;
         c.application.cookie_secure = false;
+        c.attachment_storage.local_root = std::env::temp_dir()
+            .join(format!("lab-inventory-test-{}", Uuid::new_v4()))
+            .to_string_lossy()
+            .to_string();
         c
     };
 
@@ -337,6 +341,386 @@ impl TestApp {
                 "{}/api/v1/asset-parameters/{parameter_id}",
                 &self.address
             ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn post_asset<Body>(&self, laboratory_id: Uuid, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/assets",
+                &self.address
+            ))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn upload_attachment(
+        &self,
+        laboratory_id: Uuid,
+        file_name: &str,
+        mime_type: &str,
+        bytes: Vec<u8>,
+    ) -> reqwest::Response {
+        let part = reqwest::multipart::Part::bytes(bytes)
+            .file_name(file_name.to_string())
+            .mime_str(mime_type)
+            .expect("Invalid attachment MIME type");
+        let form = reqwest::multipart::Form::new().part("file", part);
+        self.api_client
+            .post(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/attachment-uploads",
+                &self.address
+            ))
+            .multipart(form)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn delete_attachment_upload(&self, upload_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .delete(format!(
+                "{}/api/v1/attachment-uploads/{upload_id}",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn post_asset_attachment<Body>(
+        &self,
+        asset_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(format!(
+                "{}/api/v1/assets/{asset_id}/attachments",
+                &self.address
+            ))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn post_inventory_item_attachment<Body>(
+        &self,
+        inventory_item_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(format!(
+                "{}/api/v1/inventory-items/{inventory_item_id}/attachments",
+                &self.address
+            ))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_asset_attachments(&self, asset_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/assets/{asset_id}/attachments",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_inventory_item_attachments(
+        &self,
+        inventory_item_id: Uuid,
+    ) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/inventory-items/{inventory_item_id}/attachments",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_laboratory_attachments(&self, laboratory_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/attachments",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_attachment(&self, attachment_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/attachments/{attachment_id}",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn patch_attachment<Body>(
+        &self,
+        attachment_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .patch(format!(
+                "{}/api/v1/attachments/{attachment_id}",
+                &self.address
+            ))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn delete_attachment(&self, attachment_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .delete(format!(
+                "{}/api/v1/attachments/{attachment_id}",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn download_attachment(&self, attachment_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/attachments/{attachment_id}/download",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_assets(&self, laboratory_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/assets",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_assets_with_query(
+        &self,
+        laboratory_id: Uuid,
+        query: &str,
+    ) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/assets?{query}",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_asset(&self, asset_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .get(format!("{}/api/v1/assets/{asset_id}", &self.address))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_asset_with_query(&self, asset_id: Uuid, query: &str) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/assets/{asset_id}?{query}",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn patch_asset<Body>(&self, asset_id: Uuid, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .patch(format!("{}/api/v1/assets/{asset_id}", &self.address))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn delete_asset(&self, asset_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .delete(format!("{}/api/v1/assets/{asset_id}", &self.address))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn post_inventory_items<Body>(&self, asset_id: Uuid, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(format!(
+                "{}/api/v1/assets/{asset_id}/inventory-items",
+                &self.address
+            ))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_inventory_items(&self, laboratory_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/inventory-items",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_inventory_items_with_query(
+        &self,
+        laboratory_id: Uuid,
+        query: &str,
+    ) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/inventory-items?{query}",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_inventory_item(&self, inventory_item_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/inventory-items/{inventory_item_id}",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn patch_inventory_item<Body>(
+        &self,
+        inventory_item_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .patch(format!(
+                "{}/api/v1/inventory-items/{inventory_item_id}",
+                &self.address
+            ))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn patch_inventory_items_batch<Body>(&self, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .patch(format!("{}/api/v1/inventory-items/batch", &self.address))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn split_inventory_item<Body>(
+        &self,
+        inventory_item_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(format!(
+                "{}/api/v1/inventory-items/{inventory_item_id}/split",
+                &self.address
+            ))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn merge_inventory_items<Body>(&self, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(format!("{}/api/v1/inventory-items/merge", &self.address))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn delete_inventory_item(&self, inventory_item_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .delete(format!(
+                "{}/api/v1/inventory-items/{inventory_item_id}",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn batch_delete_inventory_items<Body>(&self, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(format!(
+                "{}/api/v1/inventory-items/batch-delete",
+                &self.address
+            ))
+            .json(body)
             .send()
             .await
             .expect("Failed to execute request.")

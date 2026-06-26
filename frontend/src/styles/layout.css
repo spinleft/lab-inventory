@@ -184,6 +184,43 @@
   padding: 8px 10px 14px;
 }
 
+.sidebar-footer {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--border-subtle);
+  padding: 12px 10px 14px;
+}
+
+.sidebar-laboratory-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-subtle);
+  font-size: 12px;
+  font-weight: 520;
+}
+
+.sidebar-footer .select-trigger {
+  width: 100%;
+  min-width: 0;
+}
+
+.sidebar-laboratory-static {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 10px;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sidebar-group {
   display: grid;
   gap: 2px;

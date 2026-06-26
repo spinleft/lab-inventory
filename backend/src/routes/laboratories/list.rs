@@ -41,21 +41,16 @@ pub async fn list_laboratories(
         .ok_or(ListLaboratoriesError::Forbidden(
             "Actor not found in the database".into(),
         ))?;
-    if !actor.is_admin() {
+    if actor.is_lab_admin() && actor.laboratory_id.is_none() {
+        return Ok(HttpResponse::Ok().json(Vec::<LaboratoryResponse>::new()));
+    }
+    if !actor.can_browse_laboratories() {
         return Err(ListLaboratoriesError::Forbidden(
             "You don't have permission to list laboratories.".into(),
         ));
     }
 
-    let actor_laboratory_id = if actor.is_lab_admin() {
-        let Some(laboratory_id) = actor.laboratory_id.map(Uuid::from) else {
-            return Ok(HttpResponse::Ok().json(Vec::<LaboratoryResponse>::new()));
-        };
-        Some(laboratory_id)
-    } else {
-        None
-    };
-    let laboratories: Vec<_> = fetch_laboratories(&pool, actor_laboratory_id)
+    let laboratories: Vec<_> = fetch_laboratories(&pool, None)
         .await?
         .into_iter()
         .map(LaboratoryResponse::from)

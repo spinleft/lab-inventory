@@ -6,6 +6,7 @@ import { cn } from "../lib/cn";
 
 type DialogProps = {
   children: ReactNode;
+  closeOnInteractOutside?: boolean;
   description?: string;
   footer?: ReactNode;
   onOpenChange: (open: boolean) => void;
@@ -16,6 +17,7 @@ type DialogProps = {
 
 export function Dialog({
   children,
+  closeOnInteractOutside,
   description,
   footer,
   onOpenChange,
@@ -23,11 +25,20 @@ export function Dialog({
   sidePanel = false,
   title,
 }: DialogProps) {
+  const shouldCloseOnInteractOutside = closeOnInteractOutside ?? !sidePanel;
+
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="dialog-overlay" />
-        <DialogPrimitive.Content className={cn("dialog-content", sidePanel && "side-panel")}>
+        <DialogPrimitive.Content
+          className={cn("dialog-content", sidePanel && "side-panel")}
+          onInteractOutside={(event) => {
+            if (!shouldCloseOnInteractOutside) {
+              event.preventDefault();
+            }
+          }}
+        >
           <div className="dialog-header">
             <div>
               <DialogPrimitive.Title className="dialog-title">{title}</DialogPrimitive.Title>

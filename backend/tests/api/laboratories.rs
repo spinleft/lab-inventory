@@ -108,7 +108,7 @@ async fn list_laboratories_returns_all_labs_for_server_admins() {
 }
 
 #[tokio::test]
-async fn list_laboratories_returns_only_the_own_lab_for_lab_admins() {
+async fn list_laboratories_returns_all_labs_for_lab_admins() {
     let app = spawn_app().await;
     let own_laboratory_id = app.create_laboratory("Lab Admin Own Lab").await;
     let other_laboratory_id = app.create_laboratory("Lab Admin Other Lab").await;
@@ -121,14 +121,15 @@ async fn list_laboratories_returns_only_the_own_lab_for_lab_admins() {
     let body: serde_json::Value = response.json().await.unwrap();
     let laboratories = body.as_array().unwrap();
 
-    assert_eq!(laboratories.len(), 1);
-    assert_eq!(
-        laboratories[0]["laboratory_id"],
-        own_laboratory_id.to_string()
+    assert!(
+        laboratories
+            .iter()
+            .any(|lab| lab["laboratory_id"] == own_laboratory_id.to_string())
     );
-    assert_ne!(
-        laboratories[0]["laboratory_id"],
-        other_laboratory_id.to_string()
+    assert!(
+        laboratories
+            .iter()
+            .any(|lab| lab["laboratory_id"] == other_laboratory_id.to_string())
     );
 }
 
@@ -143,6 +144,32 @@ async fn list_laboratories_returns_an_empty_list_for_unscoped_lab_admins() {
     assert_eq!(response.status().as_u16(), 200);
     let body: serde_json::Value = response.json().await.unwrap();
     assert!(body.as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn list_laboratories_returns_all_labs_for_regular_users() {
+    let app = spawn_app().await;
+    let own_laboratory_id = app.create_laboratory("Regular User Own Lab").await;
+    let other_laboratory_id = app.create_laboratory("Regular User Other Lab").await;
+    let regular_user = TestUser::generate_with_user_type("user", Some(own_laboratory_id));
+    app.store_user(&regular_user).await;
+    regular_user.login(&app).await;
+
+    let response = app.get_laboratories().await;
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    let laboratories = body.as_array().unwrap();
+
+    assert!(
+        laboratories
+            .iter()
+            .any(|lab| lab["laboratory_id"] == own_laboratory_id.to_string())
+    );
+    assert!(
+        laboratories
+            .iter()
+            .any(|lab| lab["laboratory_id"] == other_laboratory_id.to_string())
+    );
 }
 
 #[tokio::test]

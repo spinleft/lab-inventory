@@ -1,10 +1,12 @@
 import {
   Activity,
+  Boxes,
   Building2,
   FolderTree,
   Gauge,
   KeyRound,
   MapPin,
+  PackageSearch,
   Ruler,
   ScrollText,
   Settings,
@@ -14,14 +16,18 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { type ReactNode } from "react";
+import { matchPath } from "react-router-dom";
 import { AssetCategoriesPage } from "../modules/admin/AssetCategoriesPage";
 import { AssetParametersPage } from "../modules/admin/AssetParametersPage";
 import { AdminHomePage, LaboratoriesPage, UsersPage } from "../modules/admin/AdminPages";
 import { LocationsPage } from "../modules/admin/LocationsPage";
 import { UnitsPage } from "../modules/admin/UnitsPage";
 import { AuditLogsPage } from "../modules/audit/AuditLogsPage";
+import { AssetDetailPage } from "../modules/assets/AssetDetailPage";
+import { AssetsPage } from "../modules/assets/AssetsPage";
 import {
   canAccessAdmin,
+  canAccessAssets,
   canAccessAuditLogs,
   canManageAssetCategories,
   canManageAssetParameters,
@@ -30,6 +36,8 @@ import {
 } from "../modules/auth/permissions";
 import { type CurrentUser } from "../modules/auth/types";
 import { DashboardPage } from "../modules/dashboard/DashboardPage";
+import { InventoryDetailPage } from "../modules/inventory/InventoryDetailPage";
+import { InventoryPage } from "../modules/inventory/InventoryPage";
 import { PasswordPage, ProfilePage, PreferencesPage } from "../modules/profile/ProfilePages";
 
 export type ModuleRoute = {
@@ -74,6 +82,80 @@ export const appModules: FrontendModule[] = [
     ],
     routes: [
       { element: <DashboardPage />, id: "dashboard.index", path: "/dashboard", title: "概览" },
+    ],
+  },
+  {
+    id: "assets",
+    navItems: [
+      {
+        canAccess: canAccessAssets,
+        group: "workspace",
+        icon: PackageSearch,
+        path: "/assets",
+        title: "资产",
+      },
+    ],
+    commands: [
+      {
+        canAccess: canAccessAssets,
+        icon: PackageSearch,
+        path: "/assets",
+        title: "查看资产",
+        keywords: ["assets", "inventory"],
+      },
+    ],
+    routes: [
+      {
+        canAccess: canAccessAssets,
+        element: <AssetsPage />,
+        id: "assets.index",
+        path: "/assets",
+        title: "资产",
+      },
+      {
+        canAccess: canAccessAssets,
+        element: <AssetDetailPage />,
+        id: "assets.detail",
+        path: "/assets/:assetId",
+        title: "资产详情",
+      },
+    ],
+  },
+  {
+    id: "inventory",
+    navItems: [
+      {
+        canAccess: canAccessAssets,
+        group: "workspace",
+        icon: Boxes,
+        path: "/inventory",
+        title: "库存",
+      },
+    ],
+    commands: [
+      {
+        canAccess: canAccessAssets,
+        icon: Boxes,
+        path: "/inventory",
+        title: "查看库存",
+        keywords: ["inventory", "stock"],
+      },
+    ],
+    routes: [
+      {
+        canAccess: canAccessAssets,
+        element: <InventoryPage />,
+        id: "inventory.index",
+        path: "/inventory",
+        title: "库存",
+      },
+      {
+        canAccess: canAccessAssets,
+        element: <InventoryDetailPage />,
+        id: "inventory.detail",
+        path: "/inventory/:inventoryItemId",
+        title: "库存详情",
+      },
     ],
   },
   {
@@ -285,5 +367,7 @@ export const moduleNavItems = appModules.flatMap((module) => module.navItems);
 export const moduleCommands = appModules.flatMap((module) => module.commands);
 
 export function findRoute(pathname: string) {
-  return moduleRoutes.find((route) => route.path === pathname);
+  return moduleRoutes.find(
+    (route) => route.path === pathname || matchPath({ end: true, path: route.path }, pathname),
+  );
 }

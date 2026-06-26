@@ -3,9 +3,11 @@ import {
   canAccessAdmin,
   canAccessAuditLogs,
   canManageAssetCategories,
+  canManageLaboratoryAssets,
   canManageAssetParameters,
   canManageLocations,
   canManageUnits,
+  canSelectAssetQueryLaboratory,
   canSelectAssetCategoryLaboratory,
   canSelectAssetParameterLaboratory,
   canSelectLocationLaboratory,
@@ -14,7 +16,10 @@ import {
 } from "./permissions";
 import { type CurrentUser } from "./types";
 
-function user(role: CurrentUser["user_type"]["name"], laboratory = null): CurrentUser {
+function user(
+  role: CurrentUser["user_type"]["name"],
+  laboratory: CurrentUser["laboratory"] = null,
+): CurrentUser {
   return {
     email: null,
     laboratory,
@@ -26,6 +31,11 @@ function user(role: CurrentUser["user_type"]["name"], laboratory = null): Curren
     username: role,
   };
 }
+
+const ownLaboratory = {
+  laboratory_id: "00000000-0000-4000-8000-000000000101",
+  name: "Own Lab",
+};
 
 describe("permissions", () => {
   it("allows admin navigation for admin roles only", () => {
@@ -78,6 +88,28 @@ describe("permissions", () => {
     expect(canSelectAssetCategoryLaboratory(user("super_admin"))).toBe(true);
     expect(canSelectAssetCategoryLaboratory(user("lab_admin"))).toBe(false);
     expect(canSelectAssetCategoryLaboratory(user("user"))).toBe(false);
+  });
+
+  it("allows scoped users to select laboratories for asset and inventory queries", () => {
+    expect(canSelectAssetQueryLaboratory(user("root"))).toBe(true);
+    expect(canSelectAssetQueryLaboratory(user("super_admin"))).toBe(true);
+    expect(canSelectAssetQueryLaboratory(user("lab_admin", ownLaboratory))).toBe(true);
+    expect(canSelectAssetQueryLaboratory(user("user", ownLaboratory))).toBe(true);
+    expect(canSelectAssetQueryLaboratory(user("lab_admin"))).toBe(false);
+    expect(canSelectAssetQueryLaboratory(user("user"))).toBe(false);
+    expect(canSelectAssetQueryLaboratory(user("guest", ownLaboratory))).toBe(false);
+  });
+
+  it("allows asset writes only inside the actor laboratory unless globally scoped", () => {
+    const otherLaboratoryId = "00000000-0000-4000-8000-000000000202";
+
+    expect(canManageLaboratoryAssets(user("root"), otherLaboratoryId)).toBe(true);
+    expect(canManageLaboratoryAssets(user("super_admin"), otherLaboratoryId)).toBe(true);
+    expect(canManageLaboratoryAssets(user("lab_admin", ownLaboratory), ownLaboratory.laboratory_id)).toBe(true);
+    expect(canManageLaboratoryAssets(user("user", ownLaboratory), ownLaboratory.laboratory_id)).toBe(true);
+    expect(canManageLaboratoryAssets(user("lab_admin", ownLaboratory), otherLaboratoryId)).toBe(false);
+    expect(canManageLaboratoryAssets(user("user", ownLaboratory), otherLaboratoryId)).toBe(false);
+    expect(canManageLaboratoryAssets(user("guest", ownLaboratory), ownLaboratory.laboratory_id)).toBe(false);
   });
 
   it("limits asset parameter laboratory selection to global admins", () => {

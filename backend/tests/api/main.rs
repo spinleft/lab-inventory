@@ -1,8 +1,11 @@
 mod asset_categories;
 mod asset_parameters;
+mod assets;
+mod attachments;
 mod auth;
 mod health_check;
 mod helpers;
+mod inventory_items;
 mod laboratories;
 mod locations;
 mod migrations;

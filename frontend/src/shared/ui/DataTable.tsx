@@ -15,6 +15,7 @@ type DataTableProps<T> = {
   getRowKey: (item: T) => string;
   items: T[];
   loading?: boolean;
+  onRowClick?: (item: T) => void;
 };
 
 export function DataTable<T>({
@@ -24,6 +25,7 @@ export function DataTable<T>({
   getRowKey,
   items,
   loading = false,
+  onRowClick,
 }: DataTableProps<T>) {
   if (loading) {
     return (
@@ -54,7 +56,19 @@ export function DataTable<T>({
         </thead>
         <tbody>
           {items.map((item) => (
-            <tr key={getRowKey(item)}>
+            <tr
+              className={onRowClick ? "asset-clickable-row" : undefined}
+              key={getRowKey(item)}
+              tabIndex={onRowClick ? 0 : undefined}
+              onClick={onRowClick ? () => onRowClick(item) : undefined}
+              onKeyDown={
+                onRowClick
+                  ? (event) => {
+                      if (event.key === "Enter") onRowClick(item);
+                    }
+                  : undefined
+              }
+            >
               {columns.map((column) => (
                 <td
                   key={column.key}

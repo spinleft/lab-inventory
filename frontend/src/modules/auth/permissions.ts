@@ -37,6 +37,36 @@ export function canManageAssetCategories(user: CurrentUser) {
   );
 }
 
+export function canAccessAssets(user: CurrentUser) {
+  return isRoot(user) || isSuperAdmin(user) || Boolean(user.laboratory);
+}
+
+export function canManageAssets(user: CurrentUser) {
+  return canManageAssetCategories(user);
+}
+
+export function canSelectAssetLaboratory(user: CurrentUser) {
+  return isRoot(user) || isSuperAdmin(user);
+}
+
+export function canSelectAssetQueryLaboratory(user: CurrentUser) {
+  return (
+    isRoot(user) ||
+    isSuperAdmin(user) ||
+    ((isLabAdmin(user) || getUserTypeName(user) === "user") && Boolean(user.laboratory))
+  );
+}
+
+export function canManageLaboratoryAssets(user: CurrentUser, laboratoryId?: string | null) {
+  if (!laboratoryId || !canManageAssets(user)) {
+    return false;
+  }
+  if (isRoot(user) || isSuperAdmin(user)) {
+    return true;
+  }
+  return user.laboratory?.laboratory_id === laboratoryId;
+}
+
 export function canManageAssetParameters(user: CurrentUser) {
   return canManageAssetCategories(user);
 }

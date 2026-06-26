@@ -50,11 +50,19 @@ async fn create_list_get_asset_parameters_are_laboratory_scoped_and_record_audit
     assert_eq!(body["parameter_type_id"], own_parameter_id.to_string());
 
     let response = app.get_asset_parameters(other_laboratory_id).await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(parameter_codes(&body), vec!["state"]);
+
     let response = app
         .get_asset_parameter(parameter_id(&other_parameter))
         .await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(
+        body["parameter_type_id"],
+        parameter_id(&other_parameter).to_string()
+    );
 }
 
 #[tokio::test]

@@ -8,6 +8,7 @@ use uuid::Uuid;
 pub struct Settings {
     pub database: DatabaseSettings,
     pub application: ApplicationSettings,
+    pub attachment_storage: AttachmentStorageSettings,
     pub redis_uri: Secret<String>,
 }
 
@@ -32,6 +33,16 @@ pub struct DatabaseSettings {
     pub host: String,
     pub database_name: String,
     pub require_ssl: bool,
+}
+
+#[derive(serde::Deserialize, Clone)]
+pub struct AttachmentStorageSettings {
+    pub backend: String,
+    pub local_root: String,
+    #[serde(deserialize_with = "deserialize_number_from_string")]
+    pub max_file_size_bytes: u64,
+    #[serde(deserialize_with = "deserialize_number_from_string")]
+    pub upload_token_ttl_minutes: i64,
 }
 
 impl DatabaseSettings {

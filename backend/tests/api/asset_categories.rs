@@ -115,9 +115,14 @@ async fn list_and_get_asset_categories_are_laboratory_scoped() {
     assert_eq!(body["category_id"], category_id(&own_child).to_string());
 
     let response = app.get_asset_categories(other_laboratory_id).await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(category_paths(&body), vec!["equipment"]);
+
     let response = app.get_asset_category(category_id(&other_root)).await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["category_id"], category_id(&other_root).to_string());
 }
 
 #[tokio::test]

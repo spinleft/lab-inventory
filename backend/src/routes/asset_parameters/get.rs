@@ -65,7 +65,7 @@ fn validate_read_permission(
     actor: &Actor,
     target_laboratory_id: &LaboratoryId,
 ) -> Result<(), GetAssetParameterError> {
-    if actor.can_read_laboratory_resource(target_laboratory_id) {
+    if actor.can_query_laboratory_resource(target_laboratory_id) {
         Ok(())
     } else {
         Err(GetAssetParameterError::Forbidden(

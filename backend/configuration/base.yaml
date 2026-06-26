@@ -18,4 +18,9 @@ database:
   password: "password"
   database_name: "lab_inventory"
   require_ssl: false
+attachment_storage:
+  backend: "local"
+  local_root: "./storage/attachments"
+  max_file_size_bytes: 52428800
+  upload_token_ttl_minutes: 60
 redis_uri: "redis://127.0.0.1:6379"

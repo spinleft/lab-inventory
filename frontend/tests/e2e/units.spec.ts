@@ -76,6 +76,12 @@ test("manage units", async ({ page }) => {
   await page.getByRole("button", { name: "新建单位" }).click();
   await expect(page.getByRole("heading", { name: "新建单位" })).toBeVisible();
   await page.getByLabel("单位名称").fill("厘米");
+  await page.getByLabel("单位维度").click();
+  await expect(page.getByRole("option", { name: "长度" })).toBeVisible();
+  await page.mouse.click(12, 12);
+  await expect(page.getByRole("heading", { name: "新建单位" })).toBeVisible();
+  await expect(page.getByLabel("单位名称")).toHaveValue("厘米");
+  await expect(page.getByRole("option", { name: "长度" })).toBeHidden();
   await page.getByLabel("单位代码").fill("cm");
   await page.getByLabel("显示符号").fill("cm");
   await page.getByLabel("基础换算系数").fill("0.01");

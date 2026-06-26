@@ -1,8 +1,11 @@
 mod asset_categories;
 mod asset_parameters;
+mod assets;
+pub(crate) mod attachments;
 mod audit_logs;
 mod auth;
 mod health_check;
+mod inventory_items;
 mod laboratories;
 mod locations;
 mod pagination;
@@ -11,9 +14,12 @@ mod users;
 
 pub use asset_categories::*;
 pub use asset_parameters::*;
+pub use assets::*;
+pub use attachments::*;
 pub use audit_logs::*;
 pub use auth::*;
 pub use health_check::*;
+pub use inventory_items::*;
 pub use laboratories::*;
 pub use locations::*;
 pub(crate) use pagination::*;

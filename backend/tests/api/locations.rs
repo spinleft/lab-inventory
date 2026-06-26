@@ -104,9 +104,14 @@ async fn list_and_get_locations_are_laboratory_scoped() {
     assert_eq!(body["location_id"], location_id(&own_child).to_string());
 
     let response = app.get_locations(other_laboratory_id).await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(location_paths(&body), vec!["room_a"]);
+
     let response = app.get_location(location_id(&other_root)).await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["location_id"], location_id(&other_root).to_string());
 }
 
 #[tokio::test]
@@ -464,7 +469,7 @@ async fn insert_test_inventory_item(app: &TestApp, laboratory_id: Uuid, location
             tracking_mode,
             quantity_on_hand,
             quantity_allocated,
-            unit_id,
+            quantity_unit_id,
             location_id
         )
         VALUES ($1, $2, $3, 'quantity', 1, 0, $4, $5)

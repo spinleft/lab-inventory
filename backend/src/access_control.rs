@@ -28,6 +28,10 @@ impl Actor {
         self.user_type == UserType::LabAdmin
     }
 
+    pub fn is_regular_user(&self) -> bool {
+        self.user_type == UserType::User
+    }
+
     pub fn is_super_admin(&self) -> bool {
         self.user_type == UserType::SuperAdmin
     }
@@ -132,6 +136,17 @@ impl Actor {
 
     pub fn can_read_laboratory_resource(&self, laboratory_id: &LaboratoryId) -> bool {
         self.is_root() || self.is_super_admin() || self.laboratory_id == Some(*laboratory_id)
+    }
+
+    pub fn can_query_laboratory_resource(&self, laboratory_id: &LaboratoryId) -> bool {
+        self.can_read_laboratory_resource(laboratory_id)
+            || (!self.is_guest() && self.laboratory_id.is_some())
+    }
+
+    pub fn can_browse_laboratories(&self) -> bool {
+        self.is_root()
+            || self.is_super_admin()
+            || ((self.is_lab_admin() || self.is_regular_user()) && self.laboratory_id.is_some())
     }
 
     pub fn can_write_laboratory_resource(&self, laboratory_id: &LaboratoryId) -> bool {

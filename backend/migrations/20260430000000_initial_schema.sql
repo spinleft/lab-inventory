@@ -171,6 +171,9 @@ ON locations (
 CREATE UNIQUE INDEX uq_locations_path
 ON locations(laboratory_id, path);
 
+CREATE UNIQUE INDEX uq_locations_location_laboratory
+ON locations(location_id, laboratory_id);
+
 CREATE INDEX idx_locations_path_gist
 ON locations USING gist(path);
 
@@ -246,6 +249,10 @@ CREATE TABLE assets (
 
 CREATE UNIQUE INDEX idx_assets_unique_laboratory_name_model
     ON assets (laboratory_id, name, COALESCE(model, ''));
+CREATE UNIQUE INDEX uq_assets_asset_laboratory
+    ON assets (asset_id, laboratory_id);
+CREATE UNIQUE INDEX uq_assets_asset_laboratory_tracking_mode
+    ON assets (asset_id, laboratory_id, tracking_mode);
 CREATE INDEX idx_assets_laboratory_id ON assets (laboratory_id);
 CREATE INDEX idx_assets_category_id ON assets (category_id);
 CREATE INDEX idx_assets_default_unit_id ON assets (default_unit_id);
@@ -371,30 +378,37 @@ CREATE TABLE asset_parameter_values (
 
 CREATE TABLE asset_inventory_items (
     inventory_item_id uuid PRIMARY KEY,
-    asset_id uuid NOT NULL REFERENCES assets (asset_id),
+    asset_id uuid NOT NULL,
     laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id),
     tracking_mode TEXT NOT NULL,
     serial_number TEXT,
     batch_number TEXT,
-    quantity_on_hand DOUBLE PRECISION NOT NULL,
-    quantity_allocated DOUBLE PRECISION NOT NULL DEFAULT 0,
-    unit_id uuid NOT NULL REFERENCES units (unit_id),
-    location_id uuid REFERENCES locations (location_id),
+    quantity_on_hand NUMERIC NOT NULL,
+    quantity_allocated NUMERIC NOT NULL DEFAULT 0,
+    quantity_unit_id uuid NOT NULL REFERENCES units (unit_id),
+    location_id uuid,
     status TEXT NOT NULL DEFAULT 'available',
     public_notes TEXT,
     internal_notes TEXT,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
+    last_stocktake_at timestamptz,
+    FOREIGN KEY (asset_id, laboratory_id, tracking_mode)
+        REFERENCES assets (asset_id, laboratory_id, tracking_mode)
+        ON DELETE CASCADE,
+    FOREIGN KEY (location_id, laboratory_id)
+        REFERENCES locations (location_id, laboratory_id),
     CHECK (tracking_mode IN ('serialized', 'quantity')),
     CHECK (quantity_on_hand >= 0),
     CHECK (quantity_allocated >= 0),
     CHECK (quantity_allocated <= quantity_on_hand),
     CHECK (status IN ('available', 'reserved', 'retired', 'lost', 'consumed')),
+    CHECK (batch_number IS NULL OR btrim(batch_number) <> ''),
     CHECK (
         (
             tracking_mode = 'serialized'
             AND serial_number IS NOT NULL
-            AND serial_number <> ''
+            AND btrim(serial_number) <> ''
             AND quantity_on_hand = 1
             AND quantity_allocated IN (0, 1)
         )
@@ -406,40 +420,112 @@ CREATE TABLE asset_inventory_items (
     )
 );
 
-CREATE UNIQUE INDEX idx_asset_inventory_items_unique_serial_number
-    ON asset_inventory_items (laboratory_id, serial_number)
+CREATE UNIQUE INDEX idx_asset_inventory_items_unique_asset_serial_number
+    ON asset_inventory_items (laboratory_id, asset_id, serial_number)
     WHERE serial_number IS NOT NULL;
-CREATE INDEX idx_asset_inventory_items_asset_id ON asset_inventory_items (asset_id);
+CREATE UNIQUE INDEX idx_asset_inventory_items_unique_quantity_aggregate
+    ON asset_inventory_items (
+        laboratory_id,
+        asset_id,
+        COALESCE(batch_number, ''),
+        COALESCE(location_id, '00000000-0000-0000-0000-000000000000'::uuid),
+        status,
+        quantity_unit_id
+    )
+    WHERE tracking_mode = 'quantity';
+CREATE INDEX idx_asset_inventory_items_asset_laboratory_id ON asset_inventory_items (asset_id, laboratory_id);
 CREATE INDEX idx_asset_inventory_items_laboratory_id ON asset_inventory_items (laboratory_id);
-CREATE INDEX idx_asset_inventory_items_location_id ON asset_inventory_items (location_id);
-CREATE INDEX idx_asset_inventory_items_unit_id ON asset_inventory_items (unit_id);
+CREATE INDEX idx_asset_inventory_items_location_laboratory_id ON asset_inventory_items (location_id, laboratory_id);
+CREATE INDEX idx_asset_inventory_items_quantity_unit_id ON asset_inventory_items (quantity_unit_id);
+CREATE INDEX idx_asset_inventory_items_laboratory_asset_id ON asset_inventory_items (laboratory_id, asset_id);
+CREATE INDEX idx_asset_inventory_items_laboratory_status ON asset_inventory_items (laboratory_id, status);
+CREATE INDEX idx_asset_inventory_items_laboratory_batch_number ON asset_inventory_items (laboratory_id, batch_number);
+CREATE INDEX idx_asset_inventory_items_laboratory_location_id ON asset_inventory_items (laboratory_id, location_id);
 CREATE INDEX idx_asset_inventory_items_search_trgm
     ON asset_inventory_items USING gin ((COALESCE(serial_number, '') || ' ' || COALESCE(batch_number, '') || ' ' || COALESCE(public_notes, '') || ' ' || COALESCE(internal_notes, '')) gin_trgm_ops);
+CREATE UNIQUE INDEX uq_asset_inventory_items_item_laboratory
+    ON asset_inventory_items (inventory_item_id, laboratory_id);
+
+CREATE TABLE attachment_uploads (
+    upload_id uuid PRIMARY KEY,
+    laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id),
+    storage_backend TEXT NOT NULL DEFAULT 'local',
+    storage_key TEXT NOT NULL UNIQUE,
+    original_file_name TEXT NOT NULL,
+    mime_type TEXT,
+    file_size_bytes BIGINT NOT NULL,
+    sha256_hex TEXT NOT NULL,
+    uploaded_by_user_id uuid REFERENCES users (user_id) ON DELETE SET NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
+    consumed_at timestamptz,
+    CHECK (storage_backend IN ('local')),
+    CHECK (original_file_name <> ''),
+    CHECK (file_size_bytes > 0),
+    CHECK (storage_key <> ''),
+    CHECK (sha256_hex ~ '^[0-9a-f]{64}$'),
+    CHECK (expires_at > created_at)
+);
+
+CREATE INDEX idx_attachment_uploads_laboratory_active
+    ON attachment_uploads (laboratory_id, expires_at)
+    WHERE consumed_at IS NULL;
+CREATE INDEX idx_attachment_uploads_uploaded_by_user_id
+    ON attachment_uploads (uploaded_by_user_id);
 
 CREATE TABLE attachments (
     attachment_id uuid PRIMARY KEY,
     laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id),
-    resource_type TEXT NOT NULL,
-    resource_id uuid NOT NULL,
-    file_name TEXT NOT NULL,
+    asset_id uuid,
+    inventory_item_id uuid,
+    display_name TEXT NOT NULL,
+    original_file_name TEXT NOT NULL,
+    description TEXT,
     mime_type TEXT,
     file_size_bytes BIGINT NOT NULL,
-    storage_url TEXT NOT NULL,
+    sha256_hex TEXT NOT NULL,
+    storage_backend TEXT NOT NULL DEFAULT 'local',
+    storage_key TEXT NOT NULL UNIQUE,
     visibility TEXT NOT NULL DEFAULT 'internal',
     uploaded_by_user_id uuid REFERENCES users (user_id) ON DELETE SET NULL,
+    deleted_by_user_id uuid REFERENCES users (user_id) ON DELETE SET NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
-    CHECK (resource_type IN ('asset', 'inventory_item')),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    deleted_at timestamptz,
+    FOREIGN KEY (asset_id, laboratory_id)
+        REFERENCES assets (asset_id, laboratory_id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (inventory_item_id, laboratory_id)
+        REFERENCES asset_inventory_items (inventory_item_id, laboratory_id)
+        ON DELETE CASCADE,
+    CHECK ((asset_id IS NULL) <> (inventory_item_id IS NULL)),
     CHECK (visibility IN ('public', 'internal')),
-    CHECK (file_name <> ''),
-    CHECK (file_size_bytes >= 0),
-    CHECK (storage_url <> '')
+    CHECK (storage_backend IN ('local')),
+    CHECK (display_name <> ''),
+    CHECK (original_file_name <> ''),
+    CHECK (file_size_bytes > 0),
+    CHECK (storage_key <> ''),
+    CHECK (sha256_hex ~ '^[0-9a-f]{64}$')
 );
 
-CREATE INDEX idx_attachments_laboratory_id ON attachments (laboratory_id);
-CREATE INDEX idx_attachments_resource ON attachments (resource_type, resource_id);
-CREATE INDEX idx_attachments_visibility ON attachments (visibility);
-CREATE INDEX idx_attachments_file_name_trgm
-    ON attachments USING gin (file_name gin_trgm_ops);
+CREATE INDEX idx_attachments_asset_laboratory_id ON attachments (asset_id, laboratory_id);
+CREATE INDEX idx_attachments_inventory_item_laboratory_id ON attachments (inventory_item_id, laboratory_id);
+CREATE INDEX idx_attachments_uploaded_by_user_id ON attachments (uploaded_by_user_id);
+CREATE INDEX idx_attachments_deleted_by_user_id ON attachments (deleted_by_user_id);
+CREATE INDEX idx_attachments_active_asset
+    ON attachments (asset_id, created_at DESC)
+    WHERE deleted_at IS NULL AND asset_id IS NOT NULL;
+CREATE INDEX idx_attachments_active_inventory_item
+    ON attachments (inventory_item_id, created_at DESC)
+    WHERE deleted_at IS NULL AND inventory_item_id IS NOT NULL;
+CREATE INDEX idx_attachments_laboratory_created_active
+    ON attachments (laboratory_id, created_at DESC)
+    WHERE deleted_at IS NULL;
+CREATE INDEX idx_attachments_visibility_active
+    ON attachments (visibility)
+    WHERE deleted_at IS NULL;
+CREATE INDEX idx_attachments_display_name_trgm
+    ON attachments USING gin (display_name gin_trgm_ops);
 
 CREATE TABLE inventory_transactions (
     transaction_id uuid PRIMARY KEY,
@@ -448,8 +534,8 @@ CREATE TABLE inventory_transactions (
     actor_user_id uuid REFERENCES users (user_id) ON DELETE SET NULL,
     actor_laboratory_id uuid REFERENCES laboratories (laboratory_id) ON DELETE SET NULL,
     action TEXT NOT NULL,
-    quantity_delta DOUBLE PRECISION NOT NULL DEFAULT 0,
-    allocated_delta DOUBLE PRECISION NOT NULL DEFAULT 0,
+    quantity_delta NUMERIC NOT NULL DEFAULT 0,
+    allocated_delta NUMERIC NOT NULL DEFAULT 0,
     from_location_id uuid REFERENCES locations (location_id) ON DELETE SET NULL,
     to_location_id uuid REFERENCES locations (location_id) ON DELETE SET NULL,
     related_resource_type TEXT,

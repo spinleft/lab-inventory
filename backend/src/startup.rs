@@ -1,13 +1,21 @@
+use crate::attachment_storage::AttachmentStorage;
 use crate::authentication::reject_anonymous_users;
 use crate::configuration::{ApplicationSettings, DatabaseSettings, Settings};
 use crate::routes::{
-    change_password, create_asset_category, create_asset_parameter, create_laboratory,
-    create_location, create_unit, create_user, delete_asset_category, delete_asset_parameter,
-    delete_laboratory, delete_location, delete_unit, delete_user, get_asset_category,
-    get_asset_parameter, get_laboratory, get_location, get_unit, get_user, health_check,
-    list_asset_categories, list_asset_parameters, list_audit_logs, list_laboratories,
-    list_locations, list_units, list_users, login, logout, me, update_asset_category,
-    update_asset_parameter, update_laboratory, update_location, update_unit, update_user,
+    batch_delete_inventory_items, batch_update_inventory_items, change_password, create_asset,
+    create_asset_attachment, create_asset_category, create_asset_parameter,
+    create_inventory_item_attachment, create_inventory_items, create_laboratory, create_location,
+    create_unit, create_user, delete_asset, delete_asset_category, delete_asset_parameter,
+    delete_attachment, delete_attachment_upload, delete_inventory_item, delete_laboratory,
+    delete_location, delete_unit, delete_user, download_attachment, get_asset, get_asset_category,
+    get_asset_parameter, get_attachment, get_inventory_item, get_laboratory, get_location,
+    get_unit, get_user, health_check, list_asset_attachments, list_asset_categories,
+    list_asset_parameters, list_assets, list_audit_logs, list_inventory_item_attachments,
+    list_inventory_items, list_laboratories, list_laboratory_attachments, list_locations,
+    list_units, list_users, login, logout, me, merge_inventory_items, split_inventory_item,
+    update_asset, update_asset_category, update_asset_parameter, update_attachment,
+    update_inventory_item, update_laboratory, update_location, update_unit, update_user,
+    upload_attachment,
 };
 use actix_cors::Cors;
 use actix_session::SessionMiddleware;
@@ -45,6 +53,7 @@ impl Application {
             listener,
             connection_pool,
             configuration.application,
+            configuration.attachment_storage,
             configuration.redis_uri,
         )
         .await?;
@@ -69,15 +78,18 @@ async fn run(
     listener: TcpListener,
     db_pool: PgPool,
     application: ApplicationSettings,
+    attachment_storage: crate::configuration::AttachmentStorageSettings,
     redis_uri: Secret<String>,
 ) -> Result<Server, anyhow::Error> {
     let db_pool = Data::new(db_pool);
+    let attachment_storage = Data::new(AttachmentStorage::new(attachment_storage)?);
     let secret_key = Key::derive_from(application.hmac_secret.expose_secret().as_bytes());
     let redis_store = RedisSessionStore::new(redis_uri.expose_secret()).await?;
 
     let server = build_server(
         listener,
         db_pool,
+        attachment_storage,
         secret_key,
         application.cookie_secure,
         application.cors_allowed_origins,
@@ -90,6 +102,7 @@ async fn run(
 fn build_server(
     listener: TcpListener,
     db_pool: Data<PgPool>,
+    attachment_storage: Data<AttachmentStorage>,
     secret_key: Key,
     cookie_secure: bool,
     cors_allowed_origins: Vec<String>,
@@ -106,6 +119,7 @@ fn build_server(
             .wrap(TracingLogger::default())
             .configure(api_routes)
             .app_data(db_pool.clone())
+            .app_data(attachment_storage.clone())
     })
     .listen(listener)?
     .run();
@@ -176,6 +190,30 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                         web::post().to(create_asset_parameter),
                     )
                     .route(
+                        "/laboratories/{laboratory_id}/assets",
+                        web::get().to(list_assets),
+                    )
+                    .route(
+                        "/laboratories/{laboratory_id}/assets",
+                        web::post().to(create_asset),
+                    )
+                    .route(
+                        "/laboratories/{laboratory_id}/attachment-uploads",
+                        web::post().to(upload_attachment),
+                    )
+                    .route(
+                        "/attachment-uploads/{upload_id}",
+                        web::delete().to(delete_attachment_upload),
+                    )
+                    .route(
+                        "/laboratories/{laboratory_id}/attachments",
+                        web::get().to(list_laboratory_attachments),
+                    )
+                    .route(
+                        "/laboratories/{laboratory_id}/inventory-items",
+                        web::get().to(list_inventory_items),
+                    )
+                    .route(
                         "/laboratories/{laboratory_id}/locations",
                         web::get().to(list_locations),
                     )
@@ -226,6 +264,73 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                     .route(
                         "/asset-parameters/{parameter_id}",
                         web::delete().to(delete_asset_parameter),
+                    )
+                    .route("/assets/{asset_id}", web::get().to(get_asset))
+                    .route("/assets/{asset_id}", web::patch().to(update_asset))
+                    .route("/assets/{asset_id}", web::delete().to(delete_asset))
+                    .route(
+                        "/assets/{asset_id}/attachments",
+                        web::post().to(create_asset_attachment),
+                    )
+                    .route(
+                        "/assets/{asset_id}/attachments",
+                        web::get().to(list_asset_attachments),
+                    )
+                    .route(
+                        "/assets/{asset_id}/inventory-items",
+                        web::post().to(create_inventory_items),
+                    )
+                    .route(
+                        "/inventory-items/batch",
+                        web::patch().to(batch_update_inventory_items),
+                    )
+                    .route(
+                        "/inventory-items/batch-delete",
+                        web::post().to(batch_delete_inventory_items),
+                    )
+                    .route(
+                        "/inventory-items/merge",
+                        web::post().to(merge_inventory_items),
+                    )
+                    .route(
+                        "/inventory-items/{inventory_item_id}/split",
+                        web::post().to(split_inventory_item),
+                    )
+                    .route(
+                        "/inventory-items/{inventory_item_id}",
+                        web::get().to(get_inventory_item),
+                    )
+                    .route(
+                        "/inventory-items/{inventory_item_id}",
+                        web::patch().to(update_inventory_item),
+                    )
+                    .route(
+                        "/inventory-items/{inventory_item_id}",
+                        web::delete().to(delete_inventory_item),
+                    )
+                    .route(
+                        "/inventory-items/{inventory_item_id}/attachments",
+                        web::post().to(create_inventory_item_attachment),
+                    )
+                    .route(
+                        "/inventory-items/{inventory_item_id}/attachments",
+                        web::get().to(list_inventory_item_attachments),
+                    )
+                    .route(
+                        "/attachments/{attachment_id}",
+                        web::get().to(get_attachment),
+                    )
+                    .route(
+                        "/attachments/{attachment_id}",
+                        web::patch().to(update_attachment),
+                    )
+                    .route(
+                        "/attachments/{attachment_id}",
+                        web::delete().to(delete_attachment),
+                    )
+                    .route(
+                        "/attachments/{attachment_id}/download",
+                        web::get().to(download_attachment),
                     )
                     .route("/locations/{location_id}", web::get().to(get_location))
                     .route("/locations/{location_id}", web::patch().to(update_location))

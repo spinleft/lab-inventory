@@ -2,6 +2,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  Building2,
   ChevronDown,
   LogOut,
   Menu,
@@ -18,9 +19,14 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useLogout } from "../modules/auth/api";
 import { describeRole, describeScope } from "../modules/auth/permissions";
 import { Button } from "../shared/ui/Button";
+import { Select } from "../shared/ui/Select";
 import { useTheme, type ThemePreference } from "../shared/theme/ThemeProvider";
 import { useAuth } from "./auth-context";
 import { CommandMenu, useCommandMenuState } from "./CommandMenu";
+import {
+  LaboratorySelectionProvider,
+  useLaboratorySelection,
+} from "./laboratory-selection-context";
 import { findRoute, moduleNavItems, type ModuleNavItem } from "./modules";
 
 const groupLabels: Record<ModuleNavItem["group"], string> = {
@@ -51,33 +57,35 @@ export function AppShell() {
   }
 
   return (
-    <div className="app-shell">
-      <Sidebar
-        items={visibleNavItems}
-        isLogoutPending={logout.isPending}
-        onCommandOpen={() => setCommandOpen(true)}
-        onLogout={handleLogout}
-      />
-      <div className="app-main">
-        <header className="topbar">
-          <div className="topbar-left">
-            <MobileNavigation
-              items={visibleNavItems}
-              isLogoutPending={logout.isPending}
-              onLogout={handleLogout}
-            />
-            <span className="breadcrumb">{currentRoute?.title ?? "工作台"}</span>
+    <LaboratorySelectionProvider>
+      <div className="app-shell">
+        <Sidebar
+          items={visibleNavItems}
+          isLogoutPending={logout.isPending}
+          onCommandOpen={() => setCommandOpen(true)}
+          onLogout={handleLogout}
+        />
+        <div className="app-main">
+          <header className="topbar">
+            <div className="topbar-left">
+              <MobileNavigation
+                items={visibleNavItems}
+                isLogoutPending={logout.isPending}
+                onLogout={handleLogout}
+              />
+              <span className="breadcrumb">{currentRoute?.title ?? "工作台"}</span>
+            </div>
+            <div className="topbar-right">
+              <ThemeMenu />
+            </div>
+          </header>
+          <div className="page-scroll">
+            <Outlet />
           </div>
-          <div className="topbar-right">
-            <ThemeMenu />
-          </div>
-        </header>
-        <div className="page-scroll">
-          <Outlet />
         </div>
+        <CommandMenu open={commandOpen} onOpenChange={setCommandOpen} />
       </div>
-      <CommandMenu open={commandOpen} onOpenChange={setCommandOpen} />
-    </div>
+    </LaboratorySelectionProvider>
   );
 }
 
@@ -198,7 +206,49 @@ function Sidebar({
           );
         })}
       </nav>
+      <SidebarLaboratorySelector />
     </aside>
+  );
+}
+
+function SidebarLaboratorySelector() {
+  const {
+    canSelectLaboratory,
+    laboratories,
+    laboratoriesLoading,
+    selectedLaboratoryId,
+    selectedLaboratoryName,
+    setSelectedLaboratoryId,
+  } = useLaboratorySelection();
+
+  if (!canSelectLaboratory && !selectedLaboratoryName) {
+    return null;
+  }
+
+  return (
+    <div className="sidebar-footer">
+      <div className="sidebar-laboratory-label">
+        <Building2 size={14} aria-hidden="true" />
+        <span>实验室</span>
+      </div>
+      {canSelectLaboratory ? (
+        <Select
+          disabled={laboratoriesLoading || laboratories.length === 0}
+          label="选择实验室"
+          options={laboratories.map((laboratory) => ({
+            label: laboratory.name,
+            value: laboratory.laboratory_id,
+          }))}
+          placeholder="选择实验室"
+          value={selectedLaboratoryId || undefined}
+          onValueChange={setSelectedLaboratoryId}
+        />
+      ) : (
+        <div className="sidebar-laboratory-static" title={selectedLaboratoryName}>
+          {selectedLaboratoryName}
+        </div>
+      )}
+    </div>
   );
 }
 
