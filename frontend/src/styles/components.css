@@ -714,6 +714,19 @@
   margin: 0;
 }
 
+.federation-code-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.federation-merge-control {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
 @media (max-width: 1120px) {
   .asset-filter-grid,
   .asset-detail-grid {
@@ -725,6 +738,8 @@
   .asset-filter-grid,
   .asset-detail-grid,
   .asset-extra-parameter-row,
+  .federation-code-grid,
+  .federation-merge-control,
   .attachment-list-item,
   .asset-parameter-input,
   .asset-parameter-inline-inputs {

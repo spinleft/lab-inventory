@@ -40,6 +40,10 @@ import { PageHeader } from "../../shared/ui/PageHeader";
 import { Select } from "../../shared/ui/Select";
 import { useToast } from "../../shared/ui/Toast";
 import {
+  assetDetailPath,
+  laboratoryDetailScopeCacheKey,
+} from "../federation/scope";
+import {
   type AssetCategory,
   type AssetParameter,
   type Location,
@@ -203,6 +207,7 @@ const INVENTORY_FILTER_OPTIONS: Array<{ label: string; value: InventoryFilterKey
 export function InventoryPage() {
   const {
     canManageSelectedLaboratoryAssets,
+    selectedDataScope,
     selectedLaboratoryId,
   } = useLaboratorySelection();
   const { apiBaseUrl } = useBackendConfig();
@@ -237,14 +242,17 @@ export function InventoryPage() {
   const categoriesQuery = useAssetCategories({
     enabled: Boolean(selectedLaboratoryId),
     laboratoryId: selectedLaboratoryId,
+    scope: selectedDataScope,
   });
   const parametersQuery = useAssetParameters({
     enabled: Boolean(selectedLaboratoryId),
     laboratoryId: selectedLaboratoryId,
+    scope: selectedDataScope,
   });
   const locationsQuery = useLocations({
     enabled: Boolean(selectedLaboratoryId),
     laboratoryId: selectedLaboratoryId,
+    scope: selectedDataScope,
   });
   const unitsQuery = useUnits();
   const createInventoryItems = useCreateInventoryItems();
@@ -280,7 +288,7 @@ export function InventoryPage() {
 
   useEffect(() => {
     setOffset(0);
-  }, [selectedLaboratoryId]);
+  }, [selectedDataScope]);
 
   useEffect(() => {
     setSearchValue(filters.keyword);
@@ -326,6 +334,7 @@ export function InventoryPage() {
     enabled: Boolean(selectedLaboratoryId),
     laboratoryId: selectedLaboratoryId,
     query,
+    scope: selectedDataScope,
   });
   const response = inventoryQuery.data;
   const total = response?.total ?? 0;
@@ -340,11 +349,18 @@ export function InventoryPage() {
   const assetDetailQueries = useQueries({
     queries: currentPageAssetIds.map((assetId) => ({
       enabled: Boolean(apiBaseUrl) && needsAssetDetails,
-      queryKey: assetQueryKeys.detail(apiBaseUrl, assetId, true),
+      queryKey: assetQueryKeys.detail(
+        apiBaseUrl,
+        laboratoryDetailScopeCacheKey(selectedDataScope),
+        assetId,
+        true,
+      ),
       queryFn: async () => {
         const client = createApiClient(apiBaseUrl);
         return assetSchema.parse(
-          await client.get(`/assets/${assetId}`, { include: "parameters" }),
+          await client.get(assetDetailPath(selectedDataScope, assetId), {
+            include: "parameters",
+          }),
         );
       },
     })),

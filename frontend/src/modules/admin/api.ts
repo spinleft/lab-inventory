@@ -3,6 +3,12 @@ import { z } from "zod";
 import { useBackendConfig } from "../../shared/api/backendConfig";
 import { createApiClient } from "../../shared/api/httpClient";
 import { userTypeNameSchema } from "../auth/types";
+import {
+  type LaboratoryDataScope,
+  laboratoryCollectionPath,
+  laboratoryScopeCacheKey,
+  localLaboratoryScope,
+} from "../federation/scope";
 
 export const laboratorySchema = z.object({
   laboratory_id: z.string().uuid(),
@@ -33,7 +39,7 @@ export const assetCategorySchema = z.object({
   path: z.string(),
   depth: z.number(),
   description: z.string().nullable(),
-  parameter_assignments: z.array(assetCategoryParameterAssignmentSchema),
+  parameter_assignments: z.array(assetCategoryParameterAssignmentSchema).default([]),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -236,19 +242,22 @@ export function useUsers() {
 export function useAssetCategories({
   enabled = true,
   laboratoryId,
+  scope,
 }: {
   enabled?: boolean;
   laboratoryId: string;
+  scope?: LaboratoryDataScope;
 }) {
   const { apiBaseUrl } = useBackendConfig();
+  const dataScope = scope ?? localLaboratoryScope(laboratoryId);
 
   return useQuery({
     enabled: enabled && Boolean(laboratoryId),
-    queryKey: adminQueryKeys.assetCategories(apiBaseUrl, laboratoryId),
+    queryKey: adminQueryKeys.assetCategories(apiBaseUrl, laboratoryScopeCacheKey(dataScope)),
     queryFn: async () => {
       const client = createApiClient(apiBaseUrl);
       return assetCategoriesSchema.parse(
-        await client.get(`/laboratories/${laboratoryId}/asset-categories`),
+        await client.get(laboratoryCollectionPath(dataScope, "asset-categories")),
       );
     },
   });
@@ -257,19 +266,22 @@ export function useAssetCategories({
 export function useAssetParameters({
   enabled = true,
   laboratoryId,
+  scope,
 }: {
   enabled?: boolean;
   laboratoryId: string;
+  scope?: LaboratoryDataScope;
 }) {
   const { apiBaseUrl } = useBackendConfig();
+  const dataScope = scope ?? localLaboratoryScope(laboratoryId);
 
   return useQuery({
     enabled: enabled && Boolean(laboratoryId),
-    queryKey: adminQueryKeys.assetParameters(apiBaseUrl, laboratoryId),
+    queryKey: adminQueryKeys.assetParameters(apiBaseUrl, laboratoryScopeCacheKey(dataScope)),
     queryFn: async () => {
       const client = createApiClient(apiBaseUrl);
       return assetParametersSchema.parse(
-        await client.get(`/laboratories/${laboratoryId}/asset-parameters`),
+        await client.get(laboratoryCollectionPath(dataScope, "asset-parameters")),
       );
     },
   });
@@ -278,19 +290,22 @@ export function useAssetParameters({
 export function useLocations({
   enabled = true,
   laboratoryId,
+  scope,
 }: {
   enabled?: boolean;
   laboratoryId: string;
+  scope?: LaboratoryDataScope;
 }) {
   const { apiBaseUrl } = useBackendConfig();
+  const dataScope = scope ?? localLaboratoryScope(laboratoryId);
 
   return useQuery({
     enabled: enabled && Boolean(laboratoryId),
-    queryKey: adminQueryKeys.locations(apiBaseUrl, laboratoryId),
+    queryKey: adminQueryKeys.locations(apiBaseUrl, laboratoryScopeCacheKey(dataScope)),
     queryFn: async () => {
       const client = createApiClient(apiBaseUrl);
       return locationsSchema.parse(
-        await client.get(`/laboratories/${laboratoryId}/locations`),
+        await client.get(laboratoryCollectionPath(dataScope, "locations")),
       );
     },
   });

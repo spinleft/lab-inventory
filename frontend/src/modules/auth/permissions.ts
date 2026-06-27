@@ -83,6 +83,10 @@ export function canManageLocations(user: CurrentUser) {
   return canManageAssetCategories(user);
 }
 
+export function canManageFederation(user: CurrentUser) {
+  return isLabAdmin(user) && Boolean(user.laboratory);
+}
+
 export function canManageUnits(user: CurrentUser) {
   return isRoot(user) || isSuperAdmin(user);
 }

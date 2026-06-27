@@ -183,6 +183,7 @@ const ASSET_FILTER_OPTIONS: Array<{ label: string; value: AssetFilterKey }> = [
 export function AssetsPage() {
   const {
     canManageSelectedLaboratoryAssets,
+    selectedDataScope,
     selectedLaboratoryId,
   } = useLaboratorySelection();
   const { apiBaseUrl } = useBackendConfig();
@@ -218,14 +219,17 @@ export function AssetsPage() {
   const categoriesQuery = useAssetCategories({
     enabled: Boolean(selectedLaboratoryId),
     laboratoryId: selectedLaboratoryId,
+    scope: selectedDataScope,
   });
   const parametersQuery = useAssetParameters({
     enabled: Boolean(selectedLaboratoryId),
     laboratoryId: selectedLaboratoryId,
+    scope: selectedDataScope,
   });
   const locationsQuery = useLocations({
     enabled: Boolean(selectedLaboratoryId),
     laboratoryId: selectedLaboratoryId,
+    scope: selectedDataScope,
   });
   const unitsQuery = useUnits();
   const createAsset = useCreateAsset();
@@ -260,7 +264,7 @@ export function AssetsPage() {
 
   useEffect(() => {
     setOffset(0);
-  }, [selectedLaboratoryId]);
+  }, [selectedDataScope]);
 
   useEffect(() => {
     setSearchValue(filters.keyword);
@@ -303,6 +307,7 @@ export function AssetsPage() {
     enabled: Boolean(selectedLaboratoryId),
     laboratoryId: selectedLaboratoryId,
     query,
+    scope: selectedDataScope,
   });
   const response = assetsQuery.data;
   const total = response?.total ?? 0;

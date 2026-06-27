@@ -2,5 +2,9 @@ application:
   host: "127.0.0.1"
   base_url: "http://127.0.0.1:8000"
   cookie_secure: false
+federation:
+  public_base_url: "http://127.0.0.1:8000"
+  require_https: false
+  allow_insecure_private_network: true
 database:
   require_ssl: false

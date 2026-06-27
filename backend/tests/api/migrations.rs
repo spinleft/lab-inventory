@@ -77,6 +77,12 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
         "attachment_uploads",
         "attachments",
         "idempotency",
+        "federation_local_nodes",
+        "federation_remote_nodes",
+        "federation_laboratory_trusts",
+        "federation_pairing_codes",
+        "federation_request_nonces",
+        "federation_guest_links",
     ];
     for table_name in required_tables {
         let exists: Option<i32> = sqlx::query_scalar(
@@ -281,6 +287,58 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
             "idx_attachments_display_name_trgm",
             "idx_attachments_inventory_item_laboratory_id",
             "idx_attachments_laboratory_created_active",
+        ]
+    );
+
+    let federation_shadow_column: Option<i32> = sqlx::query_scalar(
+        r#"
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'users'
+          AND column_name = 'is_federation_shadow'
+          AND is_nullable = 'NO'
+        "#,
+    )
+    .fetch_optional(&app.db_pool)
+    .await
+    .unwrap();
+    assert!(federation_shadow_column.is_some());
+
+    let local_node_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM federation_local_nodes")
+        .fetch_one(&app.db_pool)
+        .await
+        .unwrap();
+    assert_eq!(local_node_count, 1);
+
+    let federation_indexes: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT indexname
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname IN (
+            'idx_federation_trusts_local_laboratory',
+            'idx_federation_trusts_remote',
+            'idx_federation_pairing_codes_laboratory_active',
+            'idx_federation_request_nonces_expires_at',
+            'idx_federation_guest_links_laboratory',
+            'idx_federation_guest_links_local_guest'
+          )
+        ORDER BY indexname
+        "#,
+    )
+    .fetch_all(&app.db_pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        federation_indexes,
+        vec![
+            "idx_federation_guest_links_laboratory",
+            "idx_federation_guest_links_local_guest",
+            "idx_federation_pairing_codes_laboratory_active",
+            "idx_federation_request_nonces_expires_at",
+            "idx_federation_trusts_local_laboratory",
+            "idx_federation_trusts_remote",
         ]
     );
 }

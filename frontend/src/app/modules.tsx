@@ -6,6 +6,7 @@ import {
   Gauge,
   KeyRound,
   MapPin,
+  Network,
   PackageSearch,
   Ruler,
   ScrollText,
@@ -31,11 +32,13 @@ import {
   canAccessAuditLogs,
   canManageAssetCategories,
   canManageAssetParameters,
+  canManageFederation,
   canManageLocations,
   canManageUnits,
 } from "../modules/auth/permissions";
 import { type CurrentUser } from "../modules/auth/types";
 import { DashboardPage } from "../modules/dashboard/DashboardPage";
+import { FederationPage } from "../modules/federation/FederationPage";
 import { InventoryDetailPage } from "../modules/inventory/InventoryDetailPage";
 import { InventoryPage } from "../modules/inventory/InventoryPage";
 import { PasswordPage, ProfilePage, PreferencesPage } from "../modules/profile/ProfilePages";
@@ -74,9 +77,7 @@ export type FrontendModule = {
 export const appModules: FrontendModule[] = [
   {
     id: "dashboard",
-    navItems: [
-      { group: "workspace", icon: Gauge, path: "/dashboard", title: "概览" },
-    ],
+    navItems: [{ group: "workspace", icon: Gauge, path: "/dashboard", title: "概览" }],
     commands: [
       { icon: Gauge, path: "/dashboard", title: "打开概览", keywords: ["dashboard"] },
     ],
@@ -176,6 +177,13 @@ export const appModules: FrontendModule[] = [
         title: "用户",
       },
       {
+        canAccess: canManageFederation,
+        group: "admin",
+        icon: Network,
+        path: "/admin/federation",
+        title: "联邦实验室",
+      },
+      {
         canAccess: canManageAssetCategories,
         group: "admin",
         icon: FolderTree,
@@ -216,6 +224,12 @@ export const appModules: FrontendModule[] = [
         icon: Users,
         path: "/admin/users",
         title: "管理用户",
+      },
+      {
+        canAccess: canManageFederation,
+        icon: Network,
+        path: "/admin/federation",
+        title: "管理联邦实验室",
       },
       {
         canAccess: canManageAssetCategories,
@@ -263,6 +277,13 @@ export const appModules: FrontendModule[] = [
         id: "admin.users",
         path: "/admin/users",
         title: "用户",
+      },
+      {
+        canAccess: canManageFederation,
+        element: <FederationPage />,
+        id: "admin.federation",
+        path: "/admin/federation",
+        title: "联邦实验室",
       },
       {
         canAccess: canManageAssetCategories,
@@ -355,9 +376,7 @@ export const appModules: FrontendModule[] = [
   {
     id: "server-settings",
     navItems: [],
-    commands: [
-      { icon: Activity, path: "/server-settings", title: "服务端设置" },
-    ],
+    commands: [{ icon: Activity, path: "/server-settings", title: "服务端设置" }],
     routes: [],
   },
 ];

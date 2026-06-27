@@ -4,6 +4,14 @@ import { useBackendConfig } from "../../shared/api/backendConfig";
 import { createApiClient } from "../../shared/api/httpClient";
 import { type AttachmentClaim } from "../attachments/api";
 import {
+  type LaboratoryDataScope,
+  inventoryItemDetailPath,
+  laboratoryCollectionPath,
+  laboratoryDetailScopeCacheKey,
+  laboratoryScopeCacheKey,
+  localLaboratoryScope,
+} from "../federation/scope";
+import {
   assetQueryKeys,
   assetTrackingModeSchema,
   type AssetTrackingMode,
@@ -104,10 +112,10 @@ export type UpdateInventoryItemPayload = {
 };
 
 export const inventoryQueryKeys = {
-  detail: (apiBaseUrl: string, inventoryItemId: string) =>
-    ["inventory-items", apiBaseUrl, "detail", inventoryItemId] as const,
-  list: (apiBaseUrl: string, laboratoryId: string, query: InventoryItemQuery) =>
-    ["inventory-items", apiBaseUrl, "list", laboratoryId, query] as const,
+  detail: (apiBaseUrl: string, scopeKey: string, inventoryItemId: string) =>
+    ["inventory-items", apiBaseUrl, "detail", scopeKey, inventoryItemId] as const,
+  list: (apiBaseUrl: string, scopeKey: string, query: InventoryItemQuery) =>
+    ["inventory-items", apiBaseUrl, "list", scopeKey, query] as const,
   root: (apiBaseUrl: string) => ["inventory-items", apiBaseUrl] as const,
 };
 
@@ -115,20 +123,23 @@ export function useInventoryItems({
   enabled = true,
   laboratoryId,
   query,
+  scope,
 }: {
   enabled?: boolean;
   laboratoryId: string;
   query: InventoryItemQuery;
+  scope?: LaboratoryDataScope;
 }) {
   const { apiBaseUrl } = useBackendConfig();
+  const dataScope = scope ?? localLaboratoryScope(laboratoryId);
 
   return useQuery({
     enabled: enabled && Boolean(laboratoryId),
-    queryKey: inventoryQueryKeys.list(apiBaseUrl, laboratoryId, query),
+    queryKey: inventoryQueryKeys.list(apiBaseUrl, laboratoryScopeCacheKey(dataScope), query),
     queryFn: async () => {
       const client = createApiClient(apiBaseUrl);
       return inventoryItemsResponseSchema.parse(
-        await client.get(`/laboratories/${laboratoryId}/inventory-items`, query),
+        await client.get(laboratoryCollectionPath(dataScope, "inventory-items"), query),
       );
     },
   });
@@ -137,19 +148,22 @@ export function useInventoryItems({
 export function useInventoryItem({
   enabled = true,
   inventoryItemId,
+  scope,
 }: {
   enabled?: boolean;
   inventoryItemId: string;
+  scope?: LaboratoryDataScope;
 }) {
   const { apiBaseUrl } = useBackendConfig();
+  const scopeKey = laboratoryDetailScopeCacheKey(scope);
 
   return useQuery({
     enabled: enabled && Boolean(inventoryItemId),
-    queryKey: inventoryQueryKeys.detail(apiBaseUrl, inventoryItemId),
+    queryKey: inventoryQueryKeys.detail(apiBaseUrl, scopeKey, inventoryItemId),
     queryFn: async () => {
       const client = createApiClient(apiBaseUrl);
       return inventoryItemSchema.parse(
-        await client.get(`/inventory-items/${inventoryItemId}`),
+        await client.get(inventoryItemDetailPath(scope, inventoryItemId)),
       );
     },
   });
@@ -199,7 +213,7 @@ export function useUpdateInventoryItem() {
     onSuccess: (item) => {
       queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.root(apiBaseUrl) });
       queryClient.invalidateQueries({
-        queryKey: inventoryQueryKeys.detail(apiBaseUrl, item.inventory_item_id),
+        queryKey: inventoryQueryKeys.detail(apiBaseUrl, "local", item.inventory_item_id),
       });
       queryClient.invalidateQueries({ queryKey: assetQueryKeys.root(apiBaseUrl) });
     },

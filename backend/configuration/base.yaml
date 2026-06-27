@@ -23,4 +23,11 @@ attachment_storage:
   local_root: "./storage/attachments"
   max_file_size_bytes: 52428800
   upload_token_ttl_minutes: 60
+federation:
+  enabled: true
+  public_base_url: "http://127.0.0.1:8000"
+  require_https: true
+  allow_insecure_private_network: false
+  request_ttl_seconds: 300
+  allowed_remote_hosts: []
 redis_uri: "redis://127.0.0.1:6379"

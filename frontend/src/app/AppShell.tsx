@@ -4,11 +4,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
   ChevronDown,
+  KeyRound,
   LogOut,
   Menu,
   Moon,
   Search,
-  KeyRound,
   Settings,
   SquarePen,
   Sun,
@@ -18,9 +18,11 @@ import {
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useLogout } from "../modules/auth/api";
 import { describeRole, describeScope } from "../modules/auth/permissions";
+import { federationTrustLabel } from "../modules/federation/api";
+import { laboratoryScopeKey, remoteLaboratoryScope } from "../modules/federation/scope";
+import { useTheme, type ThemePreference } from "../shared/theme/ThemeProvider";
 import { Button } from "../shared/ui/Button";
 import { Select } from "../shared/ui/Select";
-import { useTheme, type ThemePreference } from "../shared/theme/ThemeProvider";
 import { useAuth } from "./auth-context";
 import { CommandMenu, useCommandMenuState } from "./CommandMenu";
 import {
@@ -214,12 +216,25 @@ function Sidebar({
 function SidebarLaboratorySelector() {
   const {
     canSelectLaboratory,
+    federationTrusts,
+    federationTrustsLoading,
     laboratories,
     laboratoriesLoading,
-    selectedLaboratoryId,
     selectedLaboratoryName,
-    setSelectedLaboratoryId,
+    selectedScopeValue,
+    setSelectedScopeValue,
   } = useLaboratorySelection();
+  const localOptions = laboratories.map((laboratory) => ({
+    label: `本地 · ${laboratory.name}`,
+    value: `local:${laboratory.laboratory_id}`,
+  }));
+  const remoteOptions = federationTrusts.map((trust) => ({
+    label: `联邦 · ${federationTrustLabel(trust)}`,
+    value: laboratoryScopeKey(
+      remoteLaboratoryScope(trust.remote_node_id, trust.remote_laboratory_id),
+    ),
+  }));
+  const scopeOptions = [...localOptions, ...remoteOptions];
 
   if (!canSelectLaboratory && !selectedLaboratoryName) {
     return null;
@@ -233,15 +248,14 @@ function SidebarLaboratorySelector() {
       </div>
       {canSelectLaboratory ? (
         <Select
-          disabled={laboratoriesLoading || laboratories.length === 0}
-          label="选择实验室"
-          options={laboratories.map((laboratory) => ({
-            label: laboratory.name,
-            value: laboratory.laboratory_id,
-          }))}
+          disabled={
+            (laboratoriesLoading || federationTrustsLoading) && scopeOptions.length === 0
+          }
+          label="选择实验室范围"
+          options={scopeOptions}
           placeholder="选择实验室"
-          value={selectedLaboratoryId || undefined}
-          onValueChange={setSelectedLaboratoryId}
+          value={selectedScopeValue || undefined}
+          onValueChange={setSelectedScopeValue}
         />
       ) : (
         <div className="sidebar-laboratory-static" title={selectedLaboratoryName}>

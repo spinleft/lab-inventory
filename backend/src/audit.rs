@@ -39,6 +39,8 @@ pub enum AuditResource {
     InventoryItem,
     Attachment,
     Unit,
+    FederationTrust,
+    FederationGuestLink,
 }
 
 impl AuditResource {
@@ -53,6 +55,8 @@ impl AuditResource {
             Self::InventoryItem => "inventory_item",
             Self::Attachment => "attachment",
             Self::Unit => "unit",
+            Self::FederationTrust => "federation_trust",
+            Self::FederationGuestLink => "federation_guest_link",
         }
     }
 }

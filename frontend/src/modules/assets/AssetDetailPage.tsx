@@ -3,6 +3,7 @@ import { ArrowLeft, Pencil, Plus } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../app/auth-context";
+import { useLaboratorySelection } from "../../app/laboratory-selection-context";
 import { useBackendConfig } from "../../shared/api/backendConfig";
 import { formatDate } from "../../shared/lib/date";
 import { Badge } from "../../shared/ui/Badge";
@@ -40,25 +41,30 @@ const EMPTY_UNITS: Unit[] = [];
 export function AssetDetailPage() {
   const { currentUser } = useAuth();
   const { apiBaseUrl } = useBackendConfig();
+  const { isRemoteLaboratory, selectedDataScope } = useLaboratorySelection();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { assetId = "" } = useParams();
   const [editing, setEditing] = useState(false);
   const [creatingInventory, setCreatingInventory] = useState(false);
-  const assetQuery = useAsset({ assetId, includeParameters: true });
+  const assetQuery = useAsset({ assetId, includeParameters: true, scope: selectedDataScope });
   const asset = assetQuery.data;
-  const canManage = canManageLaboratoryAssets(currentUser, asset?.laboratory_id);
+  const canManage =
+    !isRemoteLaboratory && canManageLaboratoryAssets(currentUser, asset?.laboratory_id);
   const categoriesQuery = useAssetCategories({
     enabled: Boolean(asset?.laboratory_id),
     laboratoryId: asset?.laboratory_id ?? "",
+    scope: selectedDataScope,
   });
   const locationsQuery = useLocations({
     enabled: Boolean(asset?.laboratory_id),
     laboratoryId: asset?.laboratory_id ?? "",
+    scope: selectedDataScope,
   });
   const parametersQuery = useAssetParameters({
     enabled: Boolean(asset?.laboratory_id),
     laboratoryId: asset?.laboratory_id ?? "",
+    scope: selectedDataScope,
   });
   const unitsQuery = useUnits();
   const createAsset = useCreateAsset();
@@ -237,11 +243,13 @@ export function AssetDetailPage() {
         </div>
       </section>
 
-      <AttachmentSection
-        canManage={canManage}
-        laboratoryId={asset.laboratory_id}
-        target={{ id: asset.asset_id, type: "asset" }}
-      />
+      {selectedDataScope.kind === "local" ? (
+        <AttachmentSection
+          canManage={canManage}
+          laboratoryId={asset.laboratory_id}
+          target={{ id: asset.asset_id, type: "asset" }}
+        />
+      ) : null}
 
       <section className="panel">
         <div className="panel-header">

@@ -3,6 +3,14 @@ import { z } from "zod";
 import { useBackendConfig } from "../../shared/api/backendConfig";
 import { createApiClient } from "../../shared/api/httpClient";
 import { type AttachmentClaim } from "../attachments/api";
+import {
+  type LaboratoryDataScope,
+  assetDetailPath,
+  laboratoryCollectionPath,
+  laboratoryDetailScopeCacheKey,
+  laboratoryScopeCacheKey,
+  localLaboratoryScope,
+} from "../federation/scope";
 
 export const assetTrackingModeSchema = z.enum(["serialized", "quantity"]);
 export const assetParameterDataTypeSchema = z.enum([
@@ -167,10 +175,14 @@ export type AssetPayload = {
 };
 
 export const assetQueryKeys = {
-  detail: (apiBaseUrl: string, assetId: string, includeParameters: boolean) =>
-    ["assets", apiBaseUrl, "detail", assetId, includeParameters] as const,
-  list: (apiBaseUrl: string, laboratoryId: string, query: AssetQuery) =>
-    ["assets", apiBaseUrl, "list", laboratoryId, query] as const,
+  detail: (
+    apiBaseUrl: string,
+    scopeKey: string,
+    assetId: string,
+    includeParameters: boolean,
+  ) => ["assets", apiBaseUrl, "detail", scopeKey, assetId, includeParameters] as const,
+  list: (apiBaseUrl: string, scopeKey: string, query: AssetQuery) =>
+    ["assets", apiBaseUrl, "list", scopeKey, query] as const,
   root: (apiBaseUrl: string) => ["assets", apiBaseUrl] as const,
 };
 
@@ -178,20 +190,23 @@ export function useAssets({
   enabled = true,
   laboratoryId,
   query,
+  scope,
 }: {
   enabled?: boolean;
   laboratoryId: string;
   query: AssetQuery;
+  scope?: LaboratoryDataScope;
 }) {
   const { apiBaseUrl } = useBackendConfig();
+  const dataScope = scope ?? localLaboratoryScope(laboratoryId);
 
   return useQuery({
     enabled: enabled && Boolean(laboratoryId),
-    queryKey: assetQueryKeys.list(apiBaseUrl, laboratoryId, query),
+    queryKey: assetQueryKeys.list(apiBaseUrl, laboratoryScopeCacheKey(dataScope), query),
     queryFn: async () => {
       const client = createApiClient(apiBaseUrl);
       return assetsResponseSchema.parse(
-        await client.get(`/laboratories/${laboratoryId}/assets`, query),
+        await client.get(laboratoryCollectionPath(dataScope, "assets"), query),
       );
     },
   });
@@ -201,21 +216,24 @@ export function useAsset({
   assetId,
   enabled = true,
   includeParameters = true,
+  scope,
 }: {
   assetId: string;
   enabled?: boolean;
   includeParameters?: boolean;
+  scope?: LaboratoryDataScope;
 }) {
   const { apiBaseUrl } = useBackendConfig();
+  const scopeKey = laboratoryDetailScopeCacheKey(scope);
 
   return useQuery({
     enabled: enabled && Boolean(assetId),
-    queryKey: assetQueryKeys.detail(apiBaseUrl, assetId, includeParameters),
+    queryKey: assetQueryKeys.detail(apiBaseUrl, scopeKey, assetId, includeParameters),
     queryFn: async () => {
       const client = createApiClient(apiBaseUrl);
       return assetSchema.parse(
         await client.get(
-          `/assets/${assetId}`,
+          assetDetailPath(scope, assetId),
           includeParameters ? { include: "parameters" } : undefined,
         ),
       );

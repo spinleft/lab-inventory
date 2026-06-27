@@ -189,6 +189,109 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
+    pub async fn post_federation_pairing_code(&self, laboratory_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .post(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/federation/pairing-codes",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn post_federation_trust<Body>(
+        &self,
+        laboratory_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/federation/trusts",
+                &self.address
+            ))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_federation_trusts(&self, laboratory_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/federation/trusts",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_federation_guest_links(&self, laboratory_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/federation/guest-links",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn merge_federation_guest_link<Body>(
+        &self,
+        laboratory_id: Uuid,
+        link_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/federation/guest-links/{link_id}/merge",
+                &self.address
+            ))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_federation_assets(
+        &self,
+        remote_node_id: Uuid,
+        remote_laboratory_id: Uuid,
+    ) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}/assets",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_federation_attachment(
+        &self,
+        remote_node_id: Uuid,
+        remote_laboratory_id: Uuid,
+        attachment_id: Uuid,
+    ) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}/attachments/{attachment_id}",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
     pub async fn post_asset_category<Body>(
         &self,
         laboratory_id: Uuid,

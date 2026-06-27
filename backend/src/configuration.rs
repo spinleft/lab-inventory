@@ -9,6 +9,7 @@ pub struct Settings {
     pub database: DatabaseSettings,
     pub application: ApplicationSettings,
     pub attachment_storage: AttachmentStorageSettings,
+    pub federation: FederationSettings,
     pub redis_uri: Secret<String>,
 }
 
@@ -43,6 +44,17 @@ pub struct AttachmentStorageSettings {
     pub max_file_size_bytes: u64,
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub upload_token_ttl_minutes: i64,
+}
+
+#[derive(serde::Deserialize, Clone)]
+pub struct FederationSettings {
+    pub enabled: bool,
+    pub public_base_url: String,
+    pub require_https: bool,
+    pub allow_insecure_private_network: bool,
+    #[serde(deserialize_with = "deserialize_number_from_string")]
+    pub request_ttl_seconds: i64,
+    pub allowed_remote_hosts: Vec<String>,
 }
 
 impl DatabaseSettings {

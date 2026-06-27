@@ -2,6 +2,7 @@ import { ArrowLeft, PackageSearch, Pencil } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../app/auth-context";
+import { useLaboratorySelection } from "../../app/laboratory-selection-context";
 import { formatDate } from "../../shared/lib/date";
 import { Badge } from "../../shared/ui/Badge";
 import { Button } from "../../shared/ui/Button";
@@ -45,28 +46,34 @@ const EMPTY_UNITS: Unit[] = [];
 
 export function InventoryDetailPage() {
   const { currentUser } = useAuth();
+  const { isRemoteLaboratory, selectedDataScope } = useLaboratorySelection();
   const navigate = useNavigate();
   const { inventoryItemId = "" } = useParams();
   const [editing, setEditing] = useState(false);
-  const inventoryQuery = useInventoryItem({ inventoryItemId });
+  const inventoryQuery = useInventoryItem({ inventoryItemId, scope: selectedDataScope });
   const item = inventoryQuery.data;
-  const canManage = canManageLaboratoryAssets(currentUser, item?.laboratory_id);
+  const canManage =
+    !isRemoteLaboratory && canManageLaboratoryAssets(currentUser, item?.laboratory_id);
   const assetQuery = useAsset({
     assetId: item?.asset_id ?? "",
     enabled: Boolean(item?.asset_id),
     includeParameters: true,
+    scope: selectedDataScope,
   });
   const categoriesQuery = useAssetCategories({
     enabled: Boolean(item?.laboratory_id),
     laboratoryId: item?.laboratory_id ?? "",
+    scope: selectedDataScope,
   });
   const locationsQuery = useLocations({
     enabled: Boolean(item?.laboratory_id),
     laboratoryId: item?.laboratory_id ?? "",
+    scope: selectedDataScope,
   });
   const parametersQuery = useAssetParameters({
     enabled: Boolean(item?.laboratory_id),
     laboratoryId: item?.laboratory_id ?? "",
+    scope: selectedDataScope,
   });
   const unitsQuery = useUnits();
   const createInventoryItems = useCreateInventoryItems();
@@ -203,11 +210,13 @@ export function InventoryDetailPage() {
         </div>
       </section>
 
-      <AttachmentSection
-        canManage={canManage}
-        laboratoryId={item.laboratory_id}
-        target={{ id: item.inventory_item_id, type: "inventory-item" }}
-      />
+      {selectedDataScope.kind === "local" ? (
+        <AttachmentSection
+          canManage={canManage}
+          laboratoryId={item.laboratory_id}
+          target={{ id: item.inventory_item_id, type: "inventory-item" }}
+        />
+      ) : null}
 
       <section className="panel">
         <div className="panel-header">

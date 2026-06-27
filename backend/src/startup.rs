@@ -1,21 +1,23 @@
 use crate::attachment_storage::AttachmentStorage;
 use crate::authentication::reject_anonymous_users;
-use crate::configuration::{ApplicationSettings, DatabaseSettings, Settings};
+use crate::configuration::{ApplicationSettings, DatabaseSettings, FederationSettings, Settings};
 use crate::routes::{
-    batch_delete_inventory_items, batch_update_inventory_items, change_password, create_asset,
-    create_asset_attachment, create_asset_category, create_asset_parameter,
+    accept_pairing, batch_delete_inventory_items, batch_update_inventory_items, change_password,
+    create_asset, create_asset_attachment, create_asset_category, create_asset_parameter,
     create_inventory_item_attachment, create_inventory_items, create_laboratory, create_location,
-    create_unit, create_user, delete_asset, delete_asset_category, delete_asset_parameter,
-    delete_attachment, delete_attachment_upload, delete_inventory_item, delete_laboratory,
-    delete_location, delete_unit, delete_user, download_attachment, get_asset, get_asset_category,
-    get_asset_parameter, get_attachment, get_inventory_item, get_laboratory, get_location,
-    get_unit, get_user, health_check, list_asset_attachments, list_asset_categories,
-    list_asset_parameters, list_assets, list_audit_logs, list_inventory_item_attachments,
-    list_inventory_items, list_laboratories, list_laboratory_attachments, list_locations,
-    list_units, list_users, login, logout, me, merge_inventory_items, split_inventory_item,
-    update_asset, update_asset_category, update_asset_parameter, update_attachment,
-    update_inventory_item, update_laboratory, update_location, update_unit, update_user,
-    upload_attachment,
+    create_pairing_code, create_trust, create_unit, create_user, delete_asset,
+    delete_asset_category, delete_asset_parameter, delete_attachment, delete_attachment_upload,
+    delete_inventory_item, delete_laboratory, delete_location, delete_unit, delete_user,
+    download_attachment, get_asset, get_asset_category, get_asset_parameter, get_attachment,
+    get_inventory_item, get_laboratory, get_location, get_unit, get_user, health_check,
+    inbound_get, initialize_local_node, list_asset_attachments, list_asset_categories,
+    list_asset_parameters, list_assets, list_audit_logs, list_guest_links,
+    list_inventory_item_attachments, list_inventory_items, list_laboratories,
+    list_laboratory_attachments, list_locations, list_trusts, list_units, list_users, login,
+    logout, me, merge_guest_link, merge_inventory_items, proxy_get, revoke_trust,
+    split_inventory_item, update_asset, update_asset_category, update_asset_parameter,
+    update_attachment, update_inventory_item, update_laboratory, update_location, update_unit,
+    update_user, upload_attachment,
 };
 use actix_cors::Cors;
 use actix_session::SessionMiddleware;
@@ -54,6 +56,7 @@ impl Application {
             connection_pool,
             configuration.application,
             configuration.attachment_storage,
+            configuration.federation,
             configuration.redis_uri,
         )
         .await?;
@@ -79,10 +82,14 @@ async fn run(
     db_pool: PgPool,
     application: ApplicationSettings,
     attachment_storage: crate::configuration::AttachmentStorageSettings,
+    federation: FederationSettings,
     redis_uri: Secret<String>,
 ) -> Result<Server, anyhow::Error> {
+    initialize_local_node(&db_pool, &federation).await?;
     let db_pool = Data::new(db_pool);
     let attachment_storage = Data::new(AttachmentStorage::new(attachment_storage)?);
+    let federation = Data::new(federation);
+    let federation_client = Data::new(reqwest::Client::builder().tls_info(true).build()?);
     let secret_key = Key::derive_from(application.hmac_secret.expose_secret().as_bytes());
     let redis_store = RedisSessionStore::new(redis_uri.expose_secret()).await?;
 
@@ -90,6 +97,8 @@ async fn run(
         listener,
         db_pool,
         attachment_storage,
+        federation,
+        federation_client,
         secret_key,
         application.cookie_secure,
         application.cors_allowed_origins,
@@ -103,6 +112,8 @@ fn build_server(
     listener: TcpListener,
     db_pool: Data<PgPool>,
     attachment_storage: Data<AttachmentStorage>,
+    federation: Data<FederationSettings>,
+    federation_client: Data<reqwest::Client>,
     secret_key: Key,
     cookie_secure: bool,
     cors_allowed_origins: Vec<String>,
@@ -120,6 +131,8 @@ fn build_server(
             .configure(api_routes)
             .app_data(db_pool.clone())
             .app_data(attachment_storage.clone())
+            .app_data(federation.clone())
+            .app_data(federation_client.clone())
     })
     .listen(listener)?
     .run();
@@ -163,6 +176,18 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
             .route("/health_check", web::get().to(health_check))
             .route("/auth/login", web::post().to(login))
             .route("/auth/logout", web::post().to(logout))
+            .route(
+                "/federation/inbound/pairing/accept",
+                web::post().to(accept_pairing),
+            )
+            .route(
+                "/federation/inbound/laboratories/{laboratory_id}",
+                web::get().to(inbound_get),
+            )
+            .route(
+                "/federation/inbound/laboratories/{laboratory_id}/{tail:.*}",
+                web::get().to(inbound_get),
+            )
             .service(
                 web::scope("")
                     .wrap(from_fn(reject_anonymous_users))
@@ -171,8 +196,40 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                     .route("/audit-logs", web::get().to(list_audit_logs))
                     .route("/units", web::get().to(list_units))
                     .route("/units", web::post().to(create_unit))
+                    .route(
+                        "/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}",
+                        web::get().to(proxy_get),
+                    )
+                    .route(
+                        "/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}/{tail:.*}",
+                        web::get().to(proxy_get),
+                    )
                     .route("/laboratories", web::post().to(create_laboratory))
                     .route("/laboratories", web::get().to(list_laboratories))
+                    .route(
+                        "/laboratories/{laboratory_id}/federation/pairing-codes",
+                        web::post().to(create_pairing_code),
+                    )
+                    .route(
+                        "/laboratories/{laboratory_id}/federation/trusts",
+                        web::post().to(create_trust),
+                    )
+                    .route(
+                        "/laboratories/{laboratory_id}/federation/trusts",
+                        web::get().to(list_trusts),
+                    )
+                    .route(
+                        "/laboratories/{laboratory_id}/federation/trusts/{trust_id}",
+                        web::delete().to(revoke_trust),
+                    )
+                    .route(
+                        "/laboratories/{laboratory_id}/federation/guest-links",
+                        web::get().to(list_guest_links),
+                    )
+                    .route(
+                        "/laboratories/{laboratory_id}/federation/guest-links/{link_id}/merge",
+                        web::post().to(merge_guest_link),
+                    )
                     .route(
                         "/laboratories/{laboratory_id}/asset-categories",
                         web::get().to(list_asset_categories),
