@@ -2,7 +2,7 @@ use crate::helpers::{TestUser, spawn_app};
 use uuid::Uuid;
 
 #[tokio::test]
-async fn create_laboratory_allows_super_admin_and_lab_admin_users() {
+async fn create_laboratory_allows_only_server_admins() {
     let app = spawn_app().await;
     app.test_user.login(&app).await;
 
@@ -23,6 +23,9 @@ async fn create_laboratory_allows_super_admin_and_lab_admin_users() {
     assert_eq!(body["description"], "Wet lab");
     assert_eq!(body["contact"], "chem@example.com");
 
+    // Creating a laboratory brings a new scope into existence, so it stays with
+    // the server admins: a laboratory-scoped admin only exists once its own
+    // laboratory does.
     let laboratory_id = app.create_laboratory("Lab Admin Source Lab").await;
     let lab_admin = TestUser::generate_with_user_type("lab_admin", Some(laboratory_id));
     app.store_user(&lab_admin).await;
@@ -34,7 +37,7 @@ async fn create_laboratory_allows_super_admin_and_lab_admin_users() {
             "address": "Building B"
         }))
         .await;
-    assert_eq!(response.status().as_u16(), 201);
+    assert_eq!(response.status().as_u16(), 403);
 }
 
 #[tokio::test]

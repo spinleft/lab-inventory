@@ -376,7 +376,7 @@ struct AttachmentPublicRow {
     mime_type: Option<String>,
     file_size_bytes: i64,
     sha256_hex: String,
-    visibility: String,
+    is_public: bool,
     uploaded_by_user_id: Option<Uuid>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -1117,8 +1117,7 @@ async fn list_laboratory_attachments(
         SELECT COUNT(*)
         FROM asset_attachment_assignments AS assignments
         WHERE assignments.laboratory_id = $1
-          AND assignments.deleted_at IS NULL
-          AND assignments.visibility = 'public'
+          AND assignments.is_public
         "#,
     )
     .bind(laboratory_id)
@@ -1126,7 +1125,7 @@ async fn list_laboratory_attachments(
     .await
     .map_err(|e| FederationError::UnexpectedError(e.into()))?;
     let items = sqlx::query_as::<_, AttachmentPublicRow>(&attachment_select(
-        "WHERE assignments.laboratory_id = $1 AND assignments.deleted_at IS NULL AND assignments.visibility = 'public' ORDER BY assignments.created_at DESC, assignments.attachment_id LIMIT $2 OFFSET $3",
+        "WHERE assignments.laboratory_id = $1 AND assignments.is_public ORDER BY assignments.created_at DESC, assignments.attachment_id LIMIT $2 OFFSET $3",
     ))
     .bind(laboratory_id)
     .bind(limit)
@@ -1148,7 +1147,7 @@ async fn list_asset_attachments(
     asset_id: Uuid,
 ) -> Result<Vec<AttachmentPublicRow>, FederationError> {
     sqlx::query_as::<_, AttachmentPublicRow>(&attachment_select(
-        "WHERE assignments.laboratory_id = $1 AND assignments.asset_id = $2 AND assignments.deleted_at IS NULL AND assignments.visibility = 'public' ORDER BY assignments.created_at DESC, assignments.attachment_id",
+        "WHERE assignments.laboratory_id = $1 AND assignments.asset_id = $2 AND assignments.is_public ORDER BY assignments.created_at DESC, assignments.attachment_id",
     ))
     .bind(laboratory_id)
     .bind(asset_id)
@@ -1163,7 +1162,7 @@ async fn list_inventory_item_attachments(
     inventory_item_id: Uuid,
 ) -> Result<Vec<AttachmentPublicRow>, FederationError> {
     sqlx::query_as::<_, AttachmentPublicRow>(&attachment_select(
-        "WHERE assignments.laboratory_id = $1 AND assignments.inventory_item_id = $2 AND assignments.deleted_at IS NULL AND assignments.visibility = 'public' ORDER BY assignments.created_at DESC, assignments.attachment_id",
+        "WHERE assignments.laboratory_id = $1 AND assignments.inventory_item_id = $2 AND assignments.is_public ORDER BY assignments.created_at DESC, assignments.attachment_id",
     ))
     .bind(laboratory_id)
     .bind(inventory_item_id)
@@ -1178,7 +1177,7 @@ async fn fetch_attachment(
     attachment_id: Uuid,
 ) -> Result<AttachmentPublicRow, FederationError> {
     sqlx::query_as::<_, AttachmentPublicRow>(&attachment_select(
-        "WHERE assignments.laboratory_id = $1 AND assignments.attachment_id = $2 AND assignments.deleted_at IS NULL AND assignments.visibility = 'public'",
+        "WHERE assignments.laboratory_id = $1 AND assignments.attachment_id = $2 AND assignments.is_public",
     ))
     .bind(laboratory_id)
     .bind(attachment_id)
@@ -1201,8 +1200,7 @@ async fn download_attachment(
         JOIN files ON files.file_id = assignments.file_id
         WHERE assignments.laboratory_id = $1
           AND assignments.attachment_id = $2
-          AND assignments.deleted_at IS NULL
-          AND assignments.visibility = 'public'
+          AND assignments.is_public
         "#,
     )
     .bind(laboratory_id)
@@ -1248,7 +1246,7 @@ fn attachment_select(suffix: &str) -> String {
             files.mime_type,
             files.file_size_bytes,
             files.sha256_hex,
-            assignments.visibility,
+            assignments.is_public,
             files.uploaded_by_user_id,
             assignments.created_at,
             assignments.updated_at

@@ -12,6 +12,8 @@ pub enum GetAttachmentError {
     #[error("{0}")]
     ValidationError(String),
     #[error("{0}")]
+    Forbidden(String),
+    #[error("{0}")]
     NotFound(String),
     #[error("{0}")]
     ConflictError(String),
@@ -29,6 +31,7 @@ impl ResponseError for GetAttachmentError {
     fn status_code(&self) -> StatusCode {
         match self {
             GetAttachmentError::ValidationError(_) => StatusCode::BAD_REQUEST,
+            GetAttachmentError::Forbidden(_) => StatusCode::FORBIDDEN,
             GetAttachmentError::NotFound(_) => StatusCode::NOT_FOUND,
             GetAttachmentError::ConflictError(_) => StatusCode::CONFLICT,
             GetAttachmentError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -55,7 +58,7 @@ pub async fn get_attachment(
     )
     .await?
     {
-        return Err(GetAttachmentError::ValidationError(
+        return Err(GetAttachmentError::Forbidden(
             "You do not have permission to view this attachment".into(),
         ));
     }

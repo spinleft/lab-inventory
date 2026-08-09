@@ -1,8 +1,8 @@
-﻿use super::model::{
-    AssetDatabaseError, DeletedAttachmentRow, delete_asset_attachments,
-    delete_asset_rollback_details, fetch_asset_for_update,
-    fetch_inventory_items_for_asset_for_update, fetch_parameter_values_for_asset_for_update,
-    map_database_error,
+﻿use super::model::{DeletedAttachmentRow, delete_asset_rollback_details};
+use super::queries::{
+    AssetDatabaseError, delete_asset_attachments, delete_asset_from_database,
+    fetch_asset_for_update, fetch_inventory_items_for_asset_for_update,
+    fetch_parameter_values_for_asset_for_update,
 };
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
@@ -12,7 +12,7 @@ use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(thiserror::Error)]
@@ -129,29 +129,6 @@ async fn delete_storage_objects(
             FileStorageKey::parse(attachment.storage_key.clone()).map_err(anyhow::Error::msg)?;
         storage.delete(&storage_key).await?;
     }
-
-    Ok(())
-}
-
-#[tracing::instrument(
-    name = "Deleting asset from the database",
-    skip(transaction),
-    fields(asset_id=%asset_id)
-)]
-async fn delete_asset_from_database(
-    transaction: &mut Transaction<'_, Postgres>,
-    asset_id: Uuid,
-) -> Result<(), DeleteAssetError> {
-    sqlx::query!(
-        r#"
-        DELETE FROM assets
-        WHERE asset_id = $1
-        "#,
-        asset_id,
-    )
-    .execute(transaction.as_mut())
-    .await
-    .map_err(|e| DeleteAssetError::from(map_database_error(e)))?;
 
     Ok(())
 }

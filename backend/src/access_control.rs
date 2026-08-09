@@ -281,9 +281,7 @@ impl Actor {
         .fetch_optional(pool)
         .await
         .context("Failed to fetch location")?
-        .map(|location| {
-            self.is_system_admin() || self.laboratory_id == Some(location.laboratory_id)
-        })
+        .map(|location| self.can_query_laboratory_resource(&location.laboratory_id))
         .unwrap_or(false))
     }
 
@@ -338,7 +336,7 @@ impl Actor {
         .fetch_optional(pool)
         .await
         .context("Failed to fetch asset category")?
-        .map(|unit| self.is_system_admin() || self.laboratory_id == Some(unit.laboratory_id))
+        .map(|category| self.can_query_laboratory_resource(&category.laboratory_id))
         .unwrap_or(false))
     }
 
@@ -393,9 +391,7 @@ impl Actor {
         .fetch_optional(pool)
         .await
         .context("Failed to fetch asset parameter")?
-        .map(|parameter| {
-            self.is_system_admin() || self.laboratory_id == Some(parameter.laboratory_id)
-        })
+        .map(|parameter| self.can_query_laboratory_resource(&parameter.laboratory_id))
         .unwrap_or(false))
     }
 
@@ -506,6 +502,11 @@ impl Actor {
         .unwrap_or(false))
     }
 
+    /// Answers only the ownership question: may this actor delete the upload?
+    ///
+    /// Like [`Actor::can_assign_file_upload`], a missing upload is reported as
+    /// permitted so the deleting transaction — which holds the row lock — answers
+    /// with a specific 404 instead of it being flattened into a 403.
     pub async fn can_manage_file_upload(
         &self,
         pool: &PgPool,
@@ -514,14 +515,12 @@ impl Actor {
         #[derive(sqlx::FromRow)]
         struct FileUploadRow {
             uploaded_by_user_id: UserId,
-            consumed_at: Option<DateTime<Utc>>,
-            expires_at: DateTime<Utc>,
         }
 
         let file_upload = sqlx::query_as!(
             FileUploadRow,
             r#"
-            SELECT uploaded_by_user_id, consumed_at, expires_at
+            SELECT uploaded_by_user_id
             FROM file_uploads
             WHERE upload_id = $1
             "#,
@@ -531,10 +530,11 @@ impl Actor {
         .await
         .context("Failed to fetch file upload")?;
 
-        if let Some(file_upload) = file_upload {
-            Ok(self.is_system_admin() || self.user_id == file_upload.uploaded_by_user_id)
-        } else {
-            Ok(false)
+        match file_upload {
+            Some(file_upload) => {
+                Ok(self.is_system_admin() || self.user_id == file_upload.uploaded_by_user_id)
+            }
+            None => Ok(true),
         }
     }
 
@@ -643,7 +643,10 @@ impl Actor {
                     || (self.laboratory_id == Some(assignment.laboratory_id) && !self.is_guest()))
             }
         } else {
-            Ok(false)
+            // A missing attachment is a 404 for actors who can see every
+            // laboratory, and stays a 403 for everyone else so that they cannot
+            // probe for attachment ids they are not allowed to know about.
+            Ok(self.is_system_admin())
         }
     }
 
@@ -708,9 +711,12 @@ pub async fn validate_permission(
             ResourceType::Laboratory => match action {
                 Action::Create(_) => Ok(actor.is_system_admin()),
                 Action::Delete(_) => Ok(actor.is_system_admin()),
-                Action::Read(laboratory_id) => Ok(!(actor.is_guest()
-                    && actor.laboratory_id.map(Uuid::from) != Some(laboratory_id))),
-                Action::Browse(_) => Ok(!actor.is_guest()),
+                // A laboratory is administered, not browsed: only admins reach it,
+                // and a laboratory-scoped admin is confined to its own.
+                Action::Read(laboratory_id) => Ok(actor.is_system_admin()
+                    || (actor.is_lab_admin()
+                        && actor.laboratory_id.map(Uuid::from) == Some(laboratory_id))),
+                Action::Browse(_) => Ok(actor.can_browse_laboratories()),
                 Action::Update(laboratory_id) => Ok(actor.is_system_admin()
                     || (actor.is_lab_admin()
                         && actor.laboratory_id.map(Uuid::from) == Some(laboratory_id))),
@@ -748,7 +754,7 @@ pub async fn validate_permission(
                     Ok(actor.can_view_location(&pool, location_id.into()).await?)
                 }
                 Action::Browse(laboratory_id) => {
-                    Ok(actor.can_browse_laboratory_resource(laboratory_id.into()))
+                    Ok(actor.can_query_laboratory_resource(&laboratory_id.into()))
                 }
                 Action::Update(location_id) => {
                     Ok(actor.can_manage_location(&pool, location_id.into()).await?)
@@ -806,7 +812,7 @@ pub async fn validate_permission(
                     .can_view_asset_category(&pool, asset_category_id.into())
                     .await?),
                 Action::Browse(laboratory_id) => {
-                    Ok(actor.can_browse_laboratory_resource(laboratory_id.into()))
+                    Ok(actor.can_query_laboratory_resource(&laboratory_id.into()))
                 }
                 Action::Update(asset_category_id) => Ok(actor
                     .can_manage_asset_category(&pool, asset_category_id.into())
@@ -824,7 +830,7 @@ pub async fn validate_permission(
                     .can_view_asset_parameter(&pool, asset_parameter_id.into())
                     .await?),
                 Action::Browse(laboratory_id) => {
-                    Ok(actor.can_browse_laboratory_resource(laboratory_id.into()))
+                    Ok(actor.can_query_laboratory_resource(&laboratory_id.into()))
                 }
                 Action::Update(asset_parameter_id) => Ok(actor
                     .can_manage_asset_parameter(&pool, asset_parameter_id.into())
@@ -857,8 +863,10 @@ pub async fn validate_permission(
                 Action::Read(attachment_id) => Ok(actor
                     .can_view_attachment_assignment(&pool, attachment_id)
                     .await?),
+                // Attachments follow their asset: readable across laboratories,
+                // with the internal ones filtered out by `BrowseInternal`.
                 Action::Browse(laboratory_id) => {
-                    Ok(actor.can_browse_laboratory_resource(laboratory_id.into()))
+                    Ok(actor.can_query_laboratory_resource(&laboratory_id.into()))
                 }
                 Action::BrowseInternal(laboratory_id) => {
                     Ok(actor.can_browse_laboratory_internal_resource(laboratory_id.into()))

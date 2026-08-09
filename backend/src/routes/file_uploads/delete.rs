@@ -72,6 +72,13 @@ pub async fn delete_file_upload(
     let upload = fetch_file_upload_for_update(&mut transaction, upload_id)
         .await?
         .ok_or_else(|| DeleteFileUploadError::NotFound("File upload not found".into()))?;
+    // Once consumed, the stored file backs a real attachment: deleting the
+    // upload here would take the attachment's file with it.
+    if upload.consumed_at.is_some() {
+        return Err(DeleteFileUploadError::ConflictError(
+            "File upload has already been assigned to an attachment".into(),
+        ));
+    }
     let storage_key = FileStorageKey::parse(upload.storage_key.clone())
         .map_err(|e| DeleteFileUploadError::UnexpectedError(anyhow!("{e}")))?;
 

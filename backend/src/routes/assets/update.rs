@@ -1,9 +1,12 @@
 ﻿use super::model::{
-    AssetDatabaseError, AssetParameterValueInput, AssetResponse, apply_asset_parameter_updates,
-    convert_inventory_items_to_unit, fetch_asset_for_update,
-    fetch_inventory_items_for_asset_for_update, fetch_parameter_values_for_asset_for_update,
-    map_database_error, update_asset_rollback_details, validate_category,
-    validate_required_parameters,
+    AssetParameterValueInput, AssetResponse, AssetRow, update_asset_rollback_details,
+};
+use super::queries::{
+    AssetDatabaseError, fetch_asset_for_update, fetch_inventory_items_for_asset_for_update,
+    fetch_parameter_values_for_asset_for_update, update_asset_in_database, validate_category,
+};
+use super::service::{
+    apply_asset_parameter_updates, convert_inventory_items_to_unit, validate_required_parameters,
 };
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
@@ -17,7 +20,7 @@ use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::{Context, anyhow};
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -286,7 +289,7 @@ fn parse_nullable_text(value: Option<Option<String>>) -> NullableUpdate<String> 
 
 fn resolve_category_id(
     update_asset: &UpdateAsset,
-    existing: &super::model::AssetRow,
+    existing: &AssetRow,
 ) -> Result<Option<Uuid>, UpdateAssetError> {
     let current = existing
         .category_id
@@ -303,7 +306,7 @@ fn resolve_category_id(
 
 fn resolve_tracking_mode(
     update_asset: &UpdateAsset,
-    existing: &super::model::AssetRow,
+    existing: &AssetRow,
 ) -> Result<AssetTrackingMode, UpdateAssetError> {
     let current = AssetTrackingMode::parse(&existing.tracking_mode)
         .map_err(UpdateAssetError::ValidationError)?;
@@ -315,54 +318,4 @@ fn resolve_tracking_mode(
     }
 
     Ok(tracking_mode)
-}
-
-#[allow(clippy::too_many_arguments)]
-#[tracing::instrument(
-    name = "Updating asset in the database",
-    skip(transaction, name, model, manufacturer, public_notes, internal_notes),
-    fields(asset_id=%asset_id)
-)]
-async fn update_asset_in_database(
-    transaction: &mut Transaction<'_, Postgres>,
-    asset_id: Uuid,
-    category_id: Option<Uuid>,
-    tracking_mode: AssetTrackingMode,
-    name: &str,
-    model: Option<&str>,
-    manufacturer: Option<&str>,
-    default_unit_id: Uuid,
-    public_notes: Option<&str>,
-    internal_notes: Option<&str>,
-) -> Result<(), UpdateAssetError> {
-    sqlx::query!(
-        r#"
-        UPDATE assets
-        SET
-            category_id = $2,
-            tracking_mode = $3,
-            name = $4,
-            model = $5,
-            manufacturer = $6,
-            default_unit_id = $7,
-            public_notes = $8,
-            internal_notes = $9,
-            updated_at = now()
-        WHERE asset_id = $1
-        "#,
-        asset_id,
-        category_id,
-        tracking_mode.as_str(),
-        name,
-        model,
-        manufacturer,
-        default_unit_id,
-        public_notes,
-        internal_notes,
-    )
-    .execute(transaction.as_mut())
-    .await
-    .map_err(|e| UpdateAssetError::from(map_database_error(e)))?;
-
-    Ok(())
 }

@@ -1,8 +1,10 @@
-use super::model::{
-    AssetDatabaseError, AssetParameterValueInput, AssetResponse, AssetRow,
-    apply_asset_parameter_updates, create_asset_rollback_details, fetch_asset_for_update,
-    fetch_inventory_items_for_asset_for_update, fetch_parameter_values_for_asset_for_update,
-    insert_inventory_items, map_database_error, validate_category, validate_required_parameters,
+use super::model::{AssetParameterValueInput, AssetResponse, create_asset_rollback_details};
+use super::queries::{
+    AssetDatabaseError, fetch_asset_for_update, fetch_inventory_items_for_asset_for_update,
+    fetch_parameter_values_for_asset_for_update, insert_asset, validate_category,
+};
+use super::service::{
+    apply_asset_parameter_updates, insert_inventory_items, validate_required_parameters,
 };
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
@@ -19,7 +21,7 @@ use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::{Context, anyhow};
 use serde::Deserialize;
 use serde_json::Value;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use std::collections::HashSet;
 use uuid::Uuid;
 
@@ -292,7 +294,7 @@ fn parse_attachments(
         .map_err(CreateAssetError::ValidationError)
 }
 
-/// Creating an asset does not by itself grant the right to claim an upload, so
+/// Creating an asset does not by itself grant the right to assign an upload, so
 /// every referenced upload is authorised individually.
 async fn validate_upload_permissions(
     pool: &PgPool,
@@ -374,63 +376,4 @@ fn empty_to_none(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-}
-
-#[tracing::instrument(
-    name = "Saving new asset in the database",
-    skip(transaction, new_asset),
-    fields(laboratory_id=%laboratory_id)
-)]
-async fn insert_asset(
-    transaction: &mut Transaction<'_, Postgres>,
-    laboratory_id: LaboratoryId,
-    new_asset: &NewAsset,
-) -> Result<AssetRow, CreateAssetError> {
-    sqlx::query_as!(
-        AssetRow,
-        r#"
-        INSERT INTO assets (
-            asset_id,
-            laboratory_id,
-            category_id,
-            tracking_mode,
-            name,
-            model,
-            manufacturer,
-            default_unit_id,
-            public_notes,
-            internal_notes
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        RETURNING
-            asset_id,
-            laboratory_id,
-            category_id,
-            tracking_mode,
-            name,
-            model,
-            manufacturer,
-            default_unit_id,
-            public_notes,
-            internal_notes,
-            created_at,
-            updated_at,
-            0::bigint AS "inventory_item_count!",
-            0::double precision AS "quantity_on_hand!",
-            0::double precision AS "quantity_allocated!"
-        "#,
-        Uuid::new_v4(),
-        *laboratory_id,
-        new_asset.category_id.map(Uuid::from),
-        new_asset.tracking_mode.as_str(),
-        new_asset.name.as_ref(),
-        new_asset.model.as_deref(),
-        new_asset.manufacturer.as_deref(),
-        Uuid::from(new_asset.default_unit_id),
-        new_asset.public_notes.as_deref(),
-        new_asset.internal_notes.as_deref(),
-    )
-    .fetch_one(transaction.as_mut())
-    .await
-    .map_err(|e| map_database_error(e).into())
 }

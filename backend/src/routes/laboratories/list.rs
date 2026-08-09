@@ -1,5 +1,5 @@
 use super::model::{LaboratoryResponse, LaboratoryRow};
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::{Action, ResourceType, get_actor, validate_permission};
 use crate::domain::UserId;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
@@ -35,6 +35,14 @@ pub async fn list_laboratories(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
 ) -> Result<HttpResponse, ListLaboratoriesError> {
+    // An admin that has not been bound to a laboratory yet administers nothing,
+    // which is an empty list rather than a refusal.
+    let actor = get_actor(&pool, actor_user_id)
+        .await?
+        .ok_or_else(|| ListLaboratoriesError::Forbidden("Actor not found.".into()))?;
+    if actor.is_lab_admin() && actor.laboratory_id.is_none() {
+        return Ok(HttpResponse::Ok().json(Vec::<LaboratoryResponse>::new()));
+    }
     if !validate_permission(
         &pool,
         &actor_user_id,

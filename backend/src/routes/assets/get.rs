@@ -1,6 +1,6 @@
-use super::model::{
-    AssetResponse, fetch_asset, fetch_inventory_items_for_asset, fetch_parameter_values_for_asset,
-    parse_include,
+use super::model::{AssetResponse, parse_include};
+use super::queries::{
+    fetch_asset, fetch_inventory_items_for_asset, fetch_parameter_values_for_asset,
 };
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::{AssetId, UserId};

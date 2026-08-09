@@ -232,7 +232,7 @@ async fn seed_remote_attachments(app: &TestApp, laboratory_id: Uuid, asset_id: U
             asset_id,
             &serde_json::json!({
                 "upload_id": upload["upload_id"],
-                "visibility": "internal"
+                "is_public": false
             }),
         )
         .await;

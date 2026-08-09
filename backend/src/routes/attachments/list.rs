@@ -13,6 +13,8 @@ pub enum ListAttachmentError {
     #[error("{0}")]
     ValidationError(String),
     #[error("{0}")]
+    Forbidden(String),
+    #[error("{0}")]
     NotFound(String),
     #[error("{0}")]
     ConflictError(String),
@@ -36,6 +38,7 @@ impl ResponseError for ListAttachmentError {
     fn status_code(&self) -> StatusCode {
         match self {
             ListAttachmentError::ValidationError(_) => StatusCode::BAD_REQUEST,
+            ListAttachmentError::Forbidden(_) => StatusCode::FORBIDDEN,
             ListAttachmentError::NotFound(_) => StatusCode::NOT_FOUND,
             ListAttachmentError::ConflictError(_) => StatusCode::CONFLICT,
             ListAttachmentError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -63,7 +66,7 @@ pub async fn list_asset_attachments(
     )
     .await?
     {
-        return Err(ListAttachmentError::ValidationError(
+        return Err(ListAttachmentError::Forbidden(
             "You do not have permission to view attachments for this asset".into(),
         ));
     }
@@ -74,7 +77,11 @@ pub async fn list_asset_attachments(
         Action::BrowseInternal(laboratory_id.into()),
     )
     .await?;
-    let attachments: Vec<_> = fetch_asset_attachments(&pool, asset_id, include_internal).await?;
+    let attachments: Vec<_> = fetch_asset_attachments(&pool, asset_id, include_internal)
+        .await?
+        .into_iter()
+        .map(AttachmentResponse::from)
+        .collect();
     Ok(HttpResponse::Ok().json(attachments))
 }
 
@@ -98,7 +105,7 @@ pub async fn list_inventory_item_attachments(
     )
     .await?
     {
-        return Err(ListAttachmentError::ValidationError(
+        return Err(ListAttachmentError::Forbidden(
             "You do not have permission to view attachments for this inventory item".into(),
         ));
     }
@@ -109,7 +116,12 @@ pub async fn list_inventory_item_attachments(
         Action::BrowseInternal(laboratory_id.into()),
     )
     .await?;
-    let attachments: Vec<_> = fetch_inventory_item_attachments(&pool, inventory_item_id, include_internal).await?;
+    let attachments: Vec<_> =
+        fetch_inventory_item_attachments(&pool, inventory_item_id, include_internal)
+            .await?
+            .into_iter()
+            .map(AttachmentResponse::from)
+            .collect();
     Ok(HttpResponse::Ok().json(attachments))
 }
 
@@ -133,7 +145,7 @@ pub async fn list_laboratory_attachments(
     )
     .await?
     {
-        return Err(ListAttachmentError::ValidationError(
+        return Err(ListAttachmentError::Forbidden(
             "You do not have permission to view attachments for this laboratory".into(),
         ));
     }
@@ -156,7 +168,8 @@ pub async fn list_laboratory_attachments(
     .await?;
 
     Ok(HttpResponse::Ok().json(PaginatedResponse::new(
-        attachments.into_iter()
+        attachments
+            .into_iter()
             .map(AttachmentResponse::from)
             .collect::<Vec<_>>(),
         &pagination,

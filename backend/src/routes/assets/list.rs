@@ -1,6 +1,5 @@
-use super::model::{
-    AssetResponse, AssetRow, asset_select, fetch_parameter_values_for_assets, parse_include,
-};
+use super::model::{AssetResponse, AssetRow, parse_include};
+use super::queries::{asset_select, fetch_parameter_values_for_assets};
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::{AssetTrackingMode, InventoryStatus, LaboratoryId, UserId};
 use crate::routes::parameter_filters::{

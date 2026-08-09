@@ -19,12 +19,57 @@ static TRACING: LazyLock<()> = LazyLock::new(|| {
     };
 });
 
+/// Drives the reclamation of finished tests' databases.
+///
+/// [`TestApp`] cannot close its pools from `Drop`, which is synchronous, and a
+/// task spawned onto the test's own runtime would never run: `#[tokio::test]`
+/// drops that runtime as soon as the test body returns, which is exactly why the
+/// connections leaked in the first place. This runtime is a process-wide static,
+/// so whatever is handed to it always runs to completion.
+static CLEANUP: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .expect("Failed to build the test cleanup runtime.")
+});
+
 pub struct TestApp {
     pub address: String,
     pub db_pool: PgPool,
     pub test_user: TestUser,
     pub api_client: reqwest::Client,
     pub local_node_id: Option<Uuid>,
+    database_settings: DatabaseSettings,
+}
+
+impl Drop for TestApp {
+    fn drop(&mut self) {
+        let maintenance = DatabaseSettings {
+            database_name: "postgres".to_string(),
+            username: "postgres".to_string(),
+            password: Secret::new("password".to_string()),
+            ..self.database_settings.clone()
+        };
+        let database_name = self.database_settings.database_name.clone();
+        CLEANUP.spawn(async move {
+            let Ok(mut connection) =
+                PgConnection::connect_with(&maintenance.connect_options()).await
+            else {
+                return;
+            };
+            // FORCE terminates whatever the finished test left connected. The
+            // application's own pool is the reason that is needed: it lives on
+            // actix worker threads that outlive the test runtime, so nothing on
+            // this side can ever close it.
+            let _ = connection
+                .execute(
+                    format!(r#"DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE);"#).as_str(),
+                )
+                .await;
+            let _ = connection.close().await;
+        });
+    }
 }
 
 pub async fn spawn_app() -> TestApp {
@@ -63,6 +108,7 @@ pub async fn spawn_app() -> TestApp {
         test_user: TestUser::generate_with_user_type("super_admin", None),
         api_client: client,
         local_node_id: Some(Uuid::new_v4()),
+        database_settings: configuration.database.clone(),
     };
 
     test_app.test_user.store(&test_app.db_pool).await;
@@ -1058,7 +1104,7 @@ impl TestApp {
     }
 }
 
-async fn configure_database(config: &DatabaseSettings) -> PgPool {
+async fn configure_database(config: &DatabaseSettings) {
     let maintenance_settings = DatabaseSettings {
         database_name: "postgres".to_string(),
         username: "postgres".to_string(),
@@ -1072,6 +1118,10 @@ async fn configure_database(config: &DatabaseSettings) -> PgPool {
         .execute(format!(r#"CREATE DATABASE "{}";"#, config.database_name).as_str())
         .await
         .expect("Failed to create database.");
+    connection
+        .close()
+        .await
+        .expect("Failed to close maintenance connection.");
 
     let connection_pool = PgPool::connect_with(config.connect_options())
         .await
@@ -1080,5 +1130,5 @@ async fn configure_database(config: &DatabaseSettings) -> PgPool {
         .run(&connection_pool)
         .await
         .expect("Failed to migrate the database.");
-    connection_pool
+    connection_pool.close().await;
 }
