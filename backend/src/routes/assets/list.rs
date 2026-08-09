@@ -1,6 +1,8 @@
-use super::model::{AssetResponse, AssetRow, asset_select, fetch_parameter_values_for_assets};
-use crate::access_control::{Actor, get_actor};
-use crate::domain::{AssetInventoryStatus, AssetTrackingMode, LaboratoryId, UserId};
+use super::model::{
+    AssetResponse, AssetRow, asset_select, fetch_parameter_values_for_assets, parse_include,
+};
+use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::domain::{AssetTrackingMode, InventoryStatus, LaboratoryId, UserId};
 use crate::routes::parameter_filters::{
     ParameterFilter, ParameterFilterError, parse_parameter_filters, push_parameter_filters,
 };
@@ -8,7 +10,6 @@ use crate::routes::{PaginatedResponse, Pagination, PaginationError};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
-use anyhow::anyhow;
 use serde::Deserialize;
 use sqlx::{PgPool, Postgres, QueryBuilder};
 use uuid::Uuid;
@@ -72,21 +73,32 @@ pub async fn list_assets(
     laboratory_id: web::Path<Uuid>,
     query: web::Query<ListAssetsQuery>,
 ) -> Result<HttpResponse, ListAssetsError> {
-    let laboratory_id = LaboratoryId::parse(laboratory_id.into_inner())
-        .map_err(|e| ListAssetsError::UnexpectedError(anyhow!("{e}")))?;
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(ListAssetsError::UnexpectedError)?
-        .ok_or(ListAssetsError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
-    validate_read_permission(&actor, &laboratory_id)?;
+    let laboratory_id: LaboratoryId = laboratory_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Asset,
+        Action::Browse(laboratory_id.into()),
+    )
+    .await?
+    {
+        return Err(ListAssetsError::Forbidden(
+            "You don't have permission to view assets.".into(),
+        ));
+    }
+    let include_internal_notes = validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Asset,
+        Action::BrowseInternal(laboratory_id.into()),
+    )
+    .await?;
+
     validate_query(&query)?;
     let parameter_filters =
         parse_parameter_filters(&pool, laboratory_id, query.parameter_filters.as_deref())
             .await
             .map_err(map_parameter_filter_error)?;
-    let include_internal_notes = actor.can_read_laboratory_resource(&laboratory_id);
 
     let total = fetch_asset_count(&pool, laboratory_id, &query, &parameter_filters).await?;
     let limit = query.pagination.limit()?;
@@ -106,7 +118,8 @@ pub async fn list_assets(
         .await
         .map_err(|e| ListAssetsError::UnexpectedError(e.into()))?;
 
-    let include_parameters = include_parameters(&query)?;
+    let include_parameters =
+        parse_include(query.include.as_deref()).map_err(ListAssetsError::ValidationError)?;
     let mut parameters_by_asset_id = if include_parameters {
         let asset_ids: Vec<_> = assets.iter().map(|asset| asset.asset_id).collect();
         fetch_parameter_values_for_assets(&pool, &asset_ids).await?
@@ -126,29 +139,11 @@ pub async fn list_assets(
             } else {
                 None
             };
-            AssetResponse::from_parts_with_internal_notes(
-                asset,
-                None,
-                parameters,
-                include_internal_notes,
-            )
+            AssetResponse::from_parts(asset, None, parameters, include_internal_notes)
         })
         .collect();
 
     Ok(HttpResponse::Ok().json(PaginatedResponse::new(items, &query.pagination, total)?))
-}
-
-fn validate_read_permission(
-    actor: &Actor,
-    target_laboratory_id: &LaboratoryId,
-) -> Result<(), ListAssetsError> {
-    if actor.can_query_laboratory_resource(target_laboratory_id) {
-        Ok(())
-    } else {
-        Err(ListAssetsError::Forbidden(
-            "You do not have permission to view assets for this laboratory".into(),
-        ))
-    }
 }
 
 fn validate_query(query: &ListAssetsQuery) -> Result<(), ListAssetsError> {
@@ -156,9 +151,10 @@ fn validate_query(query: &ListAssetsQuery) -> Result<(), ListAssetsError> {
         AssetTrackingMode::parse(tracking_mode).map_err(ListAssetsError::ValidationError)?;
     }
     if let Some(status) = query.inventory_status.as_deref() {
-        AssetInventoryStatus::parse(status).map_err(ListAssetsError::ValidationError)?;
+        InventoryStatus::parse(status).map_err(ListAssetsError::ValidationError)?;
     }
-    include_parameters(query)?;
+    parse_include(query.include.as_deref()).map_err(ListAssetsError::ValidationError)?;
+
     Ok(())
 }
 
@@ -303,25 +299,6 @@ fn push_asset_filters(
     }
 
     push_parameter_filters(builder, "assets.asset_id", parameter_filters);
-}
-
-fn include_parameters(query: &ListAssetsQuery) -> Result<bool, ListAssetsError> {
-    let Some(include) = query.include.as_deref() else {
-        return Ok(false);
-    };
-    let includes: Vec<_> = include
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .collect();
-    for include in &includes {
-        if *include != "parameters" {
-            return Err(ListAssetsError::ValidationError(format!(
-                "Unsupported include: {include}"
-            )));
-        }
-    }
-    Ok(includes.contains(&"parameters"))
 }
 
 fn map_parameter_filter_error(error: ParameterFilterError) -> ListAssetsError {

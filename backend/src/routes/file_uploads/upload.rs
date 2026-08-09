@@ -1,41 +1,78 @@
-use super::error::AttachmentError;
-use super::model::{AttachmentUploadResponse, actor_for_user, validate_write_permission};
-use crate::attachment_storage::{AttachmentStorage, StoredFile};
-use crate::domain::{AttachmentFileName, LaboratoryId, UserId};
+use super::model::FileUploadResponse;
+use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::domain::StoredFile;
+use crate::domain::{FileName, LaboratoryId, UserId};
+use crate::file_storage::FileStorage;
+use crate::utils::error_chain_fmt;
 use actix_multipart::Multipart;
-use actix_web::{HttpResponse, web};
-use anyhow::anyhow;
+use actix_web::http::StatusCode;
+use actix_web::{HttpResponse, ResponseError, web};
 use chrono::{Duration, Utc};
 use futures_util::StreamExt;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+#[derive(thiserror::Error)]
+pub enum UploadFileError {
+    #[error("{0}")]
+    ValidationError(String),
+    #[error("{0}")]
+    Forbidden(String),
+    #[error(transparent)]
+    UnexpectedError(#[from] anyhow::Error),
+}
+
+impl std::fmt::Debug for UploadFileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+impl ResponseError for UploadFileError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            UploadFileError::ValidationError(_) => StatusCode::BAD_REQUEST,
+            UploadFileError::Forbidden(_) => StatusCode::FORBIDDEN,
+            UploadFileError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
 #[tracing::instrument(
-    name = "Upload attachment file",
+    name = "Upload file",
     skip(pool, storage, payload),
     fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_id)
 )]
-pub async fn upload_attachment(
+pub async fn upload_file(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    storage: web::Data<AttachmentStorage>,
+    storage: web::Data<FileStorage>,
     laboratory_id: web::Path<Uuid>,
     payload: Multipart,
-) -> Result<HttpResponse, AttachmentError> {
-    let laboratory_id = LaboratoryId::parse(laboratory_id.into_inner())
-        .map_err(|e| AttachmentError::UnexpectedError(anyhow!("{e}")))?;
-    let actor = actor_for_user(&pool, actor_user_id).await?;
-    validate_write_permission(&actor, &laboratory_id)?;
+) -> Result<HttpResponse, UploadFileError> {
+    let laboratory_id: LaboratoryId = laboratory_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::FileUpload,
+        Action::Create(laboratory_id.into()),
+    )
+    .await?
+    {
+        return Err(UploadFileError::Forbidden(
+            "You don't have permission to upload files.".into(),
+        ));
+    }
 
     let upload = read_single_file(payload, storage.max_file_size_bytes()).await?;
     let stored = storage
-        .store_upload(*laboratory_id, &upload.original_file_name, &upload.bytes)
+        .store_upload(laboratory_id, &upload.original_file_name, &upload.bytes)
         .await?;
 
-    match insert_attachment_upload(
+    match insert_file_upload(
         &pool,
-        *laboratory_id,
-        *actor.user_id,
+        laboratory_id,
+        actor_user_id,
         &upload,
         &stored,
         storage.upload_token_ttl_minutes(),
@@ -51,7 +88,7 @@ pub async fn upload_attachment(
 }
 
 struct MultipartUpload {
-    original_file_name: AttachmentFileName,
+    original_file_name: FileName,
     mime_type: Option<String>,
     bytes: Vec<u8>,
 }
@@ -59,23 +96,23 @@ struct MultipartUpload {
 async fn read_single_file(
     mut payload: Multipart,
     max_file_size_bytes: u64,
-) -> Result<MultipartUpload, AttachmentError> {
+) -> Result<MultipartUpload, UploadFileError> {
     let mut upload = None;
     while let Some(field) = payload.next().await {
         let mut field = field
-            .map_err(|e| AttachmentError::ValidationError(format!("Invalid multipart: {e}")))?;
+            .map_err(|e| UploadFileError::ValidationError(format!("Invalid multipart: {e}")))?;
         let content_disposition = field.content_disposition().cloned();
         let field_name = content_disposition
             .as_ref()
             .and_then(|value| value.get_name())
             .unwrap_or("");
         if field_name != "file" {
-            return Err(AttachmentError::ValidationError(
+            return Err(UploadFileError::ValidationError(
                 "Only multipart field `file` is supported".into(),
             ));
         }
         if upload.is_some() {
-            return Err(AttachmentError::ValidationError(
+            return Err(UploadFileError::ValidationError(
                 "Only one file can be uploaded at a time".into(),
             ));
         }
@@ -85,25 +122,25 @@ async fn read_single_file(
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(ToOwned::to_owned)
-            .unwrap_or_else(|| "attachment".to_string());
-        let original_file_name = AttachmentFileName::parse(original_file_name)
-            .map_err(AttachmentError::ValidationError)?;
+            .unwrap_or_else(|| "file".to_string());
+        let original_file_name =
+            FileName::parse(original_file_name).map_err(UploadFileError::ValidationError)?;
         let mime_type = field.content_type().map(ToString::to_string);
         let mut bytes = Vec::new();
         while let Some(chunk) = field.next().await {
             let chunk = chunk.map_err(|e| {
-                AttachmentError::ValidationError(format!("Failed to read multipart file: {e}"))
+                UploadFileError::ValidationError(format!("Failed to read multipart file: {e}"))
             })?;
             if bytes.len() as u64 + chunk.len() as u64 > max_file_size_bytes {
-                return Err(AttachmentError::ValidationError(
-                    "Attachment file exceeds configured size limit".into(),
+                return Err(UploadFileError::ValidationError(
+                    "File upload exceeds configured size limit".into(),
                 ));
             }
             bytes.extend_from_slice(&chunk);
         }
         if bytes.is_empty() {
-            return Err(AttachmentError::ValidationError(
-                "Attachment files cannot be empty".into(),
+            return Err(UploadFileError::ValidationError(
+                "File uploads cannot be empty".into(),
             ));
         }
         upload = Some(MultipartUpload {
@@ -113,23 +150,23 @@ async fn read_single_file(
         });
     }
     upload.ok_or_else(|| {
-        AttachmentError::ValidationError("Multipart field `file` is required".into())
+        UploadFileError::ValidationError("Multipart field `file` is required".into())
     })
 }
 
-async fn insert_attachment_upload(
+async fn insert_file_upload(
     pool: &PgPool,
-    laboratory_id: Uuid,
-    uploaded_by_user_id: Uuid,
+    laboratory_id: LaboratoryId,
+    uploaded_by_user_id: UserId,
     upload: &MultipartUpload,
     stored: &StoredFile,
-    ttl_minutes: i64,
-) -> Result<AttachmentUploadResponse, AttachmentError> {
+    ttl_minutes: u64,
+) -> Result<FileUploadResponse, UploadFileError> {
     let upload_id = Uuid::new_v4();
-    let expires_at = Utc::now() + Duration::minutes(ttl_minutes);
-    sqlx::query_as::<_, AttachmentUploadResponse>(
+    let expires_at = Utc::now() + Duration::minutes(ttl_minutes as i64);
+    sqlx::query_as::<_, FileUploadResponse>(
         r#"
-        INSERT INTO attachment_uploads (
+        INSERT INTO file_uploads (
             upload_id,
             laboratory_id,
             storage_backend,
@@ -154,16 +191,16 @@ async fn insert_attachment_upload(
         "#,
     )
     .bind(upload_id)
-    .bind(laboratory_id)
+    .bind(Uuid::from(laboratory_id))
     .bind(stored.storage_backend.as_str())
     .bind(stored.storage_key.as_ref())
     .bind(upload.original_file_name.as_ref())
     .bind(upload.mime_type.as_deref())
     .bind(stored.file_size_bytes.as_i64())
     .bind(stored.sha256_hex.as_ref())
-    .bind(uploaded_by_user_id)
+    .bind(Uuid::from(uploaded_by_user_id))
     .bind(expires_at)
     .fetch_one(pool)
     .await
-    .map_err(|e| AttachmentError::UnexpectedError(e.into()))
+    .map_err(|e| UploadFileError::UnexpectedError(e.into()))
 }

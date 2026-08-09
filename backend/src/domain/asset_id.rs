@@ -37,3 +37,9 @@ impl From<AssetId> for Uuid {
         asset_id.0
     }
 }
+
+impl Into<AssetId> for Uuid {
+    fn into(self) -> AssetId {
+        AssetId(self)
+    }
+}

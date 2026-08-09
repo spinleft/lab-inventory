@@ -24,6 +24,7 @@ pub struct TestApp {
     pub db_pool: PgPool,
     pub test_user: TestUser,
     pub api_client: reqwest::Client,
+    pub local_node_id: Option<Uuid>,
 }
 
 pub async fn spawn_app() -> TestApp {
@@ -34,7 +35,7 @@ pub async fn spawn_app() -> TestApp {
         c.database.database_name = Uuid::new_v4().to_string();
         c.application.port = 0;
         c.application.cookie_secure = false;
-        c.attachment_storage.local_root = std::env::temp_dir()
+        c.file_storage.local_root = std::env::temp_dir()
             .join(format!("lab-inventory-test-{}", Uuid::new_v4()))
             .to_string_lossy()
             .to_string();
@@ -59,12 +60,9 @@ pub async fn spawn_app() -> TestApp {
     let test_app = TestApp {
         address: format!("http://localhost:{application_port}"),
         db_pool: get_connection_pool(&configuration.database),
-        test_user: TestUser {
-            user_type: "super_admin".to_string(),
-            laboratory_id: None,
-            ..TestUser::generate()
-        },
+        test_user: TestUser::generate_with_user_type("super_admin", None),
         api_client: client,
+        local_node_id: Some(Uuid::new_v4()),
     };
 
     test_app.test_user.store(&test_app.db_pool).await;
@@ -464,7 +462,7 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
-    pub async fn upload_attachment(
+    pub async fn upload_file(
         &self,
         laboratory_id: Uuid,
         file_name: &str,
@@ -474,11 +472,11 @@ impl TestApp {
         let part = reqwest::multipart::Part::bytes(bytes)
             .file_name(file_name.to_string())
             .mime_str(mime_type)
-            .expect("Invalid attachment MIME type");
+            .expect("Invalid file MIME type");
         let form = reqwest::multipart::Form::new().part("file", part);
         self.api_client
             .post(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/attachment-uploads",
+                "{}/api/v1/laboratories/{laboratory_id}/file-uploads",
                 &self.address
             ))
             .multipart(form)
@@ -487,12 +485,9 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
-    pub async fn delete_attachment_upload(&self, upload_id: Uuid) -> reqwest::Response {
+    pub async fn delete_file_upload(&self, upload_id: Uuid) -> reqwest::Response {
         self.api_client
-            .delete(format!(
-                "{}/api/v1/attachment-uploads/{upload_id}",
-                &self.address
-            ))
+            .delete(format!("{}/api/v1/file-uploads/{upload_id}", &self.address))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -741,6 +736,56 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
+    pub async fn post_borrow_request<Body>(
+        &self,
+        inventory_item_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(format!(
+                "{}/api/v1/inventory-items/{inventory_item_id}/borrow-requests",
+                &self.address
+            ))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_borrow_requests(&self, laboratory_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/borrow-requests",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn patch_borrow_request<Body>(
+        &self,
+        laboratory_id: Uuid,
+        borrow_request_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .patch(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/borrow-requests/{borrow_request_id}",
+                &self.address
+            ))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
     pub async fn patch_inventory_item<Body>(
         &self,
         inventory_item_id: Uuid,
@@ -829,21 +874,27 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
-    pub async fn post_unit<Body>(&self, body: &Body) -> reqwest::Response
+    pub async fn post_unit<Body>(&self, laboratory_id: Uuid, body: &Body) -> reqwest::Response
     where
         Body: serde::Serialize,
     {
         self.api_client
-            .post(format!("{}/api/v1/units", &self.address))
+            .post(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/units",
+                &self.address
+            ))
             .json(body)
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
-    pub async fn get_units(&self) -> reqwest::Response {
+    pub async fn get_units(&self, laboratory_id: Uuid) -> reqwest::Response {
         self.api_client
-            .get(format!("{}/api/v1/units", &self.address))
+            .get(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/units",
+                &self.address
+            ))
             .send()
             .await
             .expect("Failed to execute request.")

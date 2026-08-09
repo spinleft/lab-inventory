@@ -1,5 +1,4 @@
-use crate::domain::{AssetCategoryId, AssetName, AssetTrackingMode};
-use uuid::Uuid;
+use crate::domain::{AssetCategoryId, AssetName, AssetTrackingMode, UnitId};
 
 #[derive(Debug)]
 pub struct NewAsset {
@@ -8,7 +7,7 @@ pub struct NewAsset {
     pub name: AssetName,
     pub model: Option<String>,
     pub manufacturer: Option<String>,
-    pub default_unit_id: Uuid,
+    pub default_unit_id: UnitId,
     pub public_notes: Option<String>,
     pub internal_notes: Option<String>,
 }
@@ -21,7 +20,7 @@ impl NewAsset {
         name: AssetName,
         model: Option<String>,
         manufacturer: Option<String>,
-        default_unit_id: Uuid,
+        default_unit_id: UnitId,
         public_notes: Option<String>,
         internal_notes: Option<String>,
     ) -> Self {

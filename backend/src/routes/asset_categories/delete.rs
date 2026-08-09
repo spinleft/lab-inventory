@@ -3,13 +3,13 @@ use super::model::{
     fetch_asset_category_parameter_assignments_for_categories_for_update,
     fetch_asset_category_tree_for_update,
 };
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{AssetCategoryId, LaboratoryId, UserId};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
@@ -50,31 +50,38 @@ impl ResponseError for DeleteAssetCategoryError {
 pub async fn delete_asset_category(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    category_id: web::Path<AssetCategoryId>,
+    category_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, DeleteAssetCategoryError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(DeleteAssetCategoryError::UnexpectedError)?
-        .ok_or(DeleteAssetCategoryError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
+    let category_id: AssetCategoryId = category_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::AssetCategory,
+        Action::Delete(category_id.into()),
+    )
+    .await?
+    {
+        return Err(DeleteAssetCategoryError::Forbidden(
+            "You don't have permission to delete this asset category.".into(),
+        ));
+    }
 
     let mut transaction = pool
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    let existing = fetch_asset_category_for_update(&mut transaction, *category_id)
+    let existing = fetch_asset_category_for_update(&mut transaction, category_id)
         .await?
         .ok_or(DeleteAssetCategoryError::NotFound(
             "Asset category not found".into(),
         ))?;
-    let laboratory_id = LaboratoryId::parse(existing.laboratory_id)
-        .map_err(|e| DeleteAssetCategoryError::UnexpectedError(anyhow!(e)))?;
-    validate_delete_permission(&actor, &laboratory_id)?;
 
-    let categories =
-        fetch_asset_category_tree_for_update(&mut transaction, laboratory_id, &existing.path)
-            .await?;
+    let categories = fetch_asset_category_tree_for_update(
+        &mut transaction,
+        existing.laboratory_id.into(),
+        &existing.path,
+    )
+    .await?;
     let category_ids: Vec<_> = categories
         .iter()
         .map(|category| category.category_id)
@@ -85,13 +92,22 @@ pub async fn delete_asset_category(
             &category_ids,
         )
         .await?;
-    let cleared_asset_ids =
-        clear_asset_category_references(&mut transaction, laboratory_id, &existing.path).await?;
-    delete_asset_category_tree(&mut transaction, laboratory_id, &existing.path).await?;
+    let cleared_asset_ids = clear_asset_category_references(
+        &mut transaction,
+        existing.laboratory_id.into(),
+        &existing.path,
+    )
+    .await?;
+    delete_asset_category_tree(
+        &mut transaction,
+        existing.laboratory_id.into(),
+        &existing.path,
+    )
+    .await?;
 
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Delete,
         AuditResource::AssetCategory,
         Some(existing.category_id),
@@ -108,19 +124,6 @@ pub async fn delete_asset_category(
         .context("Failed to commit SQL transaction to delete an asset category.")?;
 
     Ok(HttpResponse::NoContent().finish())
-}
-
-fn validate_delete_permission(
-    actor: &Actor,
-    target_laboratory_id: &LaboratoryId,
-) -> Result<(), DeleteAssetCategoryError> {
-    if actor.can_write_laboratory_resource(target_laboratory_id) {
-        Ok(())
-    } else {
-        return Err(DeleteAssetCategoryError::Forbidden(
-            "You don't have permission to delete this asset category.".into(),
-        ));
-    }
 }
 
 #[tracing::instrument(

@@ -23,7 +23,7 @@ async fn upload_and_claim_attachments_when_creating_asset_and_inventory_item() {
                     {
                         "upload_id": upload_id(&asset_upload),
                         "display_name": "Asset Manual",
-                        "visibility": "internal"
+                        "is_public": false
                     }
                 ],
                 "inventory_items": [
@@ -34,7 +34,7 @@ async fn upload_and_claim_attachments_when_creating_asset_and_inventory_item() {
                             {
                                 "upload_id": upload_id(&inventory_upload),
                                 "display_name": "Inventory Receipt",
-                                "visibility": "public"
+                                "is_public": true
                             }
                         ]
                     }
@@ -53,7 +53,7 @@ async fn upload_and_claim_attachments_when_creating_asset_and_inventory_item() {
     assert_eq!(asset_attachments.as_array().unwrap().len(), 1);
     assert_eq!(asset_attachments[0]["display_name"], "Asset Manual");
     assert_eq!(
-        asset_attachments[0]["sha256_hex"],
+        asset_attachments[0]["file"]["sha256_hex"],
         asset_upload["sha256_hex"]
     );
 
@@ -65,7 +65,7 @@ async fn upload_and_claim_attachments_when_creating_asset_and_inventory_item() {
         inventory_attachments[0]["display_name"],
         "Inventory Receipt"
     );
-    assert_eq!(inventory_attachments[0]["visibility"], "public");
+    assert_eq!(inventory_attachments[0]["is_public"], true);
 
     let direct_inventory_upload = upload(
         &app,
@@ -126,7 +126,7 @@ async fn manage_download_delete_and_filter_attachments_by_laboratory_permissions
                 "upload_id": upload_id(&internal_upload),
                 "display_name": "Internal Spec",
                 "description": "before",
-                "visibility": "internal"
+                "is_public": false
             }),
         )
         .await;
@@ -158,7 +158,7 @@ async fn manage_download_delete_and_filter_attachments_by_laboratory_permissions
             asset_id,
             &serde_json::json!({
                 "upload_id": upload_id(&public_upload),
-                "visibility": "public"
+                "is_public": true
             }),
         )
         .await;
@@ -204,17 +204,17 @@ async fn manage_download_delete_and_filter_attachments_by_laboratory_permissions
 }
 
 #[tokio::test]
-async fn delete_unconsumed_attachment_uploads_only_for_upload_owner() {
+async fn delete_unconsumed_file_uploads_only_for_upload_owner() {
     let app = spawn_app().await;
-    let laboratory_id = app.create_laboratory("Attachment Upload Delete Lab").await;
+    let laboratory_id = app.create_laboratory("File Upload Delete Lab").await;
     let unit_id = app.unit_id("pcs").await;
     app.test_user.login(&app).await;
 
     let deleted_upload = upload(&app, laboratory_id, "remove-me.txt", b"remove me").await;
     let deleted_upload_id = upload_id(&deleted_upload);
-    let response = app.delete_attachment_upload(deleted_upload_id).await;
+    let response = app.delete_file_upload(deleted_upload_id).await;
     assert_eq!(response.status().as_u16(), 204);
-    let response = app.delete_attachment_upload(Uuid::new_v4()).await;
+    let response = app.delete_file_upload(Uuid::new_v4()).await;
     assert_eq!(response.status().as_u16(), 404);
 
     let response = app
@@ -228,7 +228,7 @@ async fn delete_unconsumed_attachment_uploads_only_for_upload_owner() {
                     {
                         "upload_id": deleted_upload_id,
                         "display_name": "Deleted Upload",
-                        "visibility": "internal"
+                        "is_public": false
                     }
                 ]
             }),
@@ -242,7 +242,7 @@ async fn delete_unconsumed_attachment_uploads_only_for_upload_owner() {
     app.store_user(&regular_user).await;
     regular_user.login(&app).await;
 
-    let response = app.delete_attachment_upload(owned_by_super_admin_id).await;
+    let response = app.delete_file_upload(owned_by_super_admin_id).await;
     assert_eq!(response.status().as_u16(), 403);
 
     app.test_user.login(&app).await;
@@ -257,7 +257,7 @@ async fn delete_unconsumed_attachment_uploads_only_for_upload_owner() {
                     {
                         "upload_id": owned_by_super_admin_id,
                         "display_name": "Consumed Upload",
-                        "visibility": "internal"
+                        "is_public": false
                     }
                 ]
             }),
@@ -265,7 +265,7 @@ async fn delete_unconsumed_attachment_uploads_only_for_upload_owner() {
         .await;
     assert_eq!(response.status().as_u16(), 201);
 
-    let response = app.delete_attachment_upload(owned_by_super_admin_id).await;
+    let response = app.delete_file_upload(owned_by_super_admin_id).await;
     assert_eq!(response.status().as_u16(), 409);
 }
 
@@ -276,7 +276,7 @@ async fn upload(
     bytes: &[u8],
 ) -> serde_json::Value {
     let response = app
-        .upload_attachment(laboratory_id, file_name, "text/plain", bytes.to_vec())
+        .upload_file(laboratory_id, file_name, "text/plain", bytes.to_vec())
         .await;
     assert_eq!(response.status().as_u16(), 201);
     response.json().await.unwrap()

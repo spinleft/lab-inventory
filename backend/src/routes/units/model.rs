@@ -8,6 +8,7 @@ use uuid::Uuid;
 #[derive(Serialize)]
 pub(super) struct UnitResponse {
     unit_id: Uuid,
+    laboratory_id: Uuid,
     code: String,
     name: String,
     symbol: String,
@@ -20,6 +21,7 @@ pub(super) struct UnitResponse {
 #[derive(Clone, Serialize, sqlx::FromRow)]
 pub(super) struct UnitRow {
     pub(super) unit_id: Uuid,
+    pub(super) laboratory_id: Uuid,
     pub(super) code: String,
     pub(super) name: String,
     pub(super) symbol: String,
@@ -33,6 +35,7 @@ impl From<UnitRow> for UnitResponse {
     fn from(row: UnitRow) -> Self {
         Self {
             unit_id: row.unit_id,
+            laboratory_id: row.laboratory_id,
             code: row.code,
             name: row.name,
             symbol: row.symbol,
@@ -83,6 +86,7 @@ pub(super) fn delete_unit_rollback_details(unit: &UnitRow) -> Value {
             "resource_type": "unit",
             "values": {
                 "unit_id": unit.unit_id,
+                "laboratory_id": unit.laboratory_id,
                 "code": &unit.code,
                 "name": &unit.name,
                 "symbol": &unit.symbol,
@@ -102,7 +106,7 @@ pub(super) async fn fetch_unit(
     sqlx::query_as!(
         UnitRow,
         r#"
-        SELECT unit_id, code, name, symbol, dimension, scale_to_base, allow_decimal, created_at
+        SELECT unit_id, laboratory_id, code, name, symbol, dimension, scale_to_base, allow_decimal, created_at
         FROM units
         WHERE unit_id = $1
         "#,
@@ -120,7 +124,7 @@ pub(super) async fn fetch_unit_for_update(
     sqlx::query_as!(
         UnitRow,
         r#"
-        SELECT unit_id, code, name, symbol, dimension, scale_to_base, allow_decimal, created_at
+        SELECT unit_id, laboratory_id, code, name, symbol, dimension, scale_to_base, allow_decimal, created_at
         FROM units
         WHERE unit_id = $1
         FOR UPDATE
@@ -152,7 +156,7 @@ pub(super) fn map_unit_database_error(
         database_error.code().as_deref(),
         database_error.constraint(),
     ) {
-        (Some("23505"), Some("units_code_key")) => {
+        (Some("23505"), Some("units_laboratory_id_code_key")) => {
             Some(UnitDatabaseError::Conflict(duplicate_code.into()))
         }
         (Some("23505"), _) => Some(UnitDatabaseError::Conflict(generic_unique.into())),

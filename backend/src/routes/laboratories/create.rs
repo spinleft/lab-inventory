@@ -1,8 +1,8 @@
 use super::model::{LaboratoryResponse, LaboratoryRow, create_laboratory_rollback_details};
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::UserId;
-use crate::utils::error_chain_fmt;
+use crate::utils::{error_chain_fmt, required_text};
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
@@ -58,17 +58,24 @@ pub async fn create_laboratory(
     pool: web::Data<PgPool>,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, CreateLaboratoryError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(CreateLaboratoryError::UnexpectedError)?
-        .ok_or(CreateLaboratoryError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
-    validate_create_permission(&actor)?;
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Laboratory,
+        Action::Create(Uuid::nil()),
+    )
+    .await?
+    {
+        return Err(CreateLaboratoryError::Forbidden(
+            "You don't have permission to create laboratories.".into(),
+        ));
+    }
 
     let payload = payload.into_inner();
-    let name = required_text(&payload.name, "name")?;
-    let address = required_text(&payload.address, "address")?;
+    let name =
+        required_text(&payload.name, "name").map_err(CreateLaboratoryError::ValidationError)?;
+    let address = required_text(&payload.address, "address")
+        .map_err(CreateLaboratoryError::ValidationError)?;
     let mut transaction = pool
         .begin()
         .await
@@ -84,7 +91,7 @@ pub async fn create_laboratory(
 
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Create,
         AuditResource::Laboratory,
         Some(laboratory.laboratory_id),
@@ -97,26 +104,6 @@ pub async fn create_laboratory(
         .context("Failed to commit SQL transaction to store a new laboratory.")?;
 
     Ok(HttpResponse::Created().json(LaboratoryResponse::from(laboratory)))
-}
-
-fn validate_create_permission(actor: &Actor) -> Result<(), CreateLaboratoryError> {
-    if actor.is_admin() {
-        Ok(())
-    } else {
-        Err(CreateLaboratoryError::Forbidden(
-            "You don't have permission to create laboratories.".into(),
-        ))
-    }
-}
-
-fn required_text<'a>(value: &'a str, field: &str) -> Result<&'a str, CreateLaboratoryError> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err(CreateLaboratoryError::ValidationError(format!(
-            "{field} is required"
-        )));
-    }
-    Ok(trimmed)
 }
 
 #[tracing::instrument(

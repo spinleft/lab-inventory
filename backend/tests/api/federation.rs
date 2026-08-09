@@ -218,7 +218,7 @@ async fn seed_remote_asset(app: &TestApp, laboratory_id: Uuid) -> Uuid {
 async fn seed_remote_attachments(app: &TestApp, laboratory_id: Uuid, asset_id: Uuid) -> Uuid {
     app.test_user.login(app).await;
     let upload = app
-        .upload_attachment(
+        .upload_file(
             laboratory_id,
             "internal.txt",
             "text/plain",

@@ -87,6 +87,16 @@ export function canManageFederation(user: CurrentUser) {
   return isLabAdmin(user) && Boolean(user.laboratory);
 }
 
+export function canAccessBorrowRequests(user: CurrentUser) {
+  return (isLabAdmin(user) || getUserTypeName(user) === "user") && Boolean(user.laboratory);
+}
+
+export function canRequestBorrow(user: CurrentUser) {
+  const typeName = getUserTypeName(user);
+  return (typeName === "guest" || typeName === "lab_admin" || typeName === "user")
+    && Boolean(user.laboratory);
+}
+
 export function canManageUnits(user: CurrentUser) {
   return isRoot(user) || isSuperAdmin(user);
 }

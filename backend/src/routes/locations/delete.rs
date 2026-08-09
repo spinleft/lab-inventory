@@ -1,13 +1,13 @@
 use super::model::{
     delete_location_rollback_details, fetch_location_for_update, fetch_location_tree_for_update,
 };
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{LaboratoryId, LocationId, UserId};
+use crate::domain::{LaboratoryId, UserId};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
@@ -48,25 +48,30 @@ impl ResponseError for DeleteLocationError {
 pub async fn delete_location(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    location_id: web::Path<LocationId>,
+    location_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, DeleteLocationError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(DeleteLocationError::UnexpectedError)?
-        .ok_or(DeleteLocationError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
+    let location_id = location_id.into_inner();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Location,
+        Action::Delete(location_id.clone()),
+    )
+    .await?
+    {
+        return Err(DeleteLocationError::Forbidden(
+            "You don't have permission to delete locations.".into(),
+        ));
+    }
 
     let mut transaction = pool
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    let existing = fetch_location_for_update(&mut transaction, *location_id)
+    let existing = fetch_location_for_update(&mut transaction, location_id.into())
         .await?
         .ok_or(DeleteLocationError::NotFound("Location not found".into()))?;
-    let laboratory_id = LaboratoryId::parse(existing.laboratory_id)
-        .map_err(|e| DeleteLocationError::UnexpectedError(anyhow!(e)))?;
-    validate_delete_permission(&actor, &laboratory_id)?;
+    let laboratory_id = existing.laboratory_id.into();
 
     let locations =
         fetch_location_tree_for_update(&mut transaction, laboratory_id, &existing.path).await?;
@@ -76,7 +81,7 @@ pub async fn delete_location(
 
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Delete,
         AuditResource::Location,
         Some(existing.location_id),
@@ -89,19 +94,6 @@ pub async fn delete_location(
         .context("Failed to commit SQL transaction to delete a location.")?;
 
     Ok(HttpResponse::NoContent().finish())
-}
-
-fn validate_delete_permission(
-    actor: &Actor,
-    target_laboratory_id: &LaboratoryId,
-) -> Result<(), DeleteLocationError> {
-    if actor.can_write_laboratory_resource(target_laboratory_id) {
-        Ok(())
-    } else {
-        Err(DeleteLocationError::Forbidden(
-            "You don't have permission to delete this location.".into(),
-        ))
-    }
 }
 
 #[tracing::instrument(
@@ -128,7 +120,7 @@ async fn clear_location_references(
         ORDER BY inventory_item_id
         "#,
     )
-    .bind(*laboratory_id)
+    .bind(Uuid::from(laboratory_id))
     .bind(root_path)
     .fetch_all(transaction.as_mut())
     .await
@@ -148,7 +140,7 @@ async fn clear_location_references(
           )
         "#,
     )
-    .bind(*laboratory_id)
+    .bind(Uuid::from(laboratory_id))
     .bind(root_path)
     .execute(transaction.as_mut())
     .await

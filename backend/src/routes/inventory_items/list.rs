@@ -1,13 +1,15 @@
 use super::model::{
-    InventoryItemError, InventoryItemResponse, InventoryItemRow, actor_for_user,
-    inventory_item_select, validate_read_permission, validate_status,
+    InventoryItemResponse, InventoryItemRow, inventory_item_select, validate_status,
 };
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::{AssetTrackingMode, LaboratoryId, UserId};
 use crate::routes::parameter_filters::{
     ParameterFilter, ParameterFilterError, parse_parameter_filters, push_parameter_filters,
 };
-use crate::routes::{PaginatedResponse, Pagination};
-use actix_web::{HttpResponse, web};
+use crate::routes::{PaginatedResponse, Pagination, PaginationError};
+use crate::utils::error_chain_fmt;
+use actix_web::http::StatusCode;
+use actix_web::{HttpResponse, ResponseError, web};
 use serde::Deserialize;
 use sqlx::{PgPool, Postgres, QueryBuilder};
 use uuid::Uuid;
@@ -30,6 +32,38 @@ pub struct ListInventoryItemsQuery {
     pub parameter_filters: Option<String>,
 }
 
+#[derive(thiserror::Error)]
+pub enum ListInventoryItemsError {
+    #[error("{0}")]
+    ValidationError(String),
+    #[error("{0}")]
+    Forbidden(String),
+    #[error(transparent)]
+    UnexpectedError(#[from] anyhow::Error),
+}
+
+impl std::fmt::Debug for ListInventoryItemsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+impl ResponseError for ListInventoryItemsError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            ListInventoryItemsError::ValidationError(_) => StatusCode::BAD_REQUEST,
+            ListInventoryItemsError::Forbidden(_) => StatusCode::FORBIDDEN,
+            ListInventoryItemsError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<PaginationError> for ListInventoryItemsError {
+    fn from(error: PaginationError) -> Self {
+        Self::ValidationError(error.to_string())
+    }
+}
+
 #[tracing::instrument(
     name = "List inventory items",
     skip(pool, query),
@@ -40,15 +74,33 @@ pub async fn list_inventory_items(
     pool: web::Data<PgPool>,
     laboratory_id: web::Path<Uuid>,
     query: web::Query<ListInventoryItemsQuery>,
-) -> Result<HttpResponse, InventoryItemError> {
+) -> Result<HttpResponse, ListInventoryItemsError> {
+    let laboratory_id: LaboratoryId = laboratory_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::InventoryItem,
+        Action::Browse(laboratory_id.into()),
+    )
+    .await?
+    {
+        return Err(ListInventoryItemsError::Forbidden(
+            "You don't have permission to view inventory items.".into(),
+        ));
+    }
+    let include_internal_notes = validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::InventoryItem,
+        Action::BrowseInternal(laboratory_id.into()),
+    )
+    .await?;
+
     validate_query(&query)?;
-    let actor = actor_for_user(&pool, actor_user_id).await?;
-    let laboratory_id = validate_read_permission(&actor, laboratory_id.into_inner())?;
     let parameter_filters =
         parse_parameter_filters(&pool, laboratory_id, query.parameter_filters.as_deref())
             .await
             .map_err(map_parameter_filter_error)?;
-    let include_internal_notes = actor.can_read_laboratory_resource(&laboratory_id);
     let total =
         fetch_inventory_item_count(&pool, laboratory_id, &query, &parameter_filters).await?;
     let limit = query.pagination.limit()?;
@@ -68,7 +120,8 @@ pub async fn list_inventory_items(
         .build_query_as::<InventoryItemRow>()
         .fetch_all(pool.get_ref())
         .await
-        .map_err(|e| InventoryItemError::UnexpectedError(e.into()))?;
+        .map_err(|e| ListInventoryItemsError::UnexpectedError(e.into()))?;
+
     let items = rows
         .into_iter()
         .map(|row| InventoryItemResponse::from_row(row, include_internal_notes))
@@ -76,11 +129,13 @@ pub async fn list_inventory_items(
     Ok(HttpResponse::Ok().json(PaginatedResponse::new(items, &query.pagination, total)?))
 }
 
-fn validate_query(query: &ListInventoryItemsQuery) -> Result<(), InventoryItemError> {
+fn validate_query(query: &ListInventoryItemsQuery) -> Result<(), ListInventoryItemsError> {
     if let Some(tracking_mode) = query.tracking_mode.as_deref() {
-        AssetTrackingMode::parse(tracking_mode).map_err(InventoryItemError::ValidationError)?;
+        AssetTrackingMode::parse(tracking_mode)
+            .map_err(ListInventoryItemsError::ValidationError)?;
     }
-    validate_status(query.status.clone())?;
+    validate_status(query.status.clone()).map_err(ListInventoryItemsError::ValidationError)?;
+
     Ok(())
 }
 
@@ -89,7 +144,7 @@ async fn fetch_inventory_item_count(
     laboratory_id: LaboratoryId,
     query: &ListInventoryItemsQuery,
     parameter_filters: &[ParameterFilter],
-) -> Result<i64, InventoryItemError> {
+) -> Result<i64, ListInventoryItemsError> {
     let mut builder = QueryBuilder::<Postgres>::new(
         r#"
         SELECT COUNT(*)
@@ -103,7 +158,7 @@ async fn fetch_inventory_item_count(
         .build_query_scalar()
         .fetch_one(pool)
         .await
-        .map_err(|e| InventoryItemError::UnexpectedError(e.into()))
+        .map_err(|e| ListInventoryItemsError::UnexpectedError(e.into()))
 }
 
 pub(super) fn push_inventory_item_filters(
@@ -227,9 +282,11 @@ pub(super) fn push_inventory_item_filters(
     push_parameter_filters(builder, "asset_inventory_items.asset_id", parameter_filters);
 }
 
-fn map_parameter_filter_error(error: ParameterFilterError) -> InventoryItemError {
+fn map_parameter_filter_error(error: ParameterFilterError) -> ListInventoryItemsError {
     match error {
-        ParameterFilterError::Validation(message) => InventoryItemError::ValidationError(message),
-        ParameterFilterError::Unexpected(error) => InventoryItemError::UnexpectedError(error),
+        ParameterFilterError::Validation(message) => {
+            ListInventoryItemsError::ValidationError(message)
+        }
+        ParameterFilterError::Unexpected(error) => ListInventoryItemsError::UnexpectedError(error),
     }
 }

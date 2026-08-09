@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Filter,
+  HandHelping,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -26,6 +27,7 @@ import {
   useState,
 } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useAuth } from "../../app/auth-context";
 import { useLaboratorySelection } from "../../app/laboratory-selection-context";
 import { useBackendConfig } from "../../shared/api/backendConfig";
 import { createApiClient } from "../../shared/api/httpClient";
@@ -54,6 +56,7 @@ import {
   useLocations,
   useUnits,
 } from "../admin/api";
+import { useCreateBorrowRequest } from "../borrow-requests/api";
 import {
   type PendingAttachment,
   PendingAttachmentUploader,
@@ -79,6 +82,7 @@ import {
   useInventoryItems,
   useUpdateInventoryItem,
 } from "./api";
+import { canRequestBorrow } from "../auth/permissions";
 import {
   categoryLabel,
   formatNumber,
@@ -210,11 +214,17 @@ export function InventoryPage() {
     selectedDataScope,
     selectedLaboratoryId,
   } = useLaboratorySelection();
+  const { currentUser } = useAuth();
   const { apiBaseUrl } = useBackendConfig();
   const toast = useToast();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const canManage = canManageSelectedLaboratoryAssets;
+  const canBorrow =
+    canRequestBorrow(currentUser) &&
+    selectedDataScope.kind === "local" &&
+    (currentUser.user_type.name === "guest" ||
+     selectedLaboratoryId !== currentUser.laboratory?.laboratory_id);
   const categoryFromUrl = searchParams.get("category_id") ?? "";
   const exactCategoryFromUrl = searchParams.get("exact_category") === "true";
   const locationFromUrl = searchParams.get("location_id") ?? "";
@@ -238,6 +248,8 @@ export function InventoryPage() {
   );
   const [editor, setEditor] = useState<InventoryEditorState>(null);
   const [deletingItem, setDeletingItem] = useState<InventoryItem | null>(null);
+  const [borrowItem, setBorrowItem] = useState<InventoryItem | null>(null);
+  const [borrowNote, setBorrowNote] = useState("");
 
   const categoriesQuery = useAssetCategories({
     enabled: Boolean(selectedLaboratoryId),
@@ -258,6 +270,7 @@ export function InventoryPage() {
   const createInventoryItems = useCreateInventoryItems();
   const updateInventoryItem = useUpdateInventoryItem();
   const deleteInventoryItem = useDeleteInventoryItem();
+  const createBorrowRequest = useCreateBorrowRequest();
 
   const categories = categoriesQuery.data ?? EMPTY_CATEGORIES;
   const parameters = parametersQuery.data ?? EMPTY_PARAMETERS;
@@ -501,6 +514,25 @@ export function InventoryPage() {
     });
   }
 
+  function submitBorrowRequest() {
+    if (!borrowItem) return;
+    createBorrowRequest.mutate(
+      {
+        inventoryItemId: borrowItem.inventory_item_id,
+        payload: { request_note: borrowNote.trim() || undefined },
+      },
+      {
+        onError: (error) =>
+          toast.error({ title: "申请借用失败", description: toErrorMessage(error) }),
+        onSuccess: () => {
+          toast.success({ title: "已提交借用申请" });
+          setBorrowItem(null);
+          setBorrowNote("");
+        },
+      },
+    );
+  }
+
   const pageActions = (
     <Button
       disabled={!canManage || !selectedLaboratoryId}
@@ -617,6 +649,7 @@ export function InventoryPage() {
         </div>
         <InventoryTable
           canManage={canManage}
+          canBorrow={canBorrow}
           columns={visibleColumns}
           items={visibleItems}
           loading={
@@ -630,6 +663,7 @@ export function InventoryPage() {
           sort={sort}
           onDelete={setDeletingItem}
           onEdit={(item) => setEditor({ item, mode: "edit" })}
+          onBorrow={setBorrowItem}
           onRowClick={(item) => navigate(`/inventory/${item.inventory_item_id}`)}
           onSort={handleSort}
         />
@@ -664,6 +698,17 @@ export function InventoryPage() {
         loading={deleteInventoryItem.isPending}
         onClose={() => setDeletingItem(null)}
         onConfirm={confirmDelete}
+      />
+      <BorrowRequestDialog
+        item={borrowItem}
+        loading={createBorrowRequest.isPending}
+        note={borrowNote}
+        onNoteChange={setBorrowNote}
+        onClose={() => {
+          setBorrowItem(null);
+          setBorrowNote("");
+        }}
+        onConfirm={submitBorrowRequest}
       />
     </main>
   );
@@ -1214,20 +1259,24 @@ function ColumnSelector({
 }
 
 function InventoryTable({
+  canBorrow,
   canManage,
   columns,
   items,
   loading,
+  onBorrow,
   onDelete,
   onEdit,
   onRowClick,
   onSort,
   sort,
 }: {
+  canBorrow: boolean;
   canManage: boolean;
   columns: InventoryColumn[];
   items: InventoryItem[];
   loading: boolean;
+  onBorrow: (item: InventoryItem) => void;
   onDelete: (item: InventoryItem) => void;
   onEdit: (item: InventoryItem) => void;
   onRowClick: (item: InventoryItem) => void;
@@ -1307,8 +1356,10 @@ function InventoryTable({
               ))}
               <td style={{ textAlign: "right" }} onClick={(event) => event.stopPropagation()}>
                 <InventoryActions
+                  canBorrow={canBorrow}
                   canManage={canManage}
                   item={item}
+                  onBorrow={onBorrow}
                   onDelete={onDelete}
                   onEdit={onEdit}
                 />
@@ -1322,22 +1373,27 @@ function InventoryTable({
 }
 
 function InventoryActions({
+  canBorrow,
   canManage,
   item,
+  onBorrow,
   onDelete,
   onEdit,
 }: {
+  canBorrow: boolean;
   canManage: boolean;
   item: InventoryItem;
+  onBorrow: (item: InventoryItem) => void;
   onDelete: (item: InventoryItem) => void;
   onEdit: (item: InventoryItem) => void;
 }) {
+  const canBorrowThisItem = canBorrow && item.status === "available";
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
         <Button
           aria-label={`库存 ${inventoryItemLabel(item)} 操作`}
-          disabled={!canManage}
+          disabled={!canManage && !canBorrowThisItem}
           size="icon"
           variant="ghost"
           onClick={(event) => event.stopPropagation()}
@@ -1347,14 +1403,24 @@ function InventoryActions({
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content className="dropdown-content" align="end">
-          <DropdownMenu.Item className="dropdown-item" onSelect={() => onEdit(item)}>
-            <Pencil size={15} />
-            编辑库存
-          </DropdownMenu.Item>
-          <DropdownMenu.Item className="dropdown-item" onSelect={() => onDelete(item)}>
-            <Trash2 size={15} />
-            删除库存
-          </DropdownMenu.Item>
+          {canBorrowThisItem ? (
+            <DropdownMenu.Item className="dropdown-item" onSelect={() => onBorrow(item)}>
+              <HandHelping size={15} />
+              申请借用
+            </DropdownMenu.Item>
+          ) : null}
+          {canManage ? (
+            <>
+              <DropdownMenu.Item className="dropdown-item" onSelect={() => onEdit(item)}>
+                <Pencil size={15} />
+                编辑库存
+              </DropdownMenu.Item>
+              <DropdownMenu.Item className="dropdown-item" onSelect={() => onDelete(item)}>
+                <Trash2 size={15} />
+                删除库存
+              </DropdownMenu.Item>
+            </>
+          ) : null}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
@@ -1903,6 +1969,59 @@ function DeleteInventoryDialog({
           ? `确认删除“${item.asset.name} · ${inventoryItemLabel(item)}”？已分配库存将由后端拒绝删除。`
           : ""}
       </p>
+    </Dialog>
+  );
+}
+
+function BorrowRequestDialog({
+  item,
+  loading,
+  note,
+  onNoteChange,
+  onClose,
+  onConfirm,
+}: {
+  item: InventoryItem | null;
+  loading: boolean;
+  note: string;
+  onNoteChange: (value: string) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog
+      description="提交后由本实验室的管理员或普通用户审批。"
+      onOpenChange={(open) => {
+        if (!open && !loading) onClose();
+      }}
+      open={item !== null}
+      title="申请借用"
+      footer={
+        <div className="dialog-footer">
+          <Button disabled={loading} onClick={onClose}>
+            取消
+          </Button>
+          <Button disabled={loading} onClick={onConfirm} variant="primary">
+            提交申请
+          </Button>
+        </div>
+      }
+    >
+      {item ? (
+        <p className="dialog-description">
+          {item.asset.name} · {inventoryItemLabel(item)}
+        </p>
+      ) : null}
+      <FormField htmlFor="inventory-borrow-note" label="备注">
+        <textarea
+          className="input"
+          id="inventory-borrow-note"
+          placeholder="可选：说明借用用途"
+          rows={4}
+          value={note}
+          onChange={(event) => onNoteChange(event.target.value)}
+        />
+      </FormField>
     </Dialog>
   );
 }

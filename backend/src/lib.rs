@@ -1,9 +1,9 @@
 pub mod access_control;
-pub mod attachment_storage;
 pub mod audit;
 pub mod authentication;
 pub mod configuration;
 pub mod domain;
+pub mod file_storage;
 pub mod idempotency;
 pub mod routes;
 pub mod session_state;

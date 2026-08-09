@@ -1,14 +1,13 @@
-use super::model::{UserRow, fetch_user};
-use crate::access_control::{Actor, get_actor};
+use super::model::{DeletedUserRow, delete_user_rollback_details, fetch_user};
+use crate::access_control::get_actor;
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::UserId;
-use crate::domain::{LaboratoryId, UserType};
+use crate::domain::UserType;
+use crate::domain::{UserId, UserRole};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
-use chrono::{DateTime, Utc};
-use serde_json::{Value, json};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
@@ -51,23 +50,46 @@ pub async fn delete_user(
     pool: web::Data<PgPool>,
     target_user_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, DeleteUserError> {
+    let target = fetch_user(&pool, *target_user_id).await?;
+    let target_user_id = target.user_id.into();
+    let target_user_type = target
+        .user_type_name
+        .as_ref()
+        .map(UserType::parse)
+        .transpose()
+        .map_err(DeleteUserError::ValidationError)?
+        .ok_or(DeleteUserError::UnexpectedError(anyhow::anyhow!(
+            "User type is missing for the target user"
+        )))?;
+    let target_laboratory_id = target.laboratory_id.map(Uuid::into);
+    let target_user_role = UserRole {
+        user_type: target_user_type,
+        laboratory_id: target_laboratory_id,
+    };
+
     let actor = get_actor(&pool, actor_user_id)
         .await
         .map_err(DeleteUserError::UnexpectedError)?
         .ok_or(DeleteUserError::Forbidden(
             "Actor not found in the database".into(),
         ))?;
-    let target = fetch_user(&pool, *target_user_id).await?;
-    let target_user_id = UserId::parse(target.user_id).map_err(DeleteUserError::ValidationError)?;
-    let target_user_type = parse_user_type(&target)?;
-    let target_laboratory_id = parse_laboratory_id(target.laboratory_id)?;
-
     if actor.user_id == target_user_id {
         return Err(DeleteUserError::ValidationError(
             "Users cannot delete themselves".into(),
         ));
     }
-    validate_delete_permission(&actor, target_user_type, target_laboratory_id)?;
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::User,
+        Action::DeleteUser(&target_user_role),
+    )
+    .await?
+    {
+        return Err(DeleteUserError::Forbidden(
+            "You don't have permission to delete this user.".into(),
+        ));
+    }
 
     let mut transaction = pool
         .begin()
@@ -76,7 +98,7 @@ pub async fn delete_user(
     let deleted_user = delete_user_from_database(&mut transaction, target.user_id).await?;
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Delete,
         AuditResource::User,
         Some(deleted_user.user_id),
@@ -89,74 +111,6 @@ pub async fn delete_user(
         .context("Failed to commit SQL transaction to delete a user.")?;
 
     Ok(HttpResponse::NoContent().finish())
-}
-
-#[derive(sqlx::FromRow)]
-struct DeletedUserRow {
-    user_id: Uuid,
-    username: String,
-    password_hash: String,
-    email: Option<String>,
-    phone_number: Option<String>,
-    user_type_id: Option<Uuid>,
-    user_type_name: Option<String>,
-    laboratory_id: Option<Uuid>,
-    created_at: DateTime<Utc>,
-    last_login_at: Option<DateTime<Utc>>,
-}
-
-fn delete_user_rollback_details(user: &DeletedUserRow) -> Value {
-    json!({
-        "rollback": {
-            "operation": "create",
-            "resource_type": "user",
-            "values": {
-                "user_id": user.user_id,
-                "username": &user.username,
-                "password_hash": &user.password_hash,
-                "user_type_id": user.user_type_id,
-                "user_type": user.user_type_name.as_deref(),
-                "laboratory_id": user.laboratory_id,
-                "email": user.email.as_deref(),
-                "phone_number": user.phone_number.as_deref(),
-                "created_at": &user.created_at,
-                "last_login_at": user.last_login_at.as_ref(),
-            },
-        },
-    })
-}
-
-fn parse_user_type(user: &UserRow) -> Result<UserType, DeleteUserError> {
-    UserType::parse(
-        user.user_type_name
-            .as_ref()
-            .ok_or(DeleteUserError::ValidationError(
-                "User type is required".into(),
-            ))?,
-    )
-    .map_err(DeleteUserError::ValidationError)
-}
-
-fn parse_laboratory_id(
-    laboratory_id: Option<Uuid>,
-) -> Result<Option<LaboratoryId>, DeleteUserError> {
-    laboratory_id
-        .map(|id| LaboratoryId::parse(id).map_err(DeleteUserError::ValidationError))
-        .transpose()
-}
-
-fn validate_delete_permission(
-    actor: &Actor,
-    target_user_type: UserType,
-    target_laboratory_id: Option<LaboratoryId>,
-) -> Result<(), DeleteUserError> {
-    if actor.can_manage_user(target_user_type, target_laboratory_id) {
-        Ok(())
-    } else {
-        Err(DeleteUserError::Forbidden(
-            "You don't have permission to delete this user.".into(),
-        ))
-    }
 }
 
 #[tracing::instrument(

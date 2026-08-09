@@ -1,4 +1,4 @@
-use crate::domain::{AssetParameterId, LaboratoryId};
+use crate::domain::AssetParameterId;
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -291,10 +291,6 @@ pub(super) fn map_database_error(
         )),
         _ => None,
     }
-}
-
-pub(super) fn parse_laboratory_id(laboratory_id: Uuid) -> Result<LaboratoryId, anyhow::Error> {
-    LaboratoryId::parse(laboratory_id).map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 pub(super) enum AssetParameterDatabaseError {

@@ -9,9 +9,15 @@ use uuid::Uuid;
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct UserId(pub Uuid);
 
-impl UserId {
-    pub fn parse(id: Uuid) -> Result<Self, String> {
-        Ok(Self(id))
+impl From<UserId> for Uuid {
+    fn from(user_id: UserId) -> Self {
+        user_id.0
+    }
+}
+
+impl Into<UserId> for Uuid {
+    fn into(self) -> UserId {
+        UserId(self)
     }
 }
 

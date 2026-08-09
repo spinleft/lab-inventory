@@ -5,7 +5,7 @@ import { createApiClient } from "../../shared/api/httpClient";
 
 export const attachmentVisibilitySchema = z.enum(["public", "internal"]);
 
-export const attachmentUploadSchema = z.object({
+export const fileUploadSchema = z.object({
   created_at: z.string(),
   expires_at: z.string(),
   file_size_bytes: z.number(),
@@ -16,27 +16,38 @@ export const attachmentUploadSchema = z.object({
   upload_id: z.string().uuid(),
 });
 
+export const attachmentFileSchema = z.object({
+  created_at: z.string(),
+  file_id: z.string().uuid(),
+  file_size_bytes: z.number(),
+  mime_type: z.string().nullable(),
+  original_file_name: z.string(),
+  sha256_hex: z.string(),
+  uploaded_by_user_id: z.string().uuid().nullable(),
+});
+
+export const attachmentTargetSchema = z.discriminatedUnion("type", [
+  z.object({ id: z.string().uuid(), type: z.literal("asset") }),
+  z.object({ id: z.string().uuid(), type: z.literal("inventory_item") }),
+]);
+
 export const attachmentSchema = z.object({
-  asset_id: z.string().uuid().nullable(),
   attachment_id: z.string().uuid(),
   created_at: z.string(),
   description: z.string().nullable(),
   display_name: z.string(),
-  file_size_bytes: z.number(),
-  inventory_item_id: z.string().uuid().nullable(),
+  file: attachmentFileSchema,
+  file_id: z.string().uuid(),
   laboratory_id: z.string().uuid(),
-  mime_type: z.string().nullable(),
-  original_file_name: z.string(),
-  sha256_hex: z.string(),
+  target: attachmentTargetSchema,
   updated_at: z.string(),
-  uploaded_by_user_id: z.string().uuid().nullable(),
   visibility: attachmentVisibilitySchema,
 });
 
 const attachmentListSchema = z.array(attachmentSchema);
 
 export type AttachmentVisibility = z.infer<typeof attachmentVisibilitySchema>;
-export type AttachmentUpload = z.infer<typeof attachmentUploadSchema>;
+export type FileUpload = z.infer<typeof fileUploadSchema>;
 export type Attachment = z.infer<typeof attachmentSchema>;
 
 export type AttachmentClaim = {
@@ -94,7 +105,7 @@ export function useInventoryItemAttachments({
   });
 }
 
-export function useUploadAttachment() {
+export function useUploadFile() {
   const { apiBaseUrl } = useBackendConfig();
 
   return useMutation({
@@ -102,20 +113,20 @@ export function useUploadAttachment() {
       const client = createApiClient(apiBaseUrl);
       const form = new FormData();
       form.append("file", file);
-      return attachmentUploadSchema.parse(
-        await client.postFormData(`/laboratories/${laboratoryId}/attachment-uploads`, form),
+      return fileUploadSchema.parse(
+        await client.postFormData(`/laboratories/${laboratoryId}/file-uploads`, form),
       );
     },
   });
 }
 
-export function useDeleteAttachmentUpload() {
+export function useDeleteFileUpload() {
   const { apiBaseUrl } = useBackendConfig();
 
   return useMutation({
     mutationFn: async (uploadId: string) => {
       const client = createApiClient(apiBaseUrl);
-      await client.delete(`/attachment-uploads/${uploadId}`);
+      await client.delete(`/file-uploads/${uploadId}`);
     },
   });
 }
@@ -188,12 +199,12 @@ export function useDownloadAttachment() {
   });
 }
 
-export async function deleteAttachmentUploads(apiBaseUrl: string, uploadIds: string[]) {
+export async function deleteFileUploads(apiBaseUrl: string, uploadIds: string[]) {
   if (uploadIds.length === 0) {
     return;
   }
   const client = createApiClient(apiBaseUrl);
   await Promise.allSettled(
-    uploadIds.map((uploadId) => client.delete(`/attachment-uploads/${uploadId}`)),
+    uploadIds.map((uploadId) => client.delete(`/file-uploads/${uploadId}`)),
   );
 }

@@ -1,13 +1,16 @@
-use super::model::{
-    InventoryItemError, InventoryItemResponse, actor_for_user, convert_quantity_between_units,
-    find_quantity_aggregate_for_update, insert_inventory_item, parse_nullable_string,
-    parse_nullable_uuid, record_inventory_item_audit, resolve_asset_quantity_unit,
+﻿use super::model::{
+    InventoryItemDatabaseError, InventoryItemResponse, add_quantities_to_item,
+    convert_quantity_between_units, fetch_inventory_item_for_update,
+    find_quantity_aggregate_for_update, insert_inventory_item, resolve_asset_quantity_unit,
     set_quantity_on_hand, split_inventory_item_rollback_details, validate_location,
-    validate_quantity_item, validate_status, validate_write_permission,
+    validate_quantity_item,
 };
-use crate::audit::AuditAction;
-use crate::domain::UserId;
-use actix_web::{HttpResponse, web};
+use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::audit::{AuditAction, AuditResource, record_audit};
+use crate::domain::{InventoryItemId, SplitInventoryItem as SplitInventoryItemCommand, UserId};
+use crate::utils::error_chain_fmt;
+use actix_web::http::StatusCode;
+use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::PgPool;
@@ -33,6 +36,24 @@ struct SplitInventoryItemResponse {
     target: InventoryItemResponse,
 }
 
+impl TryFrom<JsonData> for SplitInventoryItemCommand {
+    type Error = String;
+
+    fn try_from(value: JsonData) -> Result<Self, Self::Error> {
+        Self::parse(
+            value.quantity,
+            value.quantity_unit_id.map(Uuid::into),
+            value.batch_number,
+            value
+                .location_id
+                .map(|location_id| location_id.map(Uuid::into)),
+            value.status,
+            value.public_notes,
+            value.internal_notes,
+        )
+    }
+}
+
 fn deserialize_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
     D: Deserializer<'de>,
@@ -41,8 +62,51 @@ where
     Option::<T>::deserialize(deserializer).map(Some)
 }
 
+#[derive(thiserror::Error)]
+pub enum SplitInventoryItemError {
+    #[error("{0}")]
+    ValidationError(String),
+    #[error("{0}")]
+    Forbidden(String),
+    #[error("{0}")]
+    NotFound(String),
+    #[error("{0}")]
+    ConflictError(String),
+    #[error(transparent)]
+    UnexpectedError(#[from] anyhow::Error),
+}
+
+impl std::fmt::Debug for SplitInventoryItemError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+impl ResponseError for SplitInventoryItemError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            SplitInventoryItemError::ValidationError(_) => StatusCode::BAD_REQUEST,
+            SplitInventoryItemError::Forbidden(_) => StatusCode::FORBIDDEN,
+            SplitInventoryItemError::NotFound(_) => StatusCode::NOT_FOUND,
+            SplitInventoryItemError::ConflictError(_) => StatusCode::CONFLICT,
+            SplitInventoryItemError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<InventoryItemDatabaseError> for SplitInventoryItemError {
+    fn from(error: InventoryItemDatabaseError) -> Self {
+        match error {
+            InventoryItemDatabaseError::Validation(message) => Self::ValidationError(message),
+            InventoryItemDatabaseError::NotFound(message) => Self::NotFound(message),
+            InventoryItemDatabaseError::Conflict(message) => Self::ConflictError(message),
+            InventoryItemDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
+        }
+    }
+}
+
 #[tracing::instrument(
-    name = "Split inventory item",
+    name = "Split an inventory item",
     skip(pool, payload),
     fields(actor_user_id=%actor_user_id, inventory_item_id=%inventory_item_id)
 )]
@@ -51,62 +115,72 @@ pub async fn split_inventory_item(
     pool: web::Data<PgPool>,
     inventory_item_id: web::Path<Uuid>,
     payload: web::Json<JsonData>,
-) -> Result<HttpResponse, InventoryItemError> {
-    let actor = actor_for_user(&pool, actor_user_id).await?;
-    let payload = payload.into_inner();
-    if payload.quantity <= 0.0 {
-        return Err(InventoryItemError::ValidationError(
-            "quantity must be positive".into(),
+) -> Result<HttpResponse, SplitInventoryItemError> {
+    let inventory_item_id: InventoryItemId = inventory_item_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::InventoryItem,
+        Action::Update(inventory_item_id.into()),
+    )
+    .await?
+    {
+        return Err(SplitInventoryItemError::Forbidden(
+            "You don't have permission to split this inventory item.".into(),
         ));
     }
+
+    let command = SplitInventoryItemCommand::try_from(payload.into_inner())
+        .map_err(SplitInventoryItemError::ValidationError)?;
 
     let mut transaction = pool
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    let source_before = super::model::fetch_inventory_item_for_update(
-        &mut transaction,
-        inventory_item_id.into_inner(),
-    )
-    .await?
-    .ok_or_else(|| InventoryItemError::NotFound("Inventory item not found".into()))?;
-    validate_write_permission(&actor, source_before.laboratory_id)?;
-    validate_quantity_item(&source_before)?;
-
-    let available_quantity = source_before.quantity_on_hand - source_before.quantity_allocated;
-    if payload.quantity > available_quantity {
-        return Err(InventoryItemError::ValidationError(
+    let source_before = fetch_inventory_item_for_update(&mut transaction, inventory_item_id.into())
+        .await?
+        .ok_or(SplitInventoryItemError::NotFound(
+            "Inventory item not found".into(),
+        ))?;
+    validate_quantity_item(&source_before).map_err(SplitInventoryItemError::ValidationError)?;
+    if command.quantity > source_before.quantity_on_hand - source_before.quantity_allocated {
+        return Err(SplitInventoryItemError::ValidationError(
             "Split quantity cannot exceed unallocated quantity".into(),
         ));
     }
 
-    let target_status =
-        validate_status(payload.status)?.unwrap_or_else(|| source_before.status.clone());
-    let target_batch =
-        parse_nullable_string(payload.batch_number).resolve(source_before.batch_number.clone());
-    let target_location_id =
-        parse_nullable_uuid(payload.location_id).resolve(source_before.location_id);
+    let target_status = command
+        .status
+        .map(|status| status.as_str().to_string())
+        .unwrap_or_else(|| source_before.status.clone());
+    let target_batch_number = command
+        .batch_number
+        .resolve(source_before.batch_number.clone());
+    let target_location_id = command
+        .location_id
+        .resolve(source_before.location_id.map(Uuid::into))
+        .map(Uuid::from);
     if let Some(location_id) = target_location_id {
         validate_location(&mut transaction, source_before.laboratory_id, location_id).await?;
     }
     let target_unit_id = resolve_asset_quantity_unit(
-        payload.quantity_unit_id,
+        command.quantity_unit_id.map(Uuid::from),
         source_before.asset_default_unit_id,
-    )?;
+    )
+    .map_err(SplitInventoryItemError::ValidationError)?;
     let target_quantity = convert_quantity_between_units(
         &mut transaction,
         source_before.quantity_unit_id,
         target_unit_id,
-        payload.quantity,
+        command.quantity,
     )
     .await?;
-
-    if target_batch == source_before.batch_number
+    if target_batch_number == source_before.batch_number
         && target_location_id == source_before.location_id
         && target_status == source_before.status
         && target_unit_id == source_before.quantity_unit_id
     {
-        return Err(InventoryItemError::ValidationError(
+        return Err(SplitInventoryItemError::ValidationError(
             "Split target must differ by batch, location, status, or unit".into(),
         ));
     }
@@ -115,58 +189,61 @@ pub async fn split_inventory_item(
         &mut transaction,
         source_before.laboratory_id,
         source_before.asset_id,
-        target_batch.as_deref(),
+        target_batch_number.as_deref(),
         target_location_id,
         &target_status,
         target_unit_id,
         Some(source_before.inventory_item_id),
     )
     .await?;
-
     let source_after = set_quantity_on_hand(
         &mut transaction,
         source_before.inventory_item_id,
-        source_before.quantity_on_hand - payload.quantity,
+        source_before.quantity_on_hand - command.quantity,
     )
     .await?;
-    let target_after = if let Some(target) = target_before.as_ref() {
-        super::model::add_quantities_to_item(
-            &mut transaction,
-            target.inventory_item_id,
-            target_quantity,
-            0.0,
-        )
-        .await?
-    } else {
-        insert_inventory_item(
-            &mut transaction,
-            source_before.asset_id,
-            source_before.laboratory_id,
-            "quantity",
-            None,
-            target_batch.as_deref(),
-            target_quantity,
-            0.0,
-            target_unit_id,
-            target_location_id,
-            &target_status,
-            payload
-                .public_notes
-                .as_deref()
-                .or(source_before.public_notes.as_deref()),
-            payload
-                .internal_notes
-                .as_deref()
-                .or(source_before.internal_notes.as_deref()),
-        )
-        .await?
+    let target_after = match target_before.as_ref() {
+        Some(target) => {
+            add_quantities_to_item(
+                &mut transaction,
+                target.inventory_item_id,
+                target_quantity,
+                0.0,
+            )
+            .await?
+        }
+        None => {
+            insert_inventory_item(
+                &mut transaction,
+                source_before.asset_id,
+                source_before.laboratory_id,
+                "quantity",
+                None,
+                target_batch_number.as_deref(),
+                target_quantity,
+                0.0,
+                target_unit_id,
+                target_location_id,
+                &target_status,
+                command
+                    .public_notes
+                    .as_deref()
+                    .or(source_before.public_notes.as_deref()),
+                command
+                    .internal_notes
+                    .as_deref()
+                    .or(source_before.internal_notes.as_deref()),
+            )
+            .await?
+        }
     };
 
-    record_inventory_item_audit(
+    record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Adjust,
-        source_after.inventory_item_id,
+        AuditResource::InventoryItem,
+        Some(source_after.inventory_item_id),
         split_inventory_item_rollback_details(
             &source_before,
             target_before.as_ref(),
@@ -177,10 +254,10 @@ pub async fn split_inventory_item(
     transaction
         .commit()
         .await
-        .context("Failed to commit SQL transaction to split inventory item.")?;
+        .context("Failed to commit SQL transaction to split an inventory item.")?;
 
     Ok(HttpResponse::Ok().json(SplitInventoryItemResponse {
-        source: InventoryItemResponse::from(source_after),
-        target: InventoryItemResponse::from(target_after),
+        source: InventoryItemResponse::from_row(source_after, true),
+        target: InventoryItemResponse::from_row(target_after, true),
     }))
 }

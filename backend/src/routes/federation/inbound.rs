@@ -4,9 +4,9 @@ use super::model::{
 };
 use super::public_data::{parse_read_target, respond_public_data};
 use super::security::{ensure_enabled, normalize_base_url, sha256_hex, verify_inbound_request};
-use crate::attachment_storage::AttachmentStorage;
 use crate::authentication::hash_password;
 use crate::configuration::FederationSettings;
+use crate::file_storage::FileStorage;
 use actix_web::{HttpRequest, HttpResponse, web};
 use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
@@ -108,7 +108,7 @@ pub async fn accept_pairing(
 pub async fn inbound_get(
     pool: web::Data<PgPool>,
     settings: web::Data<FederationSettings>,
-    storage: web::Data<AttachmentStorage>,
+    storage: web::Data<FileStorage>,
     path: web::Path<InboundPath>,
     req: HttpRequest,
 ) -> Result<HttpResponse, FederationError> {
@@ -208,6 +208,7 @@ async fn upsert_guest_link(
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (local_laboratory_id, remote_node_id, remote_laboratory_id, remote_user_id)
+        WHERE remote_node_id IS NOT NULL
         DO UPDATE SET
             remote_username = EXCLUDED.remote_username,
             remote_user_type = EXCLUDED.remote_user_type,

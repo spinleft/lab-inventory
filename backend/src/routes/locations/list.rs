@@ -1,10 +1,9 @@
 use super::model::{LocationResponse, LocationRow, fetch_location};
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::{LaboratoryId, LocationId, UserId};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
-use anyhow::anyhow;
 use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -51,15 +50,19 @@ pub async fn list_locations(
     laboratory_id: web::Path<Uuid>,
     query: web::Query<ListQuery>,
 ) -> Result<HttpResponse, ListLocationsError> {
-    let laboratory_id = LaboratoryId::parse(laboratory_id.into_inner())
-        .map_err(|e| ListLocationsError::UnexpectedError(anyhow!("{e}")))?;
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(ListLocationsError::UnexpectedError)?
-        .ok_or(ListLocationsError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
-    validate_read_permission(&actor, &laboratory_id)?;
+    let laboratory_id: LaboratoryId = laboratory_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Location,
+        Action::Browse(laboratory_id.into()),
+    )
+    .await?
+    {
+        return Err(ListLocationsError::Forbidden(
+            "You don't have permission to view locations.".into(),
+        ));
+    }
 
     let root_path = match query.root_location_id {
         Some(root_location_id) => {
@@ -83,19 +86,6 @@ pub async fn list_locations(
         .collect();
 
     Ok(HttpResponse::Ok().json(locations))
-}
-
-fn validate_read_permission(
-    actor: &Actor,
-    target_laboratory_id: &LaboratoryId,
-) -> Result<(), ListLocationsError> {
-    if actor.can_query_laboratory_resource(target_laboratory_id) {
-        Ok(())
-    } else {
-        Err(ListLocationsError::Forbidden(
-            "You do not have permission to view this location".into(),
-        ))
-    }
 }
 
 async fn fetch_locations(

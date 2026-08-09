@@ -27,12 +27,12 @@ impl NewAssetCategory {
 #[cfg(test)]
 mod tests {
     use super::NewAssetCategory;
-    use crate::domain::{AssetCategoryCode, AssetCategoryId, AssetCategoryName};
+    use crate::domain::{AssetCategoryCode, AssetCategoryName};
     use uuid::Uuid;
 
     #[test]
     fn new_asset_category_keeps_parent_name_code_and_description() {
-        let parent_category_id = AssetCategoryId::parse(Uuid::new_v4()).unwrap();
+        let parent_category_id = Uuid::new_v4().into();
         let name = AssetCategoryName::parse("Microscopes".into()).unwrap();
         let code = AssetCategoryCode::parse("microscopes".into()).unwrap();
 

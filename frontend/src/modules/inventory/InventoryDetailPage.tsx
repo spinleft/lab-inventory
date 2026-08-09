@@ -3,12 +3,16 @@ import { type ReactNode, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../app/auth-context";
 import { useLaboratorySelection } from "../../app/laboratory-selection-context";
+import { toErrorMessage } from "../../shared/lib/errors";
 import { formatDate } from "../../shared/lib/date";
 import { Badge } from "../../shared/ui/Badge";
 import { Button } from "../../shared/ui/Button";
 import { DataTable, type DataTableColumn } from "../../shared/ui/DataTable";
 import { EmptyState } from "../../shared/ui/EmptyState";
+import { Dialog } from "../../shared/ui/Dialog";
+import { FormField } from "../../shared/ui/FormField";
 import { PageHeader } from "../../shared/ui/PageHeader";
+import { useToast } from "../../shared/ui/Toast";
 import {
   type AssetCategory,
   type Location,
@@ -19,8 +23,9 @@ import {
   useUnits,
 } from "../admin/api";
 import { AttachmentSection } from "../attachments/AttachmentPanel";
-import { canManageLaboratoryAssets } from "../auth/permissions";
+import { canManageLaboratoryAssets, canRequestBorrow } from "../auth/permissions";
 import { type AssetParameterValue, useAsset } from "../assets/api";
+import { useCreateBorrowRequest } from "../borrow-requests/api";
 import {
   type InventoryItem,
   useCreateInventoryItems,
@@ -48,12 +53,21 @@ export function InventoryDetailPage() {
   const { currentUser } = useAuth();
   const { isRemoteLaboratory, selectedDataScope } = useLaboratorySelection();
   const navigate = useNavigate();
+  const toast = useToast();
   const { inventoryItemId = "" } = useParams();
   const [editing, setEditing] = useState(false);
+  const [borrowDialogOpen, setBorrowDialogOpen] = useState(false);
+  const [borrowNote, setBorrowNote] = useState("");
   const inventoryQuery = useInventoryItem({ inventoryItemId, scope: selectedDataScope });
   const item = inventoryQuery.data;
   const canManage =
     !isRemoteLaboratory && canManageLaboratoryAssets(currentUser, item?.laboratory_id);
+  const canRequestBorrowItem =
+    canRequestBorrow(currentUser) &&
+    selectedDataScope.kind === "local" &&
+    item?.status === "available" &&
+    (currentUser.user_type.name === "guest" ||
+     item?.laboratory_id !== currentUser.laboratory?.laboratory_id);
   const assetQuery = useAsset({
     assetId: item?.asset_id ?? "",
     enabled: Boolean(item?.asset_id),
@@ -77,6 +91,7 @@ export function InventoryDetailPage() {
   });
   const unitsQuery = useUnits();
   const createInventoryItems = useCreateInventoryItems();
+  const createBorrowRequest = useCreateBorrowRequest();
   const updateInventoryItem = useUpdateInventoryItem();
   const categories = categoriesQuery.data ?? EMPTY_CATEGORIES;
   const locations = locationsQuery.data ?? EMPTY_LOCATIONS;
@@ -168,6 +183,11 @@ export function InventoryDetailPage() {
               <Pencil size={15} />
               编辑库存
             </Button>
+            {canRequestBorrowItem ? (
+              <Button onClick={() => setBorrowDialogOpen(true)} variant="primary">
+                申请借用
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -269,6 +289,52 @@ export function InventoryDetailPage() {
         onClose={() => setEditing(false)}
         onSaved={() => setEditing(false)}
       />
+
+      <Dialog
+        description="提交后由本实验室的管理员或普通用户审批。"
+        footer={
+          <div className="dialog-footer">
+            <Button onClick={() => setBorrowDialogOpen(false)}>取消</Button>
+            <Button
+              disabled={createBorrowRequest.isPending}
+              variant="primary"
+              onClick={() => {
+                createBorrowRequest.mutate(
+                  {
+                    inventoryItemId: item.inventory_item_id,
+                    payload: { request_note: borrowNote.trim() || undefined },
+                  },
+                  {
+                    onError: (error) =>
+                      toast.error({ title: "申请借用失败", description: toErrorMessage(error) }),
+                    onSuccess: () => {
+                      toast.success({ title: "已提交借用申请" });
+                      setBorrowDialogOpen(false);
+                      setBorrowNote("");
+                    },
+                  },
+                );
+              }}
+            >
+              提交申请
+            </Button>
+          </div>
+        }
+        onOpenChange={setBorrowDialogOpen}
+        open={borrowDialogOpen}
+        title="申请借用"
+      >
+        <FormField htmlFor="borrow-request-note" label="备注">
+          <textarea
+            className="input"
+            id="borrow-request-note"
+            placeholder="可选：说明借用用途"
+            rows={4}
+            value={borrowNote}
+            onChange={(event) => setBorrowNote(event.target.value)}
+          />
+        </FormField>
+      </Dialog>
     </main>
   );
 }

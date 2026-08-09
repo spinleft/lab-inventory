@@ -43,6 +43,20 @@ pub(super) struct UserRow {
     pub(super) last_login_at: Option<DateTime<Utc>>,
 }
 
+#[derive(sqlx::FromRow)]
+pub(super) struct DeletedUserRow {
+    pub(super) user_id: Uuid,
+    pub(super) username: String,
+    pub(super) password_hash: String,
+    pub(super) email: Option<String>,
+    pub(super) phone_number: Option<String>,
+    pub(super) user_type_id: Option<Uuid>,
+    pub(super) user_type_name: Option<String>,
+    pub(super) laboratory_id: Option<Uuid>,
+    pub(super) created_at: DateTime<Utc>,
+    pub(super) last_login_at: Option<DateTime<Utc>>,
+}
+
 pub(super) fn create_user_rollback_details(user: &UserRow) -> Value {
     json!({
         "rollback": {
@@ -70,6 +84,27 @@ pub(super) fn update_user_rollback_details(user: &UserRow) -> Value {
                 "laboratory_id": user.laboratory_id,
                 "email": user.email.as_deref(),
                 "phone_number": user.phone_number.as_deref(),
+            },
+        },
+    })
+}
+
+pub(super) fn delete_user_rollback_details(user: &DeletedUserRow) -> Value {
+    json!({
+        "rollback": {
+            "operation": "create",
+            "resource_type": "user",
+            "values": {
+                "user_id": user.user_id,
+                "username": &user.username,
+                "password_hash": &user.password_hash,
+                "user_type_id": user.user_type_id,
+                "user_type": user.user_type_name.as_deref(),
+                "laboratory_id": user.laboratory_id,
+                "email": user.email.as_deref(),
+                "phone_number": user.phone_number.as_deref(),
+                "created_at": &user.created_at,
+                "last_login_at": user.last_login_at.as_ref(),
             },
         },
     })

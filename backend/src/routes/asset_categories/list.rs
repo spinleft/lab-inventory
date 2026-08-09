@@ -2,12 +2,11 @@ use super::model::{
     AssetCategoryResponse, AssetCategoryRow, fetch_asset_category,
     fetch_asset_category_parameter_assignments_for_categories,
 };
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::{AssetCategoryId, LaboratoryId, UserId};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
-use anyhow::anyhow;
 use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -54,15 +53,19 @@ pub async fn list_asset_categories(
     laboratory_id: web::Path<Uuid>,
     query: web::Query<ListQuery>,
 ) -> Result<HttpResponse, ListAssetCategoriesError> {
-    let laboratory_id = LaboratoryId::parse(laboratory_id.into_inner())
-        .map_err(|e| ListAssetCategoriesError::UnexpectedError(anyhow!("{e}")))?;
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(ListAssetCategoriesError::UnexpectedError)?
-        .ok_or(ListAssetCategoriesError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
-    validate_read_permission(&actor, &laboratory_id)?;
+    let laboratory_id: LaboratoryId = laboratory_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::AssetCategory,
+        Action::Browse(laboratory_id.into()),
+    )
+    .await?
+    {
+        return Err(ListAssetCategoriesError::Forbidden(
+            "You don't have permission to view asset categories.".into(),
+        ));
+    }
 
     let root_path = match query.root_category_id {
         Some(root_category_id) => {
@@ -97,19 +100,6 @@ pub async fn list_asset_categories(
         .collect();
 
     Ok(HttpResponse::Ok().json(categories))
-}
-
-fn validate_read_permission(
-    actor: &Actor,
-    target_laboratory_id: &LaboratoryId,
-) -> Result<(), ListAssetCategoriesError> {
-    if actor.can_query_laboratory_resource(target_laboratory_id) {
-        Ok(())
-    } else {
-        Err(ListAssetCategoriesError::Forbidden(
-            "You do not have permission to view this asset category".into(),
-        ))
-    }
 }
 
 async fn fetch_asset_categories(

@@ -1,6 +1,6 @@
 use super::model::FederationError;
-use crate::attachment_storage::AttachmentStorage;
-use crate::domain::AttachmentStorageKey;
+use crate::domain::FileStorageKey;
+use crate::file_storage::FileStorage;
 use actix_web::HttpResponse;
 use actix_web::http::header;
 use chrono::{DateTime, NaiveDate, Utc};
@@ -445,7 +445,7 @@ pub(super) fn parse_read_target(tail: &str) -> Result<FederationReadTarget, Fede
 
 pub(super) async fn respond_public_data(
     pool: &PgPool,
-    storage: &AttachmentStorage,
+    storage: &FileStorage,
     laboratory_id: Uuid,
     target: FederationReadTarget,
     query_string: &str,
@@ -1115,10 +1115,10 @@ async fn list_laboratory_attachments(
     let total: i64 = sqlx::query_scalar(
         r#"
         SELECT COUNT(*)
-        FROM attachments
-        WHERE laboratory_id = $1
-          AND deleted_at IS NULL
-          AND visibility = 'public'
+        FROM asset_attachment_assignments AS assignments
+        WHERE assignments.laboratory_id = $1
+          AND assignments.deleted_at IS NULL
+          AND assignments.visibility = 'public'
         "#,
     )
     .bind(laboratory_id)
@@ -1126,7 +1126,7 @@ async fn list_laboratory_attachments(
     .await
     .map_err(|e| FederationError::UnexpectedError(e.into()))?;
     let items = sqlx::query_as::<_, AttachmentPublicRow>(&attachment_select(
-        "WHERE laboratory_id = $1 AND deleted_at IS NULL AND visibility = 'public' ORDER BY created_at DESC, attachment_id LIMIT $2 OFFSET $3",
+        "WHERE assignments.laboratory_id = $1 AND assignments.deleted_at IS NULL AND assignments.visibility = 'public' ORDER BY assignments.created_at DESC, assignments.attachment_id LIMIT $2 OFFSET $3",
     ))
     .bind(laboratory_id)
     .bind(limit)
@@ -1148,7 +1148,7 @@ async fn list_asset_attachments(
     asset_id: Uuid,
 ) -> Result<Vec<AttachmentPublicRow>, FederationError> {
     sqlx::query_as::<_, AttachmentPublicRow>(&attachment_select(
-        "WHERE laboratory_id = $1 AND asset_id = $2 AND deleted_at IS NULL AND visibility = 'public' ORDER BY created_at DESC, attachment_id",
+        "WHERE assignments.laboratory_id = $1 AND assignments.asset_id = $2 AND assignments.deleted_at IS NULL AND assignments.visibility = 'public' ORDER BY assignments.created_at DESC, assignments.attachment_id",
     ))
     .bind(laboratory_id)
     .bind(asset_id)
@@ -1163,7 +1163,7 @@ async fn list_inventory_item_attachments(
     inventory_item_id: Uuid,
 ) -> Result<Vec<AttachmentPublicRow>, FederationError> {
     sqlx::query_as::<_, AttachmentPublicRow>(&attachment_select(
-        "WHERE laboratory_id = $1 AND inventory_item_id = $2 AND deleted_at IS NULL AND visibility = 'public' ORDER BY created_at DESC, attachment_id",
+        "WHERE assignments.laboratory_id = $1 AND assignments.inventory_item_id = $2 AND assignments.deleted_at IS NULL AND assignments.visibility = 'public' ORDER BY assignments.created_at DESC, assignments.attachment_id",
     ))
     .bind(laboratory_id)
     .bind(inventory_item_id)
@@ -1178,7 +1178,7 @@ async fn fetch_attachment(
     attachment_id: Uuid,
 ) -> Result<AttachmentPublicRow, FederationError> {
     sqlx::query_as::<_, AttachmentPublicRow>(&attachment_select(
-        "WHERE laboratory_id = $1 AND attachment_id = $2 AND deleted_at IS NULL AND visibility = 'public'",
+        "WHERE assignments.laboratory_id = $1 AND assignments.attachment_id = $2 AND assignments.deleted_at IS NULL AND assignments.visibility = 'public'",
     ))
     .bind(laboratory_id)
     .bind(attachment_id)
@@ -1190,18 +1190,19 @@ async fn fetch_attachment(
 
 async fn download_attachment(
     pool: &PgPool,
-    storage: &AttachmentStorage,
+    storage: &FileStorage,
     laboratory_id: Uuid,
     attachment_id: Uuid,
 ) -> Result<HttpResponse, FederationError> {
     let row = sqlx::query_as::<_, AttachmentDownloadRow>(
         r#"
-        SELECT storage_key, original_file_name, mime_type
-        FROM attachments
-        WHERE laboratory_id = $1
-          AND attachment_id = $2
-          AND deleted_at IS NULL
-          AND visibility = 'public'
+        SELECT files.storage_key, files.original_file_name, files.mime_type
+        FROM asset_attachment_assignments AS assignments
+        JOIN files ON files.file_id = assignments.file_id
+        WHERE assignments.laboratory_id = $1
+          AND assignments.attachment_id = $2
+          AND assignments.deleted_at IS NULL
+          AND assignments.visibility = 'public'
         "#,
     )
     .bind(laboratory_id)
@@ -1210,7 +1211,7 @@ async fn download_attachment(
     .await
     .map_err(|e| FederationError::UnexpectedError(e.into()))?
     .ok_or_else(|| FederationError::NotFound("Attachment not found".into()))?;
-    let storage_key = AttachmentStorageKey::parse(row.storage_key)
+    let storage_key = FileStorageKey::parse(row.storage_key)
         .map_err(|e| FederationError::UnexpectedError(anyhow::anyhow!("{e}")))?;
     let bytes = storage
         .read(&storage_key)
@@ -1237,21 +1238,22 @@ fn attachment_select(suffix: &str) -> String {
     format!(
         r#"
         SELECT
-            attachment_id,
-            laboratory_id,
-            asset_id,
-            inventory_item_id,
-            display_name,
-            original_file_name,
-            description,
-            mime_type,
-            file_size_bytes,
-            sha256_hex,
-            visibility,
-            uploaded_by_user_id,
-            created_at,
-            updated_at
-        FROM attachments
+            assignments.attachment_id,
+            assignments.laboratory_id,
+            assignments.asset_id,
+            assignments.inventory_item_id,
+            assignments.display_name,
+            files.original_file_name,
+            assignments.description,
+            files.mime_type,
+            files.file_size_bytes,
+            files.sha256_hex,
+            assignments.visibility,
+            files.uploaded_by_user_id,
+            assignments.created_at,
+            assignments.updated_at
+        FROM asset_attachment_assignments AS assignments
+        JOIN files ON files.file_id = assignments.file_id
         {suffix}
         "#
     )

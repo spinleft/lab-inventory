@@ -2,7 +2,7 @@ use super::model::{
     UnitDatabaseError, UnitResponse, UnitRow, fetch_unit_for_update, map_unit_database_error,
     update_unit_rollback_details,
 };
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{UnitCode, UnitDimension, UnitName, UnitSymbol, UpdateUnit, UserId};
 use crate::utils::error_chain_fmt;
@@ -86,13 +86,19 @@ pub async fn update_unit(
     unit_id: web::Path<Uuid>,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, UpdateUnitError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(UpdateUnitError::UnexpectedError)?
-        .ok_or(UpdateUnitError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
-    validate_update_permission(&actor)?;
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Unit,
+        Action::Update(*unit_id),
+    )
+    .await?
+    {
+        return Err(UpdateUnitError::Forbidden(
+            "You don't have permission to update this unit.".into(),
+        ));
+    }
+
     let update_unit =
         UpdateUnit::try_from(payload.into_inner()).map_err(UpdateUnitError::ValidationError)?;
     let dimension = update_unit.dimension.map(|dimension| dimension.to_string());
@@ -118,7 +124,7 @@ pub async fn update_unit(
 
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Update,
         AuditResource::Unit,
         Some(unit.unit_id),
@@ -131,16 +137,6 @@ pub async fn update_unit(
         .context("Failed to commit SQL transaction to update a unit.")?;
 
     Ok(HttpResponse::Ok().json(UnitResponse::from(unit)))
-}
-
-fn validate_update_permission(actor: &Actor) -> Result<(), UpdateUnitError> {
-    if actor.can_manage_units() {
-        Ok(())
-    } else {
-        Err(UpdateUnitError::Forbidden(
-            "You don't have permission to update units.".into(),
-        ))
-    }
 }
 
 #[tracing::instrument(
@@ -170,7 +166,7 @@ async fn update_unit_in_database(
             scale_to_base = COALESCE($6, scale_to_base),
             allow_decimal = COALESCE($7, allow_decimal)
         WHERE unit_id = $1
-        RETURNING unit_id, code, name, symbol, dimension, scale_to_base, allow_decimal, created_at
+        RETURNING unit_id, laboratory_id, code, name, symbol, dimension, scale_to_base, allow_decimal, created_at
         "#,
         unit_id,
         code,

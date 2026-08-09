@@ -1,23 +1,23 @@
-use crate::attachment_storage::AttachmentStorage;
 use crate::authentication::reject_anonymous_users;
 use crate::configuration::{ApplicationSettings, DatabaseSettings, FederationSettings, Settings};
+use crate::file_storage::FileStorage;
 use crate::routes::{
-    accept_pairing, batch_delete_inventory_items, batch_update_inventory_items, change_password,
-    create_asset, create_asset_attachment, create_asset_category, create_asset_parameter,
-    create_inventory_item_attachment, create_inventory_items, create_laboratory, create_location,
-    create_pairing_code, create_trust, create_unit, create_user, delete_asset,
-    delete_asset_category, delete_asset_parameter, delete_attachment, delete_attachment_upload,
-    delete_inventory_item, delete_laboratory, delete_location, delete_unit, delete_user,
-    download_attachment, get_asset, get_asset_category, get_asset_parameter, get_attachment,
-    get_inventory_item, get_laboratory, get_location, get_unit, get_user, health_check,
-    inbound_get, initialize_local_node, list_asset_attachments, list_asset_categories,
-    list_asset_parameters, list_assets, list_audit_logs, list_guest_links,
-    list_inventory_item_attachments, list_inventory_items, list_laboratories,
-    list_laboratory_attachments, list_locations, list_trusts, list_units, list_users, login,
-    logout, me, merge_guest_link, merge_inventory_items, proxy_get, revoke_trust,
-    split_inventory_item, update_asset, update_asset_category, update_asset_parameter,
-    update_attachment, update_inventory_item, update_laboratory, update_location, update_unit,
-    update_user, upload_attachment,
+    accept_pairing, assign_asset_attachment, assign_inventory_item_attachment,
+    batch_delete_inventory_items, batch_update_inventory_items, change_password, create_asset,
+    create_asset_category, create_asset_parameter, create_borrow_request, create_inventory_items,
+    create_laboratory, create_location, create_pairing_code, create_trust, create_unit,
+    create_user, delete_asset, delete_asset_category, delete_asset_parameter, delete_attachment,
+    delete_file_upload, delete_inventory_item, delete_laboratory, delete_location, delete_unit,
+    delete_user, download_attachment, get_asset, get_asset_category, get_asset_parameter,
+    get_attachment, get_inventory_item, get_laboratory, get_location, get_unit, get_user,
+    health_check, inbound_get, initialize_local_node, list_asset_attachments,
+    list_asset_categories, list_asset_parameters, list_assets, list_audit_logs,
+    list_borrow_requests, list_guest_links, list_inventory_item_attachments, list_inventory_items,
+    list_laboratories, list_laboratory_attachments, list_locations, list_trusts, list_units,
+    list_users, login, logout, me, merge_guest_link, merge_inventory_items, proxy_get,
+    resolve_borrow_request, revoke_trust, split_inventory_item, update_asset,
+    update_asset_category, update_asset_parameter, update_attachment, update_inventory_item,
+    update_laboratory, update_location, update_unit, update_user, upload_file,
 };
 use actix_cors::Cors;
 use actix_session::SessionMiddleware;
@@ -55,7 +55,7 @@ impl Application {
             listener,
             connection_pool,
             configuration.application,
-            configuration.attachment_storage,
+            configuration.file_storage,
             configuration.federation,
             configuration.redis_uri,
         )
@@ -81,13 +81,13 @@ async fn run(
     listener: TcpListener,
     db_pool: PgPool,
     application: ApplicationSettings,
-    attachment_storage: crate::configuration::AttachmentStorageSettings,
+    file_storage: crate::configuration::FileStorageSettings,
     federation: FederationSettings,
     redis_uri: Secret<String>,
 ) -> Result<Server, anyhow::Error> {
     initialize_local_node(&db_pool, &federation).await?;
     let db_pool = Data::new(db_pool);
-    let attachment_storage = Data::new(AttachmentStorage::new(attachment_storage)?);
+    let file_storage = Data::new(FileStorage::new(file_storage)?);
     let federation = Data::new(federation);
     let federation_client = Data::new(reqwest::Client::builder().tls_info(true).build()?);
     let secret_key = Key::derive_from(application.hmac_secret.expose_secret().as_bytes());
@@ -96,7 +96,7 @@ async fn run(
     let server = build_server(
         listener,
         db_pool,
-        attachment_storage,
+        file_storage,
         federation,
         federation_client,
         secret_key,
@@ -111,7 +111,7 @@ async fn run(
 fn build_server(
     listener: TcpListener,
     db_pool: Data<PgPool>,
-    attachment_storage: Data<AttachmentStorage>,
+    file_storage: Data<FileStorage>,
     federation: Data<FederationSettings>,
     federation_client: Data<reqwest::Client>,
     secret_key: Key,
@@ -130,7 +130,7 @@ fn build_server(
             .wrap(TracingLogger::default())
             .configure(api_routes)
             .app_data(db_pool.clone())
-            .app_data(attachment_storage.clone())
+            .app_data(file_storage.clone())
             .app_data(federation.clone())
             .app_data(federation_client.clone())
     })
@@ -194,8 +194,6 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                     .route("/auth/me", web::get().to(me))
                     .route("/auth/password", web::patch().to(change_password))
                     .route("/audit-logs", web::get().to(list_audit_logs))
-                    .route("/units", web::get().to(list_units))
-                    .route("/units", web::post().to(create_unit))
                     .route(
                         "/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}",
                         web::get().to(proxy_get),
@@ -231,6 +229,14 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                         web::post().to(merge_guest_link),
                     )
                     .route(
+                        "/laboratories/{laboratory_id}/borrow-requests",
+                        web::get().to(list_borrow_requests),
+                    )
+                    .route(
+                        "/laboratories/{laboratory_id}/borrow-requests/{borrow_request_id}",
+                        web::patch().to(resolve_borrow_request),
+                    )
+                    .route(
                         "/laboratories/{laboratory_id}/asset-categories",
                         web::get().to(list_asset_categories),
                     )
@@ -255,12 +261,12 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                         web::post().to(create_asset),
                     )
                     .route(
-                        "/laboratories/{laboratory_id}/attachment-uploads",
-                        web::post().to(upload_attachment),
+                        "/laboratories/{laboratory_id}/file-uploads",
+                        web::post().to(upload_file),
                     )
                     .route(
-                        "/attachment-uploads/{upload_id}",
-                        web::delete().to(delete_attachment_upload),
+                        "/file-uploads/{upload_id}",
+                        web::delete().to(delete_file_upload),
                     )
                     .route(
                         "/laboratories/{laboratory_id}/attachments",
@@ -269,6 +275,14 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                     .route(
                         "/laboratories/{laboratory_id}/inventory-items",
                         web::get().to(list_inventory_items),
+                    )
+                    .route(
+                        "/laboratories/{laboratory_id}/units",
+                        web::get().to(list_units),
+                    )
+                    .route(
+                        "/laboratories/{laboratory_id}/units",
+                        web::post().to(create_unit),
                     )
                     .route(
                         "/laboratories/{laboratory_id}/locations",
@@ -327,7 +341,7 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                     .route("/assets/{asset_id}", web::delete().to(delete_asset))
                     .route(
                         "/assets/{asset_id}/attachments",
-                        web::post().to(create_asset_attachment),
+                        web::post().to(assign_asset_attachment),
                     )
                     .route(
                         "/assets/{asset_id}/attachments",
@@ -358,6 +372,10 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                         web::get().to(get_inventory_item),
                     )
                     .route(
+                        "/inventory-items/{inventory_item_id}/borrow-requests",
+                        web::post().to(create_borrow_request),
+                    )
+                    .route(
                         "/inventory-items/{inventory_item_id}",
                         web::patch().to(update_inventory_item),
                     )
@@ -367,7 +385,7 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                     )
                     .route(
                         "/inventory-items/{inventory_item_id}/attachments",
-                        web::post().to(create_inventory_item_attachment),
+                        web::post().to(assign_inventory_item_attachment),
                     )
                     .route(
                         "/inventory-items/{inventory_item_id}/attachments",

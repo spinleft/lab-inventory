@@ -1,5 +1,5 @@
-use super::model::{AssetParameterResponse, fetch_asset_parameter_options, parse_laboratory_id};
-use crate::access_control::{Actor, get_actor};
+use super::model::{AssetParameterResponse, fetch_asset_parameter_options};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::{LaboratoryId, UserId};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
@@ -40,15 +40,19 @@ pub async fn list_asset_parameters(
     pool: web::Data<PgPool>,
     laboratory_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, ListAssetParametersError> {
-    let laboratory_id = parse_laboratory_id(laboratory_id.into_inner())
-        .map_err(ListAssetParametersError::UnexpectedError)?;
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(ListAssetParametersError::UnexpectedError)?
-        .ok_or(ListAssetParametersError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
-    validate_read_permission(&actor, &laboratory_id)?;
+    let laboratory_id: LaboratoryId = laboratory_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::AssetParameter,
+        Action::Browse(laboratory_id.into()),
+    )
+    .await?
+    {
+        return Err(ListAssetParametersError::Forbidden(
+            "You don't have permission to view asset parameters.".into(),
+        ));
+    }
 
     let parameters = fetch_asset_parameters(&pool, laboratory_id).await?;
     let mut response = Vec::with_capacity(parameters.len());
@@ -58,19 +62,6 @@ pub async fn list_asset_parameters(
     }
 
     Ok(HttpResponse::Ok().json(response))
-}
-
-fn validate_read_permission(
-    actor: &Actor,
-    target_laboratory_id: &LaboratoryId,
-) -> Result<(), ListAssetParametersError> {
-    if actor.can_query_laboratory_resource(target_laboratory_id) {
-        Ok(())
-    } else {
-        Err(ListAssetParametersError::Forbidden(
-            "You do not have permission to view asset parameters for this laboratory".into(),
-        ))
-    }
 }
 
 async fn fetch_asset_parameters(

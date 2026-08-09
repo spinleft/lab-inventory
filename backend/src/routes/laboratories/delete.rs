@@ -1,5 +1,5 @@
 use super::model::{delete_laboratory_rollback_details, fetch_laboratory};
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::UserId;
 use crate::utils::error_chain_fmt;
@@ -48,13 +48,18 @@ pub async fn delete_laboratory(
     pool: web::Data<PgPool>,
     laboratory_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, DeleteLaboratoryError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(DeleteLaboratoryError::UnexpectedError)?
-        .ok_or(DeleteLaboratoryError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
-    validate_delete_permission(&actor)?;
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Laboratory,
+        Action::Delete(Uuid::nil()),
+    )
+    .await?
+    {
+        return Err(DeleteLaboratoryError::Forbidden(
+            "You don't have permission to delete laboratories.".into(),
+        ));
+    }
 
     let existing =
         fetch_laboratory(&pool, *laboratory_id)
@@ -69,7 +74,7 @@ pub async fn delete_laboratory(
     delete_laboratory_from_database(&mut transaction, existing.laboratory_id).await?;
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Delete,
         AuditResource::Laboratory,
         Some(existing.laboratory_id),
@@ -82,16 +87,6 @@ pub async fn delete_laboratory(
         .context("Failed to commit SQL transaction to delete a laboratory.")?;
 
     Ok(HttpResponse::NoContent().finish())
-}
-
-fn validate_delete_permission(actor: &Actor) -> Result<(), DeleteLaboratoryError> {
-    if actor.is_root() || actor.is_super_admin() {
-        Ok(())
-    } else {
-        Err(DeleteLaboratoryError::Forbidden(
-            "You don't have permission to delete laboratories.".into(),
-        ))
-    }
 }
 
 #[tracing::instrument(

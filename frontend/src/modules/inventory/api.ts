@@ -20,6 +20,7 @@ import {
 export const inventoryStatusSchema = z.enum([
   "available",
   "reserved",
+  "borrowed",
   "retired",
   "lost",
   "consumed",

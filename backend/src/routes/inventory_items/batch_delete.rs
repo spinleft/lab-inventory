@@ -1,14 +1,16 @@
+﻿use super::delete::delete_storage_objects;
 use super::model::{
-    InventoryItemError, actor_for_user, delete_inventory_item_attachments,
+    InventoryItemDatabaseError, delete_inventory_item_attachments,
     delete_inventory_item_from_database, delete_inventory_item_rollback_details,
-    fetch_inventory_items_for_update, record_inventory_item_audit, validate_requested_ids,
-    validate_write_permission,
+    fetch_inventory_items_for_update, validate_requested_ids,
 };
-use crate::attachment_storage::AttachmentStorage;
-use crate::audit::AuditAction;
-use crate::domain::UserId;
-use crate::routes::attachments::delete_storage_objects;
-use actix_web::{HttpResponse, web};
+use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::audit::{AuditAction, AuditResource, record_audit};
+use crate::domain::{InventoryItemIds, UserId};
+use crate::file_storage::FileStorage;
+use crate::utils::error_chain_fmt;
+use actix_web::http::StatusCode;
+use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use serde::Deserialize;
 use sqlx::PgPool;
@@ -20,6 +22,49 @@ pub struct JsonData {
     inventory_item_ids: Vec<Uuid>,
 }
 
+#[derive(thiserror::Error)]
+pub enum BatchDeleteInventoryItemsError {
+    #[error("{0}")]
+    ValidationError(String),
+    #[error("{0}")]
+    Forbidden(String),
+    #[error("{0}")]
+    NotFound(String),
+    #[error("{0}")]
+    ConflictError(String),
+    #[error(transparent)]
+    UnexpectedError(#[from] anyhow::Error),
+}
+
+impl std::fmt::Debug for BatchDeleteInventoryItemsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+impl ResponseError for BatchDeleteInventoryItemsError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            BatchDeleteInventoryItemsError::ValidationError(_) => StatusCode::BAD_REQUEST,
+            BatchDeleteInventoryItemsError::Forbidden(_) => StatusCode::FORBIDDEN,
+            BatchDeleteInventoryItemsError::NotFound(_) => StatusCode::NOT_FOUND,
+            BatchDeleteInventoryItemsError::ConflictError(_) => StatusCode::CONFLICT,
+            BatchDeleteInventoryItemsError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<InventoryItemDatabaseError> for BatchDeleteInventoryItemsError {
+    fn from(error: InventoryItemDatabaseError) -> Self {
+        match error {
+            InventoryItemDatabaseError::Validation(message) => Self::ValidationError(message),
+            InventoryItemDatabaseError::NotFound(message) => Self::NotFound(message),
+            InventoryItemDatabaseError::Conflict(message) => Self::ConflictError(message),
+            InventoryItemDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
+        }
+    }
+}
+
 #[tracing::instrument(
     name = "Batch delete inventory items",
     skip(pool, storage, payload),
@@ -28,22 +73,40 @@ pub struct JsonData {
 pub async fn batch_delete_inventory_items(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    storage: web::Data<AttachmentStorage>,
+    storage: web::Data<FileStorage>,
     payload: web::Json<JsonData>,
-) -> Result<HttpResponse, InventoryItemError> {
-    let actor = actor_for_user(&pool, actor_user_id).await?;
-    let payload = payload.into_inner();
+) -> Result<HttpResponse, BatchDeleteInventoryItemsError> {
+    let inventory_item_ids = InventoryItemIds::parse(payload.into_inner().inventory_item_ids)
+        .map_err(BatchDeleteInventoryItemsError::ValidationError)?;
+    let inventory_item_ids: Vec<_> = inventory_item_ids
+        .into_inner()
+        .into_iter()
+        .map(Uuid::from)
+        .collect();
+    for inventory_item_id in &inventory_item_ids {
+        if !validate_permission(
+            &pool,
+            &actor_user_id,
+            ResourceType::InventoryItem,
+            Action::Delete(*inventory_item_id),
+        )
+        .await?
+        {
+            return Err(BatchDeleteInventoryItemsError::Forbidden(
+                "You don't have permission to delete these inventory items.".into(),
+            ));
+        }
+    }
+
     let mut transaction = pool
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    let items =
-        fetch_inventory_items_for_update(&mut transaction, &payload.inventory_item_ids).await?;
-    validate_requested_ids(&payload.inventory_item_ids, &items)?;
+    let items = fetch_inventory_items_for_update(&mut transaction, &inventory_item_ids).await?;
+    validate_requested_ids(&inventory_item_ids, &items)?;
     for item in &items {
-        validate_write_permission(&actor, item.laboratory_id)?;
         if item.quantity_allocated > 0.0 {
-            return Err(InventoryItemError::ConflictError(
+            return Err(BatchDeleteInventoryItemsError::ConflictError(
                 "Cannot delete inventory items with allocated quantity".into(),
             ));
         }
@@ -51,28 +114,29 @@ pub async fn batch_delete_inventory_items(
 
     let mut deleted_attachments = Vec::new();
     for item in items {
-        let item_deleted_attachments =
+        let item_attachments =
             delete_inventory_item_attachments(&mut transaction, item.inventory_item_id).await?;
-        let attachment_ids = item_deleted_attachments
+        let attachment_ids: Vec<_> = item_attachments
             .iter()
-            .map(|row| row.attachment_id)
-            .collect::<Vec<_>>();
-        deleted_attachments.extend(item_deleted_attachments);
+            .map(|attachment| attachment.attachment_id)
+            .collect();
+        deleted_attachments.extend(item_attachments);
         delete_inventory_item_from_database(&mut transaction, item.inventory_item_id).await?;
-        record_inventory_item_audit(
+        record_audit(
             &mut transaction,
-            &actor,
+            actor_user_id,
             AuditAction::Delete,
-            item.inventory_item_id,
+            AuditResource::InventoryItem,
+            Some(item.inventory_item_id),
             delete_inventory_item_rollback_details(&item, &attachment_ids),
         )
         .await?;
     }
-
     transaction
         .commit()
         .await
         .context("Failed to commit SQL transaction to batch delete inventory items.")?;
     delete_storage_objects(&storage, &deleted_attachments).await?;
+
     Ok(HttpResponse::NoContent().finish())
 }

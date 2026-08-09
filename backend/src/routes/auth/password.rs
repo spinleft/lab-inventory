@@ -107,7 +107,7 @@ pub async fn change_password(
 
     record_audit(
         &mut transaction,
-        &actor,
+        actor.user_id,
         AuditAction::Update,
         AuditResource::User,
         Some(user.user_id),

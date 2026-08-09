@@ -1,5 +1,5 @@
 use super::model::{delete_unit_rollback_details, fetch_unit_for_update};
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::UserId;
 use crate::utils::error_chain_fmt;
@@ -48,14 +48,6 @@ pub async fn delete_unit(
     pool: web::Data<PgPool>,
     unit_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, DeleteUnitError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(DeleteUnitError::UnexpectedError)?
-        .ok_or(DeleteUnitError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
-    validate_delete_permission(&actor)?;
-
     let mut transaction = pool
         .begin()
         .await
@@ -63,10 +55,22 @@ pub async fn delete_unit(
     let existing = fetch_unit_for_update(&mut transaction, *unit_id)
         .await?
         .ok_or(DeleteUnitError::NotFound("Unit not found".into()))?;
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Unit,
+        Action::Delete(*unit_id),
+    )
+    .await?
+    {
+        return Err(DeleteUnitError::Forbidden(
+            "You don't have permission to delete this unit.".into(),
+        ));
+    }
     delete_unit_from_database(&mut transaction, existing.unit_id).await?;
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Delete,
         AuditResource::Unit,
         Some(existing.unit_id),
@@ -79,16 +83,6 @@ pub async fn delete_unit(
         .context("Failed to commit SQL transaction to delete a unit.")?;
 
     Ok(HttpResponse::NoContent().finish())
-}
-
-fn validate_delete_permission(actor: &Actor) -> Result<(), DeleteUnitError> {
-    if actor.can_manage_units() {
-        Ok(())
-    } else {
-        Err(DeleteUnitError::Forbidden(
-            "You don't have permission to delete units.".into(),
-        ))
-    }
 }
 
 #[tracing::instrument(name = "Deleting unit from the database", skip(transaction), fields(unit_id=%unit_id))]

@@ -1,11 +1,11 @@
 use super::model::{AssetParameterResponse, fetch_asset_parameter, fetch_asset_parameter_options};
-use crate::access_control::{Actor, get_actor};
-use crate::domain::{AssetParameterId, LaboratoryId, UserId};
+use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::domain::{AssetParameterId, UserId};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
-use anyhow::anyhow;
 use sqlx::PgPool;
+use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum GetAssetParameterError {
@@ -41,35 +41,26 @@ impl ResponseError for GetAssetParameterError {
 pub async fn get_asset_parameter(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    parameter_id: web::Path<AssetParameterId>,
+    parameter_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, GetAssetParameterError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(GetAssetParameterError::UnexpectedError)?
-        .ok_or(GetAssetParameterError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
+    let parameter_id: AssetParameterId = parameter_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::AssetParameter,
+        Action::Read(parameter_id.into()),
+    )
+    .await?
+    {
+        return Err(GetAssetParameterError::Forbidden(
+            "You don't have permission to view this asset parameter.".into(),
+        ));
+    }
 
-    let parameter = fetch_asset_parameter(&pool, *parameter_id).await?.ok_or(
+    let parameter = fetch_asset_parameter(&pool, parameter_id).await?.ok_or(
         GetAssetParameterError::NotFound("Asset parameter not found".into()),
     )?;
-    let laboratory_id = LaboratoryId::parse(parameter.laboratory_id)
-        .map_err(|e| GetAssetParameterError::UnexpectedError(anyhow!("{e}")))?;
-    validate_read_permission(&actor, &laboratory_id)?;
 
     let options = fetch_asset_parameter_options(&pool, parameter.parameter_type_id).await?;
     Ok(HttpResponse::Ok().json(AssetParameterResponse::from_parts(parameter, options)))
-}
-
-fn validate_read_permission(
-    actor: &Actor,
-    target_laboratory_id: &LaboratoryId,
-) -> Result<(), GetAssetParameterError> {
-    if actor.can_query_laboratory_resource(target_laboratory_id) {
-        Ok(())
-    } else {
-        Err(GetAssetParameterError::Forbidden(
-            "You do not have permission to view this asset parameter".into(),
-        ))
-    }
 }

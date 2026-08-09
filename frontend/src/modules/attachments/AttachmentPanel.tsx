@@ -20,17 +20,17 @@ import { useToast } from "../../shared/ui/Toast";
 import {
   type Attachment,
   type AttachmentClaim,
-  type AttachmentUpload,
+  type FileUpload,
   type AttachmentVisibility,
-  deleteAttachmentUploads,
+  deleteFileUploads,
   useAssetAttachments,
   useCreateAssetAttachment,
   useCreateInventoryItemAttachment,
   useDeleteAttachment,
-  useDeleteAttachmentUpload,
+  useDeleteFileUpload,
   useDownloadAttachment,
   useInventoryItemAttachments,
-  useUploadAttachment,
+  useUploadFile,
 } from "./api";
 
 export type PendingAttachment = {
@@ -75,7 +75,7 @@ export function attachmentClaimsFromPending(pendingAttachments: PendingAttachmen
   return { claims, ok: true };
 }
 
-export function pendingAttachmentFromUpload(upload: AttachmentUpload): PendingAttachment {
+export function pendingAttachmentFromUpload(upload: FileUpload): PendingAttachment {
   return {
     description: "",
     displayName: upload.original_file_name,
@@ -106,8 +106,8 @@ export function PendingAttachmentUploader({
 }) {
   const { apiBaseUrl } = useBackendConfig();
   const toast = useToast();
-  const uploadAttachment = useUploadAttachment();
-  const deleteUpload = useDeleteAttachmentUpload();
+  const uploadFile = useUploadFile();
+  const deleteUpload = useDeleteFileUpload();
   const pendingRef = useRef(pendingAttachments);
   const [uploadingCount, setUploadingCount] = useState(0);
 
@@ -120,7 +120,7 @@ export function PendingAttachmentUploader({
       if (!cleanupOnUnmount) {
         return;
       }
-      void deleteAttachmentUploads(apiBaseUrl, pendingAttachmentUploadIds(pendingRef.current));
+      void deleteFileUploads(apiBaseUrl, pendingAttachmentUploadIds(pendingRef.current));
     };
   }, [apiBaseUrl, cleanupOnUnmount]);
 
@@ -138,7 +138,7 @@ export function PendingAttachmentUploader({
     setUploadingCount(files.length);
     try {
       for (const file of files) {
-        const upload = await uploadAttachment.mutateAsync({ file, laboratoryId });
+        const upload = await uploadFile.mutateAsync({ file, laboratoryId });
         onChange((current) => [...current, pendingAttachmentFromUpload(upload)]);
       }
       toast.success({ title: "附件已上传，请选择可见性后保存。" });
@@ -166,7 +166,7 @@ export function PendingAttachmentUploader({
     );
   }
 
-  const uploading = uploadingCount > 0 || uploadAttachment.isPending;
+  const uploading = uploadingCount > 0 || uploadFile.isPending;
 
   return (
     <div className="attachment-uploader">
@@ -322,7 +322,7 @@ export function AttachmentSection({
   async function downloadBoundAttachment(attachment: Attachment) {
     try {
       const download = await downloadAttachment.mutateAsync(attachment.attachment_id);
-      saveDownload(download.blob, download.fileName ?? attachment.original_file_name);
+      saveDownload(download.blob, download.fileName ?? attachment.file.original_file_name);
     } catch (error) {
       toast.error({ title: "下载附件失败", description: toErrorMessage(error) });
     }
@@ -348,7 +348,7 @@ export function AttachmentSection({
                   <div>
                     <strong>{attachment.display_name}</strong>
                     <span>
-                      {attachment.original_file_name} · {formatFileSize(attachment.file_size_bytes)} ·{" "}
+                      {attachment.file.original_file_name} · {formatFileSize(attachment.file.file_size_bytes)} ·{" "}
                       {formatDate(attachment.created_at)}
                     </span>
                     {attachment.description ? <p>{attachment.description}</p> : null}

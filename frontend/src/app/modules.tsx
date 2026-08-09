@@ -2,6 +2,7 @@ import {
   Activity,
   Boxes,
   Building2,
+  Handshake,
   FolderTree,
   Gauge,
   KeyRound,
@@ -24,12 +25,14 @@ import { AdminHomePage, LaboratoriesPage, UsersPage } from "../modules/admin/Adm
 import { LocationsPage } from "../modules/admin/LocationsPage";
 import { UnitsPage } from "../modules/admin/UnitsPage";
 import { AuditLogsPage } from "../modules/audit/AuditLogsPage";
+import { BorrowRequestsPage } from "../modules/borrow-requests/BorrowRequestsPage";
 import { AssetDetailPage } from "../modules/assets/AssetDetailPage";
 import { AssetsPage } from "../modules/assets/AssetsPage";
 import {
   canAccessAdmin,
   canAccessAssets,
   canAccessAuditLogs,
+  canAccessBorrowRequests,
   canManageAssetCategories,
   canManageAssetParameters,
   canManageFederation,
@@ -156,6 +159,36 @@ export const appModules: FrontendModule[] = [
         id: "inventory.detail",
         path: "/inventory/:inventoryItemId",
         title: "库存详情",
+      },
+    ],
+  },
+  {
+    id: "borrow-requests",
+    navItems: [
+      {
+        canAccess: canAccessBorrowRequests,
+        group: "workspace",
+        icon: Handshake,
+        path: "/borrow-requests",
+        title: "借用管理",
+      },
+    ],
+    commands: [
+      {
+        canAccess: canAccessBorrowRequests,
+        icon: Handshake,
+        path: "/borrow-requests",
+        title: "查看借用管理",
+        keywords: ["borrow", "loan", "request"],
+      },
+    ],
+    routes: [
+      {
+        canAccess: canAccessBorrowRequests,
+        element: <BorrowRequestsPage />,
+        id: "borrow-requests.index",
+        path: "/borrow-requests",
+        title: "借用管理",
       },
     ],
   },

@@ -1,7 +1,30 @@
 use crate::access_control::Actor;
+use crate::domain::UserId;
 use serde_json::Value;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
+
+pub trait AuditActor {
+    fn audit_user_id(&self) -> UserId;
+}
+
+impl AuditActor for UserId {
+    fn audit_user_id(&self) -> UserId {
+        *self
+    }
+}
+
+impl AuditActor for &UserId {
+    fn audit_user_id(&self) -> UserId {
+        **self
+    }
+}
+
+impl AuditActor for &Actor {
+    fn audit_user_id(&self) -> UserId {
+        self.user_id
+    }
+}
 
 pub enum AuditAction {
     Create,
@@ -37,6 +60,7 @@ pub enum AuditResource {
     Asset,
     AssetParameter,
     InventoryItem,
+    BorrowRequest,
     Attachment,
     Unit,
     FederationTrust,
@@ -53,6 +77,7 @@ impl AuditResource {
             Self::Asset => "asset",
             Self::AssetParameter => "asset_parameter",
             Self::InventoryItem => "inventory_item",
+            Self::BorrowRequest => "borrow_request",
             Self::Attachment => "attachment",
             Self::Unit => "unit",
             Self::FederationTrust => "federation_trust",
@@ -63,12 +88,13 @@ impl AuditResource {
 
 pub async fn record_audit(
     transaction: &mut Transaction<'_, Postgres>,
-    actor: &Actor,
+    actor: impl AuditActor,
     action: AuditAction,
     resource_type: AuditResource,
     resource_id: Option<Uuid>,
     details: Value,
 ) -> Result<(), anyhow::Error> {
+    let actor_user_id = actor.audit_user_id();
     sqlx::query(
         r#"
         INSERT INTO audit_logs (
@@ -83,7 +109,7 @@ pub async fn record_audit(
         "#,
     )
     .bind(Uuid::new_v4())
-    .bind(*actor.user_id)
+    .bind(*actor_user_id)
     .bind(action.as_str())
     .bind(resource_type.as_str())
     .bind(resource_id)

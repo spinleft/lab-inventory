@@ -1,10 +1,11 @@
 use super::model::{UserResponse, UserRow, fetch_user, update_user_rollback_details};
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::get_actor;
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::UserId;
 use crate::domain::{
     LaboratoryId, NullableUpdate, PhoneNumber, UpdateUser, UserEmail, UserName, UserType,
 };
+use crate::domain::{UserId, UserRole};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
@@ -49,9 +50,9 @@ impl JsonData {
             .user_type
             .map(|user_type| UserType::parse(&user_type))
             .transpose()?;
-        let laboratory_id = parse_nullable_update(self.laboratory_id, LaboratoryId::parse)?;
-        let email = parse_nullable_update(self.email, UserEmail::parse)?;
-        let phone_number = parse_nullable_update(self.phone_number, PhoneNumber::parse)?;
+        let laboratory_id = self.laboratory_id.map(|id| id.map(Uuid::into)).into();
+        let email = NullableUpdate::parse(self.email, UserEmail::parse)?;
+        let phone_number = NullableUpdate::parse(self.phone_number, PhoneNumber::parse)?;
 
         UpdateUser::new(
             username,
@@ -62,17 +63,6 @@ impl JsonData {
             current_user_type,
             current_laboratory_id,
         )
-    }
-}
-
-fn parse_nullable_update<T, V>(
-    value: Option<Option<V>>,
-    parse: impl FnOnce(V) -> Result<T, String>,
-) -> Result<NullableUpdate<T>, String> {
-    match value {
-        Some(Some(value)) => parse(value).map(NullableUpdate::Set),
-        Some(None) => Ok(NullableUpdate::Clear),
-        None => Ok(NullableUpdate::Unchanged),
     }
 }
 
@@ -123,10 +113,13 @@ pub async fn update_user(
             "Actor not found in the database".into(),
         ))?;
     let target_user = fetch_user(&pool, *target_user_id).await?;
-    let target_user_id =
-        UserId::parse(target_user.user_id).map_err(UpdateUserError::ValidationError)?;
+    let target_user_id = target_user.user_id.into();
     let target_user_type = parse_user_type(&target_user)?;
-    let target_laboratory_id = parse_laboratory_id(target_user.laboratory_id)?;
+    let target_laboratory_id = target_user.laboratory_id.map(Uuid::into);
+    let target_user_role = UserRole {
+        user_type: target_user_type,
+        laboratory_id: target_laboratory_id,
+    };
     let payload = payload.into_inner();
 
     if actor.user_id == target_user_id && payload.updates_role_or_laboratory() {
@@ -134,23 +127,31 @@ pub async fn update_user(
             "Users cannot change their own role or laboratory".into(),
         ));
     }
-
     let update_user = payload
         .into_update_user(target_user_type, target_laboratory_id)
         .map_err(UpdateUserError::ValidationError)?;
+    let update_user_role = UserRole {
+        user_type: update_user.user_type,
+        laboratory_id: update_user.laboratory_id,
+    };
+
+    if (actor.user_id != target_user_id)
+        && !validate_permission(
+            &pool,
+            &actor_user_id,
+            ResourceType::User,
+            Action::UpdateUser(&target_user_role, &update_user_role),
+        )
+        .await?
+    {
+        return Err(UpdateUserError::Forbidden(
+            "You don't have permission to update this user.".into(),
+        ));
+    }
 
     let username = update_user.username;
     let user_type = update_user.user_type;
     let laboratory_id = update_user.laboratory_id;
-    validate_user_update_permission(
-        &actor,
-        target_user_id,
-        target_user_type,
-        target_laboratory_id,
-        user_type,
-        laboratory_id,
-    )?;
-
     let email = resolve_nullable_string_update(update_user.email, target_user.email.clone());
     let phone_number =
         resolve_nullable_string_update(update_user.phone_number, target_user.phone_number.clone());
@@ -173,7 +174,7 @@ pub async fn update_user(
 
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Update,
         AuditResource::User,
         Some(user.user_id),
@@ -255,37 +256,6 @@ fn parse_user_type(user: &UserRow) -> Result<UserType, UpdateUserError> {
             ))?,
     )
     .map_err(UpdateUserError::ValidationError)
-}
-
-fn parse_laboratory_id(
-    laboratory_id: Option<Uuid>,
-) -> Result<Option<LaboratoryId>, UpdateUserError> {
-    laboratory_id
-        .map(|id| LaboratoryId::parse(id).map_err(UpdateUserError::ValidationError))
-        .transpose()
-}
-
-fn validate_user_update_permission(
-    actor: &Actor,
-    target_user_id: UserId,
-    target_user_type: UserType,
-    target_laboratory_id: Option<LaboratoryId>,
-    user_type: UserType,
-    laboratory_id: Option<LaboratoryId>,
-) -> Result<(), UpdateUserError> {
-    if actor.user_id == target_user_id {
-        return Ok(());
-    }
-
-    if actor.can_manage_user(target_user_type, target_laboratory_id)
-        && actor.can_manage_user(user_type, laboratory_id)
-    {
-        Ok(())
-    } else {
-        Err(UpdateUserError::Forbidden(
-            "You don't have permission to update this user.".into(),
-        ))
-    }
 }
 
 fn resolve_nullable_string_update<T>(

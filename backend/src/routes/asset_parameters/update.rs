@@ -3,11 +3,11 @@ use super::model::{
     AssetParameterRow, fetch_asset_parameter_for_update, fetch_asset_parameter_options_for_update,
     fetch_unit_dimension_for_update, map_database_error, update_asset_parameter_rollback_details,
 };
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{
     AssetParameterCode, AssetParameterDataType, AssetParameterId, AssetParameterName,
-    AssetParameterOptionLabel, LaboratoryId, NullableUpdate, UnitDimension, UpdateAssetParameter,
+    AssetParameterOptionLabel, NullableUpdate, UnitDimension, UpdateAssetParameter,
     UpdateAssetParameterOption, UserId,
 };
 use crate::utils::error_chain_fmt;
@@ -151,15 +151,22 @@ impl ResponseError for UpdateAssetParameterError {
 pub async fn update_asset_parameter(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    parameter_id: web::Path<AssetParameterId>,
+    parameter_id: web::Path<Uuid>,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, UpdateAssetParameterError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(UpdateAssetParameterError::UnexpectedError)?
-        .ok_or(UpdateAssetParameterError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
+    let parameter_id: AssetParameterId = parameter_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::AssetParameter,
+        Action::Update(parameter_id.into()),
+    )
+    .await?
+    {
+        return Err(UpdateAssetParameterError::Forbidden(
+            "You don't have permission to update this asset parameter.".into(),
+        ));
+    }
     let update_parameter = UpdateAssetParameter::try_from(payload.into_inner())
         .map_err(UpdateAssetParameterError::ValidationError)?;
 
@@ -167,7 +174,7 @@ pub async fn update_asset_parameter(
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    let existing = fetch_asset_parameter_for_update(&mut transaction, *parameter_id)
+    let existing = fetch_asset_parameter_for_update(&mut transaction, parameter_id)
         .await?
         .ok_or(UpdateAssetParameterError::NotFound(
             "Asset parameter not found".into(),
@@ -175,9 +182,6 @@ pub async fn update_asset_parameter(
     let existing_options =
         fetch_asset_parameter_options_for_update(&mut transaction, existing.parameter_type_id)
             .await?;
-    let laboratory_id = LaboratoryId::parse(existing.laboratory_id)
-        .map_err(|e| UpdateAssetParameterError::UnexpectedError(anyhow!("{e}")))?;
-    validate_update_permission(&actor, &laboratory_id)?;
 
     let data_type = update_parameter.data_type.unwrap_or(
         AssetParameterDataType::parse(&existing.data_type).map_err(|e| {
@@ -255,7 +259,7 @@ pub async fn update_asset_parameter(
 
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Update,
         AuditResource::AssetParameter,
         Some(updated.parameter_type_id),
@@ -268,19 +272,6 @@ pub async fn update_asset_parameter(
         .context("Failed to commit SQL transaction to update an asset parameter.")?;
 
     Ok(HttpResponse::Ok().json(AssetParameterResponse::from_parts(updated, options)))
-}
-
-fn validate_update_permission(
-    actor: &Actor,
-    target_laboratory_id: &LaboratoryId,
-) -> Result<(), UpdateAssetParameterError> {
-    if actor.can_write_laboratory_resource(target_laboratory_id) {
-        Ok(())
-    } else {
-        Err(UpdateAssetParameterError::Forbidden(
-            "You don't have permission to update asset parameters for this laboratory.".into(),
-        ))
-    }
 }
 
 fn validate_options(

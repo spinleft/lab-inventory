@@ -42,7 +42,7 @@ impl NewUser {
 #[cfg(test)]
 mod tests {
     use super::NewUser;
-    use crate::domain::{LaboratoryId, UserEmail, UserName, UserPassword, UserType};
+    use crate::domain::{UserEmail, UserName, UserPassword, UserType};
     use claims::{assert_err, assert_ok};
     use secrecy::Secret;
     use uuid::Uuid;
@@ -93,7 +93,7 @@ mod tests {
             valid_username(),
             valid_password(),
             UserType::LabAdmin,
-            Some(LaboratoryId::parse(Uuid::new_v4()).unwrap()),
+            Some(Uuid::new_v4().into()),
             Some(valid_email()),
             None,
         ));

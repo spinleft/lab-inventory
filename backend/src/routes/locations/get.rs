@@ -1,11 +1,11 @@
 use super::model::{LocationResponse, fetch_location};
-use crate::access_control::{Actor, get_actor};
-use crate::domain::{LaboratoryId, LocationId, UserId};
+use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::domain::{LocationId, UserId};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
-use anyhow::anyhow;
 use sqlx::PgPool;
+use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum GetLocationError {
@@ -41,34 +41,25 @@ impl ResponseError for GetLocationError {
 pub async fn get_location(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    location_id: web::Path<LocationId>,
+    location_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, GetLocationError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(GetLocationError::UnexpectedError)?
-        .ok_or(GetLocationError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
+    let location_id: LocationId = location_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Location,
+        Action::Read(location_id.into()),
+    )
+    .await?
+    {
+        return Err(GetLocationError::Forbidden(
+            "You don't have permission to view this location.".into(),
+        ));
+    }
 
-    let location = fetch_location(&pool, *location_id)
+    let location = fetch_location(&pool, location_id)
         .await?
         .ok_or(GetLocationError::NotFound("Location not found".into()))?;
-    let laboratory_id = LaboratoryId::parse(location.laboratory_id)
-        .map_err(|e| GetLocationError::UnexpectedError(anyhow!("{e}")))?;
-    validate_read_permission(&actor, &laboratory_id)?;
 
     Ok(HttpResponse::Ok().json(LocationResponse::from(location)))
-}
-
-fn validate_read_permission(
-    actor: &Actor,
-    target_laboratory_id: &LaboratoryId,
-) -> Result<(), GetLocationError> {
-    if actor.can_query_laboratory_resource(target_laboratory_id) {
-        Ok(())
-    } else {
-        Err(GetLocationError::Forbidden(
-            "You do not have permission to view this location".into(),
-        ))
-    }
 }

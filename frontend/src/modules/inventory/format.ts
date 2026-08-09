@@ -13,6 +13,7 @@ export function trackingModeLabel(mode: AssetTrackingMode) {
 export function inventoryStatusLabel(status: InventoryStatus | string) {
   const labels: Record<string, string> = {
     available: "可用",
+    borrowed: "借出",
     consumed: "已消耗",
     lost: "丢失",
     reserved: "预留",
@@ -24,6 +25,7 @@ export function inventoryStatusLabel(status: InventoryStatus | string) {
 export function inventoryStatusTone(status: InventoryStatus | string) {
   if (status === "available") return "success" as const;
   if (status === "reserved") return "warning" as const;
+  if (status === "borrowed") return "warning" as const;
   if (status === "retired" || status === "lost" || status === "consumed") {
     return "danger" as const;
   }

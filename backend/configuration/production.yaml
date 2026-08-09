@@ -1,8 +1,8 @@
 application:
   host: "0.0.0.0"
   cookie_secure: true
+database:
+  require_ssl: true
 federation:
   require_https: true
   allow_insecure_private_network: false
-database:
-  require_ssl: true

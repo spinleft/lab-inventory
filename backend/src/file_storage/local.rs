@@ -1,7 +1,5 @@
-use super::model::StoredFile;
 use crate::domain::{
-    AttachmentFileName, AttachmentFileSize, AttachmentSha256, AttachmentStorageBackend,
-    AttachmentStorageKey,
+    FileName, FileSha256, FileSize, FileStorageKey, LaboratoryId, StorageBackend, StoredFile,
 };
 use anyhow::{Context, anyhow};
 use sha2::{Digest, Sha256};
@@ -10,11 +8,11 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Clone, Debug)]
-pub(super) struct LocalAttachmentStorage {
+pub(super) struct LocalFileStorage {
     root: Arc<PathBuf>,
 }
 
-impl LocalAttachmentStorage {
+impl LocalFileStorage {
     pub(super) fn new(root: String) -> Self {
         Self {
             root: Arc::new(PathBuf::from(root)),
@@ -23,18 +21,18 @@ impl LocalAttachmentStorage {
 
     pub(super) async fn store_upload(
         &self,
-        laboratory_id: Uuid,
-        original_file_name: &AttachmentFileName,
+        laboratory_id: LaboratoryId,
+        original_file_name: &FileName,
         bytes: &[u8],
     ) -> Result<StoredFile, anyhow::Error> {
-        let sha256_hex = AttachmentSha256::parse(sha256_hex(bytes)).map_err(|e| anyhow!(e))?;
+        let sha256_hex = FileSha256::parse(sha256_hex(bytes)).map_err(|e| anyhow!(e))?;
         let object_id = Uuid::new_v4();
-        let extension = storage_extension(original_file_name.as_ref());
+        let extension = file_extension(original_file_name.as_ref());
         let file_name = match extension {
             Some(extension) => format!("{}.{extension}", sha256_hex.as_ref()),
             None => sha256_hex.as_ref().to_string(),
         };
-        let storage_key = AttachmentStorageKey::parse(format!(
+        let storage_key = FileStorageKey::parse(format!(
             "labs/{laboratory_id}/objects/{object_id}/{file_name}"
         ))
         .map_err(|e| anyhow!(e))?;
@@ -49,17 +47,16 @@ impl LocalAttachmentStorage {
             .with_context(|| format!("Failed to write attachment object {path:?}"))?;
 
         Ok(StoredFile {
-            storage_backend: AttachmentStorageBackend::Local,
+            storage_backend: StorageBackend::Local,
             storage_key,
-            file_size_bytes: AttachmentFileSize::parse(bytes.len() as i64)
-                .map_err(|e| anyhow!(e))?,
+            file_size_bytes: FileSize::parse(bytes.len() as i64).map_err(|e| anyhow!(e))?,
             sha256_hex,
         })
     }
 
     pub(super) async fn read(
         &self,
-        storage_key: &AttachmentStorageKey,
+        storage_key: &FileStorageKey,
     ) -> Result<Vec<u8>, anyhow::Error> {
         let path = self.path_for_key(storage_key)?;
         tokio::fs::read(&path)
@@ -67,10 +64,7 @@ impl LocalAttachmentStorage {
             .with_context(|| format!("Failed to read attachment object {path:?}"))
     }
 
-    pub(super) async fn delete(
-        &self,
-        storage_key: &AttachmentStorageKey,
-    ) -> Result<(), anyhow::Error> {
+    pub(super) async fn delete(&self, storage_key: &FileStorageKey) -> Result<(), anyhow::Error> {
         let path = self.path_for_key(storage_key)?;
         match tokio::fs::remove_file(&path).await {
             Ok(()) => {
@@ -84,7 +78,7 @@ impl LocalAttachmentStorage {
         }
     }
 
-    fn path_for_key(&self, storage_key: &AttachmentStorageKey) -> Result<PathBuf, anyhow::Error> {
+    fn path_for_key(&self, storage_key: &FileStorageKey) -> Result<PathBuf, anyhow::Error> {
         let mut path = (*self.root).clone();
         for segment in storage_key.as_ref().split('/') {
             if segment.is_empty()
@@ -106,7 +100,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn storage_extension(file_name: &str) -> Option<String> {
+fn file_extension(file_name: &str) -> Option<String> {
     let extension = Path::new(file_name)
         .extension()
         .and_then(|value| value.to_str())?

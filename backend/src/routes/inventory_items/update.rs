@@ -1,12 +1,13 @@
-use super::model::{
-    InventoryItemError, InventoryItemPatch, InventoryItemResponse, actor_for_user,
-    apply_inventory_item_patch, fetch_inventory_item_for_update, parse_nullable_string,
-    parse_nullable_uuid, record_inventory_item_audit, update_inventory_item_rollback_details,
-    validate_write_permission,
+﻿use super::model::{
+    InventoryItemDatabaseError, InventoryItemResponse, apply_inventory_item_patch,
+    fetch_inventory_item_for_update, update_inventory_item_rollback_details,
 };
-use crate::audit::AuditAction;
-use crate::domain::UserId;
-use actix_web::{HttpResponse, web};
+use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::audit::{AuditAction, AuditResource, record_audit};
+use crate::domain::{InventoryItemId, UpdateInventoryItem, UserId};
+use crate::utils::error_chain_fmt;
+use actix_web::http::StatusCode;
+use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use serde::{Deserialize, Deserializer};
 use sqlx::PgPool;
@@ -30,19 +31,23 @@ pub struct JsonData {
     internal_notes: Option<Option<String>>,
 }
 
-impl From<JsonData> for InventoryItemPatch {
-    fn from(value: JsonData) -> Self {
-        Self {
-            serial_number: value.serial_number,
-            batch_number: parse_nullable_string(value.batch_number),
-            quantity_on_hand: value.quantity_on_hand,
-            quantity_allocated: value.quantity_allocated,
-            quantity_unit_id: value.quantity_unit_id,
-            location_id: parse_nullable_uuid(value.location_id),
-            status: value.status,
-            public_notes: parse_nullable_string(value.public_notes),
-            internal_notes: parse_nullable_string(value.internal_notes),
-        }
+impl TryFrom<JsonData> for UpdateInventoryItem {
+    type Error = String;
+
+    fn try_from(value: JsonData) -> Result<Self, Self::Error> {
+        Self::parse(
+            value.serial_number,
+            value.batch_number,
+            value.quantity_on_hand,
+            value.quantity_allocated,
+            value.quantity_unit_id.map(Uuid::into),
+            value
+                .location_id
+                .map(|location_id| location_id.map(Uuid::into)),
+            value.status,
+            value.public_notes,
+            value.internal_notes,
+        )
     }
 }
 
@@ -52,6 +57,49 @@ where
     T: Deserialize<'de>,
 {
     Option::<T>::deserialize(deserializer).map(Some)
+}
+
+#[derive(thiserror::Error)]
+pub enum UpdateInventoryItemError {
+    #[error("{0}")]
+    ValidationError(String),
+    #[error("{0}")]
+    Forbidden(String),
+    #[error("{0}")]
+    NotFound(String),
+    #[error("{0}")]
+    ConflictError(String),
+    #[error(transparent)]
+    UnexpectedError(#[from] anyhow::Error),
+}
+
+impl std::fmt::Debug for UpdateInventoryItemError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+impl ResponseError for UpdateInventoryItemError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            UpdateInventoryItemError::ValidationError(_) => StatusCode::BAD_REQUEST,
+            UpdateInventoryItemError::Forbidden(_) => StatusCode::FORBIDDEN,
+            UpdateInventoryItemError::NotFound(_) => StatusCode::NOT_FOUND,
+            UpdateInventoryItemError::ConflictError(_) => StatusCode::CONFLICT,
+            UpdateInventoryItemError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<InventoryItemDatabaseError> for UpdateInventoryItemError {
+    fn from(error: InventoryItemDatabaseError) -> Self {
+        match error {
+            InventoryItemDatabaseError::Validation(message) => Self::ValidationError(message),
+            InventoryItemDatabaseError::NotFound(message) => Self::NotFound(message),
+            InventoryItemDatabaseError::Conflict(message) => Self::ConflictError(message),
+            InventoryItemDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
+        }
+    }
 }
 
 #[tracing::instrument(
@@ -64,26 +112,41 @@ pub async fn update_inventory_item(
     pool: web::Data<PgPool>,
     inventory_item_id: web::Path<Uuid>,
     payload: web::Json<JsonData>,
-) -> Result<HttpResponse, InventoryItemError> {
-    let actor = actor_for_user(&pool, actor_user_id).await?;
+) -> Result<HttpResponse, UpdateInventoryItemError> {
+    let inventory_item_id: InventoryItemId = inventory_item_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::InventoryItem,
+        Action::Update(inventory_item_id.into()),
+    )
+    .await?
+    {
+        return Err(UpdateInventoryItemError::Forbidden(
+            "You don't have permission to update this inventory item.".into(),
+        ));
+    }
+
+    let patch = UpdateInventoryItem::try_from(payload.into_inner())
+        .map_err(UpdateInventoryItemError::ValidationError)?;
+
     let mut transaction = pool
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    let existing =
-        fetch_inventory_item_for_update(&mut transaction, inventory_item_id.into_inner())
-            .await?
-            .ok_or_else(|| InventoryItemError::NotFound("Inventory item not found".into()))?;
-    validate_write_permission(&actor, existing.laboratory_id)?;
+    let existing = fetch_inventory_item_for_update(&mut transaction, inventory_item_id.into())
+        .await?
+        .ok_or(UpdateInventoryItemError::NotFound(
+            "Inventory item not found".into(),
+        ))?;
+    let updated = apply_inventory_item_patch(&mut transaction, &existing, patch).await?;
 
-    let updated =
-        apply_inventory_item_patch(&mut transaction, &existing, payload.into_inner().into())
-            .await?;
-    record_inventory_item_audit(
+    record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Update,
-        updated.inventory_item_id,
+        AuditResource::InventoryItem,
+        Some(updated.inventory_item_id),
         update_inventory_item_rollback_details(&existing),
     )
     .await?;
@@ -92,5 +155,5 @@ pub async fn update_inventory_item(
         .await
         .context("Failed to commit SQL transaction to update an inventory item.")?;
 
-    Ok(HttpResponse::Ok().json(InventoryItemResponse::from(updated)))
+    Ok(HttpResponse::Ok().json(InventoryItemResponse::from_row(updated, true)))
 }

@@ -1,11 +1,9 @@
 use super::model::{UserResponse, UserRow, create_user_rollback_details};
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::authentication::hash_password;
-use crate::domain::UserId;
-use crate::domain::{
-    LaboratoryId, NewUser, PhoneNumber, UserEmail, UserName, UserPassword, UserType,
-};
+use crate::domain::{NewUser, PhoneNumber, UserEmail, UserName, UserPassword, UserType};
+use crate::domain::{UserId, UserRole};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
@@ -33,7 +31,7 @@ impl TryFrom<JsonData> for NewUser {
         let username = UserName::parse(value.username)?;
         let password = UserPassword::parse(value.password)?;
         let user_type = UserType::parse(&value.user_type)?;
-        let laboratory_id = value.laboratory_id.map(LaboratoryId::parse).transpose()?;
+        let laboratory_id = value.laboratory_id.map(Uuid::into);
         let email = value.email.map(UserEmail::parse).transpose()?;
         let phone_number = value.phone_number.map(PhoneNumber::parse).transpose()?;
 
@@ -119,25 +117,34 @@ impl ResponseError for CreateUserError {
     name = "Creating a user",
     skip(pool, payload),
     fields(
-        actor_user_id=%user_id,
+        actor_user_id=%actor_user_id,
         username=%payload.username,
         user_type=%payload.user_type,
     )
 )]
 pub async fn create_user(
-    user_id: UserId,
+    actor_user_id: UserId,
     pool: web::Data<PgPool>,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, CreateUserError> {
-    let actor = get_actor(&pool, user_id)
-        .await
-        .map_err(CreateUserError::UnexpectedError)?
-        .ok_or(CreateUserError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
     let new_user =
         NewUser::try_from(payload.into_inner()).map_err(CreateUserError::ValidationError)?;
-    validate_create_permission(&actor, &new_user)?;
+    let new_user_role = UserRole {
+        user_type: new_user.user_type.clone(),
+        laboratory_id: new_user.laboratory_id,
+    };
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::User,
+        Action::CreateUser(&new_user_role),
+    )
+    .await?
+    {
+        return Err(CreateUserError::Forbidden(
+            "You don't have permission to create this user.".into(),
+        ));
+    }
 
     let password_hash = hash_password(new_user.password.clone().0).await?;
     let mut transaction = pool
@@ -147,7 +154,7 @@ pub async fn create_user(
     let created_user = insert_new_user(&mut transaction, new_user, password_hash).await?;
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Create,
         AuditResource::User,
         Some(created_user.user_id),
@@ -161,16 +168,6 @@ pub async fn create_user(
     Ok(HttpResponse::Created().json(UserResponse::from(created_user)))
 }
 
-fn validate_create_permission(actor: &Actor, new_user: &NewUser) -> Result<(), CreateUserError> {
-    if actor.can_manage_user(new_user.user_type, new_user.laboratory_id) {
-        Ok(())
-    } else {
-        Err(CreateUserError::Forbidden(
-            "You don't have permission to create this user.".into(),
-        ))
-    }
-}
-
 #[tracing::instrument(
     name = "Saving new user in the database",
     skip(new_user, password_hash, transaction)
@@ -181,6 +178,7 @@ async fn insert_new_user(
     password_hash: Secret<String>,
 ) -> Result<UserRow, CreateUserError> {
     let new_user_id = Uuid::new_v4();
+    let username = new_user.username.as_ref();
     let user_type_name = new_user.user_type.to_string();
     let laboratory_id = new_user.laboratory_id.map(Uuid::from);
     let email = new_user.email.map(String::from);
@@ -220,7 +218,7 @@ async fn insert_new_user(
         LEFT JOIN laboratories USING (laboratory_id)
         "#,
         new_user_id,
-        new_user.username.as_ref(),
+        username,
         password_hash.expose_secret(),
         laboratory_id,
         email,

@@ -1,3 +1,4 @@
+use std::ops::Deref;
 use validator::ValidateEmail;
 
 #[derive(Debug)]
@@ -15,6 +16,14 @@ impl UserEmail {
 
 impl AsRef<str> for UserEmail {
     fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Deref for UserEmail {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
         &self.0
     }
 }

@@ -2,10 +2,10 @@ use std::ops::Deref;
 use uuid::Uuid;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub struct LaboratoryId(Uuid);
+pub struct LaboratoryId(pub Uuid);
 
 impl LaboratoryId {
-    pub fn parse(id: Uuid) -> Result<LaboratoryId, String> {
+    pub fn parse(id: Uuid) -> Result<Self, String> {
         Ok(Self(id))
     }
 }
@@ -33,5 +33,11 @@ impl Deref for LaboratoryId {
 impl From<LaboratoryId> for Uuid {
     fn from(lab_id: LaboratoryId) -> Self {
         lab_id.0
+    }
+}
+
+impl Into<LaboratoryId> for Uuid {
+    fn into(self) -> LaboratoryId {
+        LaboratoryId(self)
     }
 }

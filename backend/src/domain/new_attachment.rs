@@ -1,27 +1,25 @@
-use crate::domain::{
-    AttachmentDescription, AttachmentDisplayName, AttachmentUploadId, AttachmentVisibility,
-};
+use crate::domain::{AttachmentDisplayName, FileUploadId};
 
 #[derive(Clone, Debug)]
-pub struct AttachmentClaim {
-    pub upload_id: AttachmentUploadId,
+pub struct NewAttachment {
+    pub upload_id: FileUploadId,
     pub display_name: Option<AttachmentDisplayName>,
-    pub description: Option<AttachmentDescription>,
-    pub visibility: AttachmentVisibility,
+    pub description: Option<String>,
+    pub is_public: bool,
 }
 
-impl AttachmentClaim {
+impl NewAttachment {
     pub fn new(
-        upload_id: AttachmentUploadId,
+        upload_id: FileUploadId,
         display_name: Option<AttachmentDisplayName>,
-        description: Option<AttachmentDescription>,
-        visibility: Option<AttachmentVisibility>,
+        description: Option<String>,
+        is_public: Option<bool>,
     ) -> Self {
         Self {
             upload_id,
             display_name,
             description,
-            visibility: visibility.unwrap_or_default(),
+            is_public: is_public.unwrap_or(false),
         }
     }
 }

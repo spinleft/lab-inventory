@@ -208,26 +208,28 @@ VALUES
 
 CREATE TABLE units (
     unit_id uuid PRIMARY KEY,
-    code TEXT NOT NULL UNIQUE,
+    laboratory_id uuid NOT NULL REFERENCES laboratories(laboratory_id),
+    code TEXT NOT NULL,
     name TEXT NOT NULL,
     symbol TEXT NOT NULL,
     dimension TEXT NOT NULL REFERENCES unit_dimensions(code),
     scale_to_base DOUBLE PRECISION NOT NULL,
     allow_decimal BOOLEAN NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (laboratory_id, code),
     CHECK (code <> ''),
     CHECK (name <> ''),
     CHECK (symbol <> ''),
     CHECK (scale_to_base > 0)
 );
 
-INSERT INTO units (unit_id, code, name, symbol, dimension, scale_to_base, allow_decimal)
+INSERT INTO units (unit_id, laboratory_id, code, name, symbol, dimension, scale_to_base, allow_decimal)
 VALUES
-  (gen_random_uuid(), 'm', '米', 'm', 'length', 1, true),
-  (gen_random_uuid(), 'cm', '厘米', 'cm', 'length', 0.01, true),
-  (gen_random_uuid(), 'mm', '毫米', 'mm', 'length', 0.001, true),
-  (gen_random_uuid(), 'inch', '英寸', 'in', 'length', 0.0254, true),
-  (gen_random_uuid(), 'pcs', '件', 'pcs', 'count', 1, false);
+  (gen_random_uuid(), '7227c5ab-78ef-43ce-87bc-5ce2337ccfe3', 'm', '米', 'm', 'length', 1, true),
+  (gen_random_uuid(), '7227c5ab-78ef-43ce-87bc-5ce2337ccfe3', 'cm', '厘米', 'cm', 'length', 0.01, true),
+  (gen_random_uuid(), '7227c5ab-78ef-43ce-87bc-5ce2337ccfe3', 'mm', '毫米', 'mm', 'length', 0.001, true),
+  (gen_random_uuid(), '7227c5ab-78ef-43ce-87bc-5ce2337ccfe3', 'inch', '英寸', 'in', 'length', 0.0254, true),
+  (gen_random_uuid(), '7227c5ab-78ef-43ce-87bc-5ce2337ccfe3', 'pcs', '件', 'pcs', 'count', 1, false);
 
 CREATE TABLE assets (
     asset_id uuid PRIMARY KEY,
@@ -443,7 +445,7 @@ CREATE INDEX idx_asset_inventory_items_search_trgm
 CREATE UNIQUE INDEX uq_asset_inventory_items_item_laboratory
     ON asset_inventory_items (inventory_item_id, laboratory_id);
 
-CREATE TABLE attachment_uploads (
+CREATE TABLE file_uploads (
     upload_id uuid PRIMARY KEY,
     laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id),
     storage_backend TEXT NOT NULL DEFAULT 'local',
@@ -452,7 +454,7 @@ CREATE TABLE attachment_uploads (
     mime_type TEXT,
     file_size_bytes BIGINT NOT NULL,
     sha256_hex TEXT NOT NULL,
-    uploaded_by_user_id uuid REFERENCES users (user_id) ON DELETE SET NULL,
+    uploaded_by_user_id uuid NOT NULL REFERENCES users (user_id),
     created_at timestamptz NOT NULL DEFAULT now(),
     expires_at timestamptz NOT NULL,
     consumed_at timestamptz,
@@ -464,31 +466,53 @@ CREATE TABLE attachment_uploads (
     CHECK (expires_at > created_at)
 );
 
-CREATE INDEX idx_attachment_uploads_laboratory_active
-    ON attachment_uploads (laboratory_id, expires_at)
+CREATE INDEX idx_file_uploads_laboratory_active
+    ON file_uploads (laboratory_id, expires_at)
     WHERE consumed_at IS NULL;
-CREATE INDEX idx_attachment_uploads_uploaded_by_user_id
-    ON attachment_uploads (uploaded_by_user_id);
+CREATE INDEX idx_file_uploads_uploaded_by_user_id
+    ON file_uploads (uploaded_by_user_id);
 
-CREATE TABLE attachments (
-    attachment_id uuid PRIMARY KEY,
+CREATE TABLE files (
+    file_id uuid PRIMARY KEY,
     laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id),
-    asset_id uuid,
-    inventory_item_id uuid,
-    display_name TEXT NOT NULL,
+    storage_backend TEXT NOT NULL DEFAULT 'local',
+    storage_key TEXT NOT NULL UNIQUE,
     original_file_name TEXT NOT NULL,
-    description TEXT,
     mime_type TEXT,
     file_size_bytes BIGINT NOT NULL,
     sha256_hex TEXT NOT NULL,
-    storage_backend TEXT NOT NULL DEFAULT 'local',
-    storage_key TEXT NOT NULL UNIQUE,
-    visibility TEXT NOT NULL DEFAULT 'internal',
     uploaded_by_user_id uuid REFERENCES users (user_id) ON DELETE SET NULL,
-    deleted_by_user_id uuid REFERENCES users (user_id) ON DELETE SET NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (storage_backend IN ('local')),
+    CHECK (storage_key <> ''),
+    CHECK (original_file_name <> ''),
+    CHECK (file_size_bytes > 0),
+    CHECK (sha256_hex ~ '^[0-9a-f]{64}$')
+);
+
+CREATE UNIQUE INDEX uq_files_file_laboratory
+    ON files (file_id, laboratory_id);
+CREATE INDEX idx_files_laboratory_created_at
+    ON files (laboratory_id, created_at DESC);
+CREATE INDEX idx_files_uploaded_by_user_id
+    ON files (uploaded_by_user_id);
+CREATE INDEX idx_files_sha256_hex
+    ON files (sha256_hex);
+
+CREATE TABLE asset_attachment_assignments (
+    attachment_id uuid PRIMARY KEY,
+    laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id),
+    file_id uuid NOT NULL,
+    asset_id uuid,
+    inventory_item_id uuid,
+    display_name TEXT NOT NULL,
+    description TEXT,
+    is_public boolean NOT NULL DEFAULT false,
+    assigned_by_user_id uuid REFERENCES users (user_id) ON DELETE SET NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
-    deleted_at timestamptz,
+    FOREIGN KEY (file_id, laboratory_id)
+        REFERENCES files (file_id, laboratory_id),
     FOREIGN KEY (asset_id, laboratory_id)
         REFERENCES assets (asset_id, laboratory_id)
         ON DELETE CASCADE,
@@ -496,32 +520,26 @@ CREATE TABLE attachments (
         REFERENCES asset_inventory_items (inventory_item_id, laboratory_id)
         ON DELETE CASCADE,
     CHECK ((asset_id IS NULL) <> (inventory_item_id IS NULL)),
-    CHECK (visibility IN ('public', 'internal')),
-    CHECK (storage_backend IN ('local')),
-    CHECK (display_name <> ''),
-    CHECK (original_file_name <> ''),
-    CHECK (file_size_bytes > 0),
-    CHECK (storage_key <> ''),
-    CHECK (sha256_hex ~ '^[0-9a-f]{64}$')
+    CHECK (display_name <> '')
 );
 
-CREATE INDEX idx_attachments_asset_laboratory_id ON attachments (asset_id, laboratory_id);
-CREATE INDEX idx_attachments_inventory_item_laboratory_id ON attachments (inventory_item_id, laboratory_id);
-CREATE INDEX idx_attachments_uploaded_by_user_id ON attachments (uploaded_by_user_id);
-CREATE INDEX idx_attachments_deleted_by_user_id ON attachments (deleted_by_user_id);
-CREATE INDEX idx_attachments_active_asset
-    ON attachments (asset_id, created_at DESC)
-    WHERE deleted_at IS NULL AND asset_id IS NOT NULL;
-CREATE INDEX idx_attachments_active_inventory_item
-    ON attachments (inventory_item_id, created_at DESC)
-    WHERE deleted_at IS NULL AND inventory_item_id IS NOT NULL;
-CREATE INDEX idx_attachments_laboratory_created_active
-    ON attachments (laboratory_id, created_at DESC)
-    WHERE deleted_at IS NULL;
-CREATE INDEX idx_attachments_visibility_active
-    ON attachments (visibility)
-    WHERE deleted_at IS NULL;
-CREATE INDEX idx_attachments_display_name_trgm
-    ON attachments USING gin (display_name gin_trgm_ops);
+CREATE INDEX idx_asset_attachment_assignments_file_laboratory_id
+    ON asset_attachment_assignments (file_id, laboratory_id);
+CREATE INDEX idx_asset_attachment_assignments_asset_laboratory_id
+    ON asset_attachment_assignments (asset_id, laboratory_id);
+CREATE INDEX idx_asset_attachment_assignments_inventory_item_laboratory_id
+    ON asset_attachment_assignments (inventory_item_id, laboratory_id);
+CREATE INDEX idx_asset_attachment_assignments_assigned_by_user_id
+    ON asset_attachment_assignments (assigned_by_user_id);
+CREATE INDEX idx_asset_attachment_assignments_active_asset
+    ON asset_attachment_assignments (asset_id, created_at DESC)
+    WHERE asset_id IS NOT NULL;
+CREATE INDEX idx_asset_attachment_assignments_active_inventory_item
+    ON asset_attachment_assignments (inventory_item_id, created_at DESC)
+    WHERE inventory_item_id IS NOT NULL;
+CREATE INDEX idx_asset_attachment_assignments_laboratory_created_active
+    ON asset_attachment_assignments (laboratory_id, created_at DESC);
+CREATE INDEX idx_asset_attachment_assignments_display_name_trgm
+    ON asset_attachment_assignments USING gin (display_name gin_trgm_ops);
 
 COMMIT;

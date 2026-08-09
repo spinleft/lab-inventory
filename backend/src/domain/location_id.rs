@@ -4,13 +4,7 @@ use uuid::Uuid;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct LocationId(Uuid);
-
-impl LocationId {
-    pub fn parse(id: Uuid) -> Result<Self, String> {
-        Ok(Self(id))
-    }
-}
+pub struct LocationId(pub Uuid);
 
 impl std::fmt::Display for LocationId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -35,5 +29,11 @@ impl Deref for LocationId {
 impl From<LocationId> for Uuid {
     fn from(location_id: LocationId) -> Self {
         location_id.0
+    }
+}
+
+impl Into<LocationId> for Uuid {
+    fn into(self) -> LocationId {
+        LocationId(self)
     }
 }

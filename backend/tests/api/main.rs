@@ -3,6 +3,7 @@ mod asset_parameters;
 mod assets;
 mod attachments;
 mod auth;
+mod borrow_requests;
 mod federation;
 mod health_check;
 mod helpers;

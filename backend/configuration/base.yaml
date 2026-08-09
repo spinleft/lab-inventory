@@ -1,33 +1,34 @@
 application:
   port: 8000
-  host: "0.0.0.0"
-  base_url: "http://127.0.0.1:8000"
-  local_laboratory_id: "30000000-0000-4000-8000-000000000001"
-  hmac_secret: "super-long-and-secret-random-key-needed-to-verify-message-integrity"
+  host: 0.0.0.0
+  base_url: http://127.0.0.1:8000
+  hmac_secret: super-long-and-secret-random-key-needed-to-verify-message-integrity
   cookie_secure: false
+  enable_federation: true
   cors_allowed_origins:
-    - "http://localhost:5173"
-    - "http://127.0.0.1:5173"
-    - "http://localhost:3000"
-    - "tauri://localhost"
-    - "https://tauri.localhost"
+  - http://localhost:5173
+  - http://127.0.0.1:5173
+  - http://localhost:3000
+  - tauri://localhost
+  - https://tauri.localhost
 database:
-  host: "127.0.0.1"
+  host: 127.0.0.1
   port: 5432
-  username: "postgres"
-  password: "password"
-  database_name: "lab_inventory"
+  username: postgres
+  password: password
+  database_name: lab_inventory
   require_ssl: false
-attachment_storage:
-  backend: "local"
-  local_root: "./storage/attachments"
+redis_uri: redis://127.0.0.1:6379
+file_storage:
+  backend: local
+  local_root: ./storage/attachments
   max_file_size_bytes: 52428800
   upload_token_ttl_minutes: 60
 federation:
   enabled: true
-  public_base_url: "http://127.0.0.1:8000"
+  public_base_url: http://127.0.0.1:8000
   require_https: true
   allow_insecure_private_network: false
   request_ttl_seconds: 300
+  local_node_id: 2bd3013d-79fa-4996-a32f-ed9c05a5e16a
   allowed_remote_hosts: []
-redis_uri: "redis://127.0.0.1:6379"

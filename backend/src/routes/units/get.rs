@@ -1,5 +1,5 @@
 use super::model::{UnitResponse, fetch_unit};
-use crate::access_control::get_actor;
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::UserId;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
@@ -43,12 +43,18 @@ pub async fn get_unit(
     pool: web::Data<PgPool>,
     unit_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, GetUnitError> {
-    get_actor(&pool, actor_user_id)
-        .await
-        .map_err(GetUnitError::UnexpectedError)?
-        .ok_or(GetUnitError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Unit,
+        Action::Read(*unit_id),
+    )
+    .await?
+    {
+        return Err(GetUnitError::Forbidden(
+            "You don't have permission to view this unit.".into(),
+        ));
+    }
 
     let unit = fetch_unit(&pool, *unit_id)
         .await?

@@ -2,13 +2,13 @@ use super::model::{
     delete_asset_parameter_rollback_details, fetch_asset_parameter_for_update,
     fetch_asset_parameter_options_for_update,
 };
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{AssetParameterId, LaboratoryId, UserId};
+use crate::domain::{AssetParameterId, UserId};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
@@ -49,27 +49,31 @@ impl ResponseError for DeleteAssetParameterError {
 pub async fn delete_asset_parameter(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    parameter_id: web::Path<AssetParameterId>,
+    parameter_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, DeleteAssetParameterError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(DeleteAssetParameterError::UnexpectedError)?
-        .ok_or(DeleteAssetParameterError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
+    let parameter_id: AssetParameterId = parameter_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::AssetParameter,
+        Action::Delete(parameter_id.into()),
+    )
+    .await?
+    {
+        return Err(DeleteAssetParameterError::Forbidden(
+            "You don't have permission to delete this asset parameter.".into(),
+        ));
+    }
 
     let mut transaction = pool
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    let existing = fetch_asset_parameter_for_update(&mut transaction, *parameter_id)
+    let existing = fetch_asset_parameter_for_update(&mut transaction, parameter_id)
         .await?
         .ok_or(DeleteAssetParameterError::NotFound(
             "Asset parameter not found".into(),
         ))?;
-    let laboratory_id = LaboratoryId::parse(existing.laboratory_id)
-        .map_err(|e| DeleteAssetParameterError::UnexpectedError(anyhow!("{e}")))?;
-    validate_delete_permission(&actor, &laboratory_id)?;
 
     let options =
         fetch_asset_parameter_options_for_update(&mut transaction, existing.parameter_type_id)
@@ -77,7 +81,7 @@ pub async fn delete_asset_parameter(
     delete_asset_parameter_from_database(&mut transaction, existing.parameter_type_id).await?;
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Delete,
         AuditResource::AssetParameter,
         Some(existing.parameter_type_id),
@@ -90,19 +94,6 @@ pub async fn delete_asset_parameter(
         .context("Failed to commit SQL transaction to delete an asset parameter.")?;
 
     Ok(HttpResponse::NoContent().finish())
-}
-
-fn validate_delete_permission(
-    actor: &Actor,
-    target_laboratory_id: &LaboratoryId,
-) -> Result<(), DeleteAssetParameterError> {
-    if actor.can_write_laboratory_resource(target_laboratory_id) {
-        Ok(())
-    } else {
-        Err(DeleteAssetParameterError::Forbidden(
-            "You don't have permission to delete this asset parameter.".into(),
-        ))
-    }
 }
 
 #[tracing::instrument(

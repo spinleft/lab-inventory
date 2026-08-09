@@ -74,8 +74,9 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
         "locations",
         "assets",
         "asset_inventory_items",
-        "attachment_uploads",
-        "attachments",
+        "file_uploads",
+        "files",
+        "asset_attachment_assignments",
         "idempotency",
         "federation_local_nodes",
         "federation_remote_nodes",
@@ -263,13 +264,13 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
         FROM pg_indexes
         WHERE schemaname = 'public'
           AND indexname IN (
-            'idx_attachment_uploads_laboratory_active',
-            'idx_attachments_active_asset',
-            'idx_attachments_active_inventory_item',
-            'idx_attachments_asset_laboratory_id',
-            'idx_attachments_inventory_item_laboratory_id',
-            'idx_attachments_laboratory_created_active',
-            'idx_attachments_display_name_trgm'
+            'idx_file_uploads_laboratory_active',
+            'idx_asset_attachment_assignments_active_asset',
+            'idx_asset_attachment_assignments_active_inventory_item',
+            'idx_asset_attachment_assignments_asset_laboratory_id',
+            'idx_asset_attachment_assignments_inventory_item_laboratory_id',
+            'idx_asset_attachment_assignments_laboratory_created_active',
+            'idx_asset_attachment_assignments_display_name_trgm'
           )
         ORDER BY indexname
         "#,
@@ -280,13 +281,13 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
     assert_eq!(
         attachment_indexes,
         vec![
-            "idx_attachment_uploads_laboratory_active",
-            "idx_attachments_active_asset",
-            "idx_attachments_active_inventory_item",
-            "idx_attachments_asset_laboratory_id",
-            "idx_attachments_display_name_trgm",
-            "idx_attachments_inventory_item_laboratory_id",
-            "idx_attachments_laboratory_created_active",
+            "idx_asset_attachment_assignments_active_asset",
+            "idx_asset_attachment_assignments_active_inventory_item",
+            "idx_asset_attachment_assignments_asset_laboratory_id",
+            "idx_asset_attachment_assignments_display_name_trgm",
+            "idx_asset_attachment_assignments_inventory_item_laboratory_id",
+            "idx_asset_attachment_assignments_laboratory_created_active",
+            "idx_file_uploads_laboratory_active",
         ]
     );
 
@@ -410,7 +411,7 @@ async fn attachment_constraints_are_enforced_by_the_database() {
         SELECT column_name
         FROM information_schema.columns
         WHERE table_schema = 'public'
-          AND table_name = 'attachments'
+          AND table_name = 'asset_attachment_assignments'
           AND column_name IN ('resource_type', 'resource_id', 'file_name', 'storage_url')
         ORDER BY column_name
         "#,
@@ -445,29 +446,46 @@ async fn insert_attachment(
         "labs/{laboratory_id}/objects/{}/constraint.txt",
         uuid::Uuid::new_v4()
     );
+    let file_id = uuid::Uuid::new_v4();
     sqlx::query(
         r#"
-        INSERT INTO attachments (
-            attachment_id,
+        INSERT INTO files (
+            file_id,
             laboratory_id,
-            asset_id,
-            inventory_item_id,
-            display_name,
+            storage_backend,
+            storage_key,
             original_file_name,
             file_size_bytes,
-            sha256_hex,
-            storage_backend,
-            storage_key
+            sha256_hex
         )
-        VALUES ($1, $2, $3, $4, 'constraint.txt', 'constraint.txt', 1, $5, 'local', $6)
+        VALUES ($1, $2, 'local', $3, 'constraint.txt', 1, $4)
+        "#,
+    )
+    .bind(file_id)
+    .bind(laboratory_id)
+    .bind(&storage_key)
+    .bind("b".repeat(64))
+    .execute(&app.db_pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO asset_attachment_assignments (
+            attachment_id,
+            laboratory_id,
+            file_id,
+            asset_id,
+            inventory_item_id,
+            display_name
+        )
+        VALUES ($1, $2, $3, $4, $5, 'constraint.txt')
         "#,
     )
     .bind(uuid::Uuid::new_v4())
     .bind(laboratory_id)
+    .bind(file_id)
     .bind(asset_id)
     .bind(inventory_item_id)
-    .bind("b".repeat(64))
-    .bind(storage_key)
     .execute(&app.db_pool)
     .await
     .map(|_| ())

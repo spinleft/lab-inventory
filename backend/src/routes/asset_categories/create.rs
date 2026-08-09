@@ -4,7 +4,7 @@ use super::model::{
     fetch_asset_parameter_ids_for_laboratory, insert_asset_category_parameter_assignments,
     map_database_conflict,
 };
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{AssetCategoryCode, AssetCategoryId, AssetCategoryName, NewAssetCategory};
 use crate::domain::{LaboratoryId, UserId};
@@ -40,10 +40,7 @@ impl TryFrom<JsonData> for NewAssetCategory {
     type Error = String;
 
     fn try_from(value: JsonData) -> Result<Self, Self::Error> {
-        let parent_category_id = value
-            .parent_category_id
-            .map(AssetCategoryId::parse)
-            .transpose()?;
+        let parent_category_id = value.parent_category_id.map(Uuid::into);
         let name = AssetCategoryName::parse(value.name)?;
         let code = AssetCategoryCode::parse(value.code)?;
 
@@ -91,30 +88,34 @@ pub async fn create_asset_category(
     laboratory_id: web::Path<Uuid>,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, CreateAssetCategoryError> {
-    let laboratory_id = LaboratoryId::parse(laboratory_id.into_inner())
-        .map_err(CreateAssetCategoryError::ValidationError)?;
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(CreateAssetCategoryError::UnexpectedError)?
-        .ok_or(CreateAssetCategoryError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
+    let laboratory_id: LaboratoryId = laboratory_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::AssetCategory,
+        Action::Create(laboratory_id.into()),
+    )
+    .await?
+    {
+        return Err(CreateAssetCategoryError::Forbidden(
+            "You don't have permission to create asset categories.".into(),
+        ));
+    }
+
     let payload = payload.into_inner();
     let parameter_assignments =
         parse_parameter_assignments(payload.parameter_assignments.as_deref().unwrap_or(&[]))
             .map_err(CreateAssetCategoryError::ValidationError)?;
     let new_category =
         NewAssetCategory::try_from(payload).map_err(CreateAssetCategoryError::ValidationError)?;
-    validate_create_permission(&actor, &laboratory_id)?;
 
     let mut transaction = pool
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
     let parent = fetch_parent_category(&mut transaction, new_category.parent_category_id).await?;
-    validate_parent(&parent, &laboratory_id)?;
-    validate_parameter_assignments(&mut transaction, *laboratory_id, &parameter_assignments)
-        .await?;
+    validate_parent(&parent, laboratory_id)?;
+    validate_parameter_assignments(&mut transaction, laboratory_id, &parameter_assignments).await?;
     let parent_category_id = new_category.parent_category_id;
     let (path, depth) = build_path_and_depth(parent.as_ref(), new_category.code.as_ref());
     let category = insert_asset_category(
@@ -138,7 +139,7 @@ pub async fn create_asset_category(
 
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Create,
         AuditResource::AssetCategory,
         Some(category.category_id),
@@ -156,19 +157,6 @@ pub async fn create_asset_category(
             parameter_assignments,
         )),
     )
-}
-
-fn validate_create_permission(
-    actor: &Actor,
-    target_laboratory_id: &LaboratoryId,
-) -> Result<(), CreateAssetCategoryError> {
-    if actor.can_write_laboratory_resource(target_laboratory_id) {
-        Ok(())
-    } else {
-        Err(CreateAssetCategoryError::Forbidden(
-            "You don't have permission to create asset categories for this laboratory.".into(),
-        ))
-    }
 }
 
 async fn fetch_parent_category(
@@ -189,13 +177,10 @@ async fn fetch_parent_category(
 
 fn validate_parent(
     parent: &Option<AssetCategoryRow>,
-    laboratory_id: &LaboratoryId,
+    laboratory_id: LaboratoryId,
 ) -> Result<(), CreateAssetCategoryError> {
     if let Some(parent) = parent {
-        if &LaboratoryId::parse(parent.laboratory_id)
-            .map_err(CreateAssetCategoryError::ValidationError)?
-            != laboratory_id
-        {
+        if parent.laboratory_id != Uuid::from(laboratory_id) {
             return Err(CreateAssetCategoryError::ValidationError(
                 "Parent category does not belong to this laboratory".into(),
             ));
@@ -228,16 +213,19 @@ fn parse_parameter_assignments(
 
 async fn validate_parameter_assignments(
     transaction: &mut Transaction<'_, Postgres>,
-    laboratory_id: Uuid,
+    laboratory_id: LaboratoryId,
     assignments: &[AssetCategoryParameterAssignmentInput],
 ) -> Result<(), CreateAssetCategoryError> {
     let parameter_type_ids: Vec<_> = assignments
         .iter()
         .map(|assignment| assignment.parameter_type_id)
         .collect();
-    let valid_parameter_type_ids =
-        fetch_asset_parameter_ids_for_laboratory(transaction, laboratory_id, &parameter_type_ids)
-            .await?;
+    let valid_parameter_type_ids = fetch_asset_parameter_ids_for_laboratory(
+        transaction,
+        laboratory_id.into(),
+        &parameter_type_ids,
+    )
+    .await?;
 
     if valid_parameter_type_ids.len() != parameter_type_ids.len() {
         return Err(CreateAssetCategoryError::ValidationError(

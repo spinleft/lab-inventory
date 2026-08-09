@@ -513,12 +513,13 @@ async fn delete_asset_cascades_inventory_parameter_values_and_attachments() {
             .unwrap();
     assert_eq!(parameter_count, 0);
 
-    let attachment_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM attachments WHERE attachment_id = ANY($1)")
-            .bind(vec![asset_attachment_id, inventory_attachment_id])
-            .fetch_one(&app.db_pool)
-            .await
-            .unwrap();
+    let attachment_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM asset_attachment_assignments WHERE attachment_id = ANY($1)",
+    )
+    .bind(vec![asset_attachment_id, inventory_attachment_id])
+    .fetch_one(&app.db_pool)
+    .await
+    .unwrap();
     assert_eq!(attachment_count, 0);
 }
 
@@ -720,30 +721,48 @@ async fn insert_attachment(
         _ => panic!("unsupported resource type"),
     };
     let storage_key = format!("labs/{laboratory_id}/objects/{}/asset.txt", Uuid::new_v4());
-    sqlx::query_scalar(
+    let file_id = Uuid::new_v4();
+    sqlx::query(
         r#"
-        INSERT INTO attachments (
-            attachment_id,
+        INSERT INTO files (
+            file_id,
             laboratory_id,
-            asset_id,
-            inventory_item_id,
-            display_name,
+            storage_backend,
+            storage_key,
             original_file_name,
             file_size_bytes,
-            sha256_hex,
-            storage_backend,
-            storage_key
+            sha256_hex
         )
-        VALUES ($1, $2, $3, $4, 'asset.txt', 'asset.txt', 1, $5, 'local', $6)
+        VALUES ($1, $2, 'local', $3, 'asset.txt', 1, $4)
+        "#,
+    )
+    .bind(file_id)
+    .bind(laboratory_id)
+    .bind(&storage_key)
+    .bind("a".repeat(64))
+    .execute(&app.db_pool)
+    .await
+    .unwrap();
+
+    sqlx::query_scalar(
+        r#"
+        INSERT INTO asset_attachment_assignments (
+            attachment_id,
+            laboratory_id,
+            file_id,
+            asset_id,
+            inventory_item_id,
+            display_name
+        )
+        VALUES ($1, $2, $3, $4, $5, 'asset.txt')
         RETURNING attachment_id
         "#,
     )
     .bind(Uuid::new_v4())
     .bind(laboratory_id)
+    .bind(file_id)
     .bind(asset_id)
     .bind(inventory_item_id)
-    .bind("a".repeat(64))
-    .bind(storage_key)
     .fetch_one(&app.db_pool)
     .await
     .unwrap()

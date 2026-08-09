@@ -1,12 +1,12 @@
 use super::model::{
     AssetResponse, fetch_asset, fetch_inventory_items_for_asset, fetch_parameter_values_for_asset,
+    parse_include,
 };
-use crate::access_control::{Actor, get_actor};
-use crate::domain::{AssetId, LaboratoryId, UserId};
+use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::domain::{AssetId, UserId};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
-use anyhow::anyhow;
 use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -53,23 +53,35 @@ impl ResponseError for GetAssetError {
 pub async fn get_asset(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    asset_id: web::Path<AssetId>,
+    asset_id: web::Path<Uuid>,
     query: web::Query<GetAssetQuery>,
 ) -> Result<HttpResponse, GetAssetError> {
-    let include_parameters = include_parameters(&query)?;
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(GetAssetError::UnexpectedError)?
-        .ok_or(GetAssetError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
-    let asset = fetch_asset(&pool, Uuid::from(*asset_id))
+    let asset_id: AssetId = asset_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Asset,
+        Action::Read(asset_id.into()),
+    )
+    .await?
+    {
+        return Err(GetAssetError::Forbidden(
+            "You don't have permission to view this asset.".into(),
+        ));
+    }
+
+    let include_parameters =
+        parse_include(query.include.as_deref()).map_err(GetAssetError::ValidationError)?;
+    let asset = fetch_asset(&pool, asset_id.into())
         .await?
         .ok_or(GetAssetError::NotFound("Asset not found".into()))?;
-    let laboratory_id = LaboratoryId::parse(asset.laboratory_id)
-        .map_err(|e| GetAssetError::UnexpectedError(anyhow!("{e}")))?;
-    validate_read_permission(&actor, &laboratory_id)?;
-    let include_internal_notes = actor.can_read_laboratory_resource(&laboratory_id);
+    let include_internal_notes = validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Asset,
+        Action::BrowseInternal(asset.laboratory_id),
+    )
+    .await?;
 
     let inventory_items = fetch_inventory_items_for_asset(&pool, asset.asset_id).await?;
     let parameters = if include_parameters {
@@ -78,44 +90,10 @@ pub async fn get_asset(
         None
     };
 
-    Ok(
-        HttpResponse::Ok().json(AssetResponse::from_parts_with_internal_notes(
-            asset,
-            Some(inventory_items),
-            parameters,
-            include_internal_notes,
-        )),
-    )
-}
-
-fn validate_read_permission(
-    actor: &Actor,
-    target_laboratory_id: &LaboratoryId,
-) -> Result<(), GetAssetError> {
-    if actor.can_query_laboratory_resource(target_laboratory_id) {
-        Ok(())
-    } else {
-        Err(GetAssetError::Forbidden(
-            "You do not have permission to view this asset".into(),
-        ))
-    }
-}
-
-fn include_parameters(query: &GetAssetQuery) -> Result<bool, GetAssetError> {
-    let Some(include) = query.include.as_deref() else {
-        return Ok(false);
-    };
-    let includes: Vec<_> = include
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .collect();
-    for include in &includes {
-        if *include != "parameters" {
-            return Err(GetAssetError::ValidationError(format!(
-                "Unsupported include: {include}"
-            )));
-        }
-    }
-    Ok(includes.contains(&"parameters"))
+    Ok(HttpResponse::Ok().json(AssetResponse::from_parts(
+        asset,
+        Some(inventory_items),
+        parameters,
+        include_internal_notes,
+    )))
 }

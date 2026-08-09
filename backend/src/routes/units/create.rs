@@ -1,7 +1,7 @@
 use super::model::{
     UnitDatabaseError, UnitResponse, UnitRow, create_unit_rollback_details, map_unit_database_error,
 };
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{NewUnit, UnitCode, UnitDimension, UnitName, UnitSymbol, UserId};
 use crate::utils::error_chain_fmt;
@@ -75,15 +75,22 @@ impl ResponseError for CreateUnitError {
 pub async fn create_unit(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
+    laboratory_id: web::Path<Uuid>,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, CreateUnitError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(CreateUnitError::UnexpectedError)?
-        .ok_or(CreateUnitError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
-    validate_create_permission(&actor)?;
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Unit,
+        Action::Create(*laboratory_id),
+    )
+    .await?
+    {
+        return Err(CreateUnitError::Forbidden(
+            "You don't have permission to create units.".into(),
+        ));
+    }
+
     let new_unit =
         NewUnit::try_from(payload.into_inner()).map_err(CreateUnitError::ValidationError)?;
 
@@ -91,10 +98,10 @@ pub async fn create_unit(
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    let unit = insert_new_unit(&mut transaction, new_unit).await?;
+    let unit = insert_new_unit(&mut transaction, *laboratory_id, new_unit).await?;
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Create,
         AuditResource::Unit,
         Some(unit.unit_id),
@@ -109,30 +116,22 @@ pub async fn create_unit(
     Ok(HttpResponse::Created().json(UnitResponse::from(unit)))
 }
 
-fn validate_create_permission(actor: &Actor) -> Result<(), CreateUnitError> {
-    if actor.can_manage_units() {
-        Ok(())
-    } else {
-        Err(CreateUnitError::Forbidden(
-            "You don't have permission to create units.".into(),
-        ))
-    }
-}
-
 #[tracing::instrument(name = "Saving new unit in the database", skip(transaction, new_unit))]
 async fn insert_new_unit(
     transaction: &mut Transaction<'_, Postgres>,
+    laboratory_id: Uuid,
     new_unit: NewUnit,
 ) -> Result<UnitRow, CreateUnitError> {
     let dimension = new_unit.dimension.to_string();
     sqlx::query_as!(
         UnitRow,
         r#"
-        INSERT INTO units (unit_id, code, name, symbol, dimension, scale_to_base, allow_decimal)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING unit_id, code, name, symbol, dimension, scale_to_base, allow_decimal, created_at
+        INSERT INTO units (unit_id, laboratory_id, code, name, symbol, dimension, scale_to_base, allow_decimal)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING unit_id, laboratory_id, code, name, symbol, dimension, scale_to_base, allow_decimal, created_at
         "#,
         Uuid::new_v4(),
+        laboratory_id,
         new_unit.code.as_ref(),
         new_unit.name.as_ref(),
         new_unit.symbol.as_ref(),

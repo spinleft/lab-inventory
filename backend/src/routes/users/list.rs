@@ -1,11 +1,9 @@
 use super::model::{UserResponse, UserRow};
-use crate::access_control::get_actor;
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::UserId;
-use crate::domain::{LaboratoryId, UserType};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
-use anyhow::anyhow;
 use sqlx::PgPool;
 
 #[derive(thiserror::Error)]
@@ -39,27 +37,16 @@ pub async fn list_users(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
 ) -> Result<HttpResponse, ListUsersError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(ListUsersError::UnexpectedError)?
-        .ok_or(ListUsersError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
-
     let mut users = Vec::new();
     for user in fetch_users(&pool).await? {
-        if actor.can_view_user(
-            UserId::parse(user.user_id).map_err(|e| ListUsersError::UnexpectedError(anyhow!(e)))?,
-            UserType::parse(user.user_type_name.as_ref().ok_or(
-                ListUsersError::ValidationError("User type is required".into()),
-            )?)
-            .map_err(|e| ListUsersError::UnexpectedError(anyhow!(e)))?,
-            user.laboratory_id
-                .map(|id| {
-                    LaboratoryId::parse(id).map_err(|e| ListUsersError::UnexpectedError(anyhow!(e)))
-                })
-                .transpose()?,
-        ) {
+        if validate_permission(
+            &pool,
+            &actor_user_id,
+            ResourceType::User,
+            Action::Read(user.user_id),
+        )
+        .await?
+        {
             users.push(UserResponse::from(user));
         }
     }

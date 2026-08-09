@@ -27,12 +27,12 @@ impl NewLocation {
 #[cfg(test)]
 mod tests {
     use super::NewLocation;
-    use crate::domain::{LocationCode, LocationId, LocationName};
+    use crate::domain::{LocationCode, LocationName};
     use uuid::Uuid;
 
     #[test]
     fn new_location_keeps_parent_name_code_and_description() {
-        let parent_location_id = LocationId::parse(Uuid::new_v4()).unwrap();
+        let parent_location_id = Uuid::new_v4().into();
         let name = LocationName::parse("Room A".into()).unwrap();
         let code = LocationCode::parse("room_a".into()).unwrap();
 

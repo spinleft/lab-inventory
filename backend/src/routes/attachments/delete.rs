@@ -1,15 +1,43 @@
-use super::error::AttachmentError;
-use super::model::{
-    DeletedAttachmentRow, actor_for_user, attachment_audit_json, fetch_attachment_for_update,
-    validate_write_permission,
-};
-use crate::attachment_storage::AttachmentStorage;
+use super::model::{delete_attachment_rollback_details, fetch_attachment_for_update};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{AttachmentId, AttachmentStorageKey, LaboratoryId, UserId};
-use actix_web::{HttpResponse, web};
+use crate::domain::{AttachmentId, FileStorageKey, UserId};
+use crate::file_storage::FileStorage;
+use crate::utils::error_chain_fmt;
+use actix_web::http::StatusCode;
+use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::{Context, anyhow};
-use serde_json::json;
 use sqlx::PgPool;
+use uuid::Uuid;
+
+#[derive(thiserror::Error)]
+pub enum DeleteAttachmentError {
+    #[error("{0}")]
+    ValidationError(String),
+    #[error("{0}")]
+    Forbidden(String),
+    #[error("{0}")]
+    NotFound(String),
+    #[error(transparent)]
+    UnexpectedError(#[from] anyhow::Error),
+}
+
+impl std::fmt::Debug for DeleteAttachmentError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+impl ResponseError for DeleteAttachmentError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            DeleteAttachmentError::ValidationError(_) => StatusCode::BAD_REQUEST,
+            DeleteAttachmentError::Forbidden(_) => StatusCode::FORBIDDEN,
+            DeleteAttachmentError::NotFound(_) => StatusCode::NOT_FOUND,
+            DeleteAttachmentError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
 
 #[tracing::instrument(
     name = "Delete attachment",
@@ -19,39 +47,40 @@ use sqlx::PgPool;
 pub async fn delete_attachment(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    storage: web::Data<AttachmentStorage>,
-    attachment_id: web::Path<AttachmentId>,
-) -> Result<HttpResponse, AttachmentError> {
-    let actor = actor_for_user(&pool, actor_user_id).await?;
-    let attachment_id = attachment_id.into_inner();
+    storage: web::Data<FileStorage>,
+    attachment_id: web::Path<Uuid>,
+) -> Result<HttpResponse, DeleteAttachmentError> {
+    let attachment_id: AttachmentId = attachment_id.into_inner().into();
     let mut transaction = pool
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    let row = fetch_attachment_for_update(&mut transaction, *attachment_id)
+    let existing = fetch_attachment_for_update(&mut transaction, attachment_id)
         .await?
-        .ok_or_else(|| AttachmentError::NotFound("Attachment not found".into()))?;
-    let laboratory_id = LaboratoryId::parse(row.laboratory_id)
-        .map_err(|e| AttachmentError::UnexpectedError(anyhow!("{e}")))?;
-    validate_write_permission(&actor, &laboratory_id)?;
-    let storage_key = AttachmentStorageKey::parse(row.storage_key.clone())
-        .map_err(|e| AttachmentError::UnexpectedError(anyhow!("{e}")))?;
+        .ok_or_else(|| DeleteAttachmentError::NotFound("Attachment not found".into()))?;
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::AttachmentAssignment,
+        Action::Delete(attachment_id.into()),
+    )
+    .await?
+    {
+        return Err(DeleteAttachmentError::Forbidden(
+            "You are not allowed to delete this attachment".into(),
+        ));
+    }
+    let storage_key = FileStorageKey::parse(existing.storage_key.clone())
+        .map_err(|e| DeleteAttachmentError::UnexpectedError(anyhow!("{e}")))?;
 
-    sqlx::query("DELETE FROM attachments WHERE attachment_id = $1")
-        .bind(row.attachment_id)
-        .execute(transaction.as_mut())
-        .await
-        .map_err(|e| AttachmentError::UnexpectedError(e.into()))?;
-
+    delete_attachment_from_database(&mut transaction, attachment_id).await?;
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Delete,
         AuditResource::Attachment,
-        Some(row.attachment_id),
-        json!({
-            "deleted": attachment_audit_json(&row),
-        }),
+        Some(existing.attachment_id),
+        delete_attachment_rollback_details(&existing),
     )
     .await?;
     transaction
@@ -63,14 +92,26 @@ pub async fn delete_attachment(
     Ok(HttpResponse::NoContent().finish())
 }
 
-pub(crate) async fn delete_storage_objects(
-    storage: &AttachmentStorage,
-    rows: &[DeletedAttachmentRow],
-) -> Result<(), anyhow::Error> {
-    for row in rows {
-        let storage_key =
-            AttachmentStorageKey::parse(row.storage_key.clone()).map_err(|e| anyhow!(e))?;
-        storage.delete(&storage_key).await?;
-    }
+#[tracing::instrument(name = "Deleting attachment from the database", skip(transaction), fields(attachment_id=%attachment_id))]
+async fn delete_attachment_from_database(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    attachment_id: AttachmentId,
+) -> Result<(), DeleteAttachmentError> {
+    sqlx::query!(
+        r#"
+            WITH deleted_assignment AS (
+                DELETE FROM asset_attachment_assignments
+                WHERE attachment_id = $1
+                RETURNING file_id
+            )
+            DELETE FROM files
+            WHERE file_id IN (SELECT file_id FROM deleted_assignment)
+        "#,
+        Uuid::from(attachment_id)
+    )
+    .execute(transaction.as_mut())
+    .await
+    .map_err(|e| DeleteAttachmentError::UnexpectedError(e.into()))?;
+
     Ok(())
 }

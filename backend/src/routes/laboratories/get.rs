@@ -1,5 +1,5 @@
 use super::model::{LaboratoryResponse, fetch_laboratory};
-use crate::access_control::get_actor;
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::UserId;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
@@ -43,22 +43,16 @@ pub async fn get_laboratory(
     pool: web::Data<PgPool>,
     laboratory_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, GetLaboratoryError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(GetLaboratoryError::UnexpectedError)?
-        .ok_or(GetLaboratoryError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
-    if !actor.is_admin() {
-        return Err(GetLaboratoryError::Forbidden(
-            "You don't have permission to view this laboratory.".into(),
-        ));
-    }
-
     let laboratory = fetch_laboratory(&pool, *laboratory_id)
         .await?
         .ok_or(GetLaboratoryError::NotFound("Laboratory not found".into()))?;
-    if actor.is_lab_admin() && actor.laboratory_id.map(Uuid::from) != Some(laboratory.laboratory_id)
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Laboratory,
+        Action::Read(laboratory.laboratory_id),
+    )
+    .await?
     {
         return Err(GetLaboratoryError::Forbidden(
             "You don't have permission to view this laboratory.".into(),

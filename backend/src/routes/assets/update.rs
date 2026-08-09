@@ -1,11 +1,11 @@
-use super::model::{
-    AssetModelError, AssetParameterValueInput, AssetResponse, apply_asset_parameter_updates,
+﻿use super::model::{
+    AssetDatabaseError, AssetParameterValueInput, AssetResponse, apply_asset_parameter_updates,
     convert_inventory_items_to_unit, fetch_asset_for_update,
     fetch_inventory_items_for_asset_for_update, fetch_parameter_values_for_asset_for_update,
     map_database_error, update_asset_rollback_details, validate_category,
     validate_required_parameters,
 };
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{
     AssetCategoryId, AssetId, AssetName, AssetTrackingMode, LaboratoryId, NullableUpdate,
@@ -51,25 +51,23 @@ impl TryFrom<JsonData> for UpdateAsset {
     type Error = String;
 
     fn try_from(value: JsonData) -> Result<Self, Self::Error> {
+        let category_id = NullableUpdate::parse(value.category_id, AssetCategoryId::parse)?;
+        let tracking_mode = value
+            .tracking_mode
+            .as_deref()
+            .map(AssetTrackingMode::parse)
+            .transpose()?;
+        let name = value.name.map(AssetName::parse).transpose()?;
+
         Ok(Self::new(
-            match value.category_id {
-                Some(Some(category_id)) => {
-                    NullableUpdate::Set(AssetCategoryId::parse(category_id)?)
-                }
-                Some(None) => NullableUpdate::Clear,
-                None => NullableUpdate::Unchanged,
-            },
-            value
-                .tracking_mode
-                .as_deref()
-                .map(AssetTrackingMode::parse)
-                .transpose()?,
-            value.name.map(AssetName::parse).transpose()?,
-            parse_nullable_string(value.model),
-            parse_nullable_string(value.manufacturer),
-            value.default_unit_id,
-            parse_nullable_string(value.public_notes),
-            parse_nullable_string(value.internal_notes),
+            category_id,
+            tracking_mode,
+            name,
+            parse_nullable_text(value.model),
+            parse_nullable_text(value.manufacturer),
+            value.default_unit_id.map(Uuid::into),
+            parse_nullable_text(value.public_notes),
+            parse_nullable_text(value.internal_notes),
         ))
     }
 }
@@ -123,6 +121,16 @@ impl ResponseError for UpdateAssetError {
     }
 }
 
+impl From<AssetDatabaseError> for UpdateAssetError {
+    fn from(error: AssetDatabaseError) -> Self {
+        match error {
+            AssetDatabaseError::Validation(message) => Self::ValidationError(message),
+            AssetDatabaseError::Conflict(message) => Self::ConflictError(message),
+            AssetDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
+        }
+    }
+}
+
 #[tracing::instrument(
     name = "Update an asset",
     skip(pool, payload),
@@ -131,15 +139,23 @@ impl ResponseError for UpdateAssetError {
 pub async fn update_asset(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    asset_id: web::Path<AssetId>,
+    asset_id: web::Path<Uuid>,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, UpdateAssetError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(UpdateAssetError::UnexpectedError)?
-        .ok_or(UpdateAssetError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
+    let asset_id: AssetId = asset_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Asset,
+        Action::Update(asset_id.into()),
+    )
+    .await?
+    {
+        return Err(UpdateAssetError::Forbidden(
+            "You don't have permission to update this asset.".into(),
+        ));
+    }
+
     let mut payload = payload.into_inner();
     let parameter_values = payload.parameters.take().map(|parameters| {
         parameters
@@ -153,38 +169,20 @@ pub async fn update_asset(
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    let existing = fetch_asset_for_update(&mut transaction, Uuid::from(*asset_id))
+    let existing = fetch_asset_for_update(&mut transaction, asset_id.into())
         .await?
         .ok_or(UpdateAssetError::NotFound("Asset not found".into()))?;
     let existing_parameters =
         fetch_parameter_values_for_asset_for_update(&mut transaction, existing.asset_id).await?;
     let laboratory_id = LaboratoryId::parse(existing.laboratory_id)
         .map_err(|e| UpdateAssetError::UnexpectedError(anyhow!("{e}")))?;
-    validate_update_permission(&actor, &laboratory_id)?;
 
-    let category_id = update_asset
-        .category_id
-        .resolve(
-            existing
-                .category_id
-                .map(|id| AssetCategoryId::parse(id).unwrap()),
-        )
-        .map(Uuid::from);
-    validate_category(&mut transaction, laboratory_id, category_id)
-        .await
-        .map_err(map_model_error)?;
-
-    let current_tracking_mode = AssetTrackingMode::parse(&existing.tracking_mode)
-        .map_err(UpdateAssetError::ValidationError)?;
-    let tracking_mode = update_asset.tracking_mode.unwrap_or(current_tracking_mode);
-    if tracking_mode != current_tracking_mode && existing.inventory_item_count > 0 {
-        return Err(UpdateAssetError::ValidationError(
-            "Cannot change tracking_mode while inventory items exist".into(),
-        ));
-    }
-
+    let category_id = resolve_category_id(&update_asset, &existing)?;
+    validate_category(&mut transaction, laboratory_id, category_id).await?;
+    let tracking_mode = resolve_tracking_mode(&update_asset, &existing)?;
     let default_unit_id = update_asset
         .default_unit_id
+        .map(Uuid::from)
         .unwrap_or(existing.default_unit_id);
 
     update_asset_in_database(
@@ -219,10 +217,8 @@ pub async fn update_asset(
 
     if default_unit_id != existing.default_unit_id {
         convert_inventory_items_to_unit(&mut transaction, existing.asset_id, default_unit_id)
-            .await
-            .map_err(map_model_error)?;
+            .await?;
     }
-
     if let Some(parameter_values) = parameter_values.as_deref() {
         apply_asset_parameter_updates(
             &mut transaction,
@@ -231,8 +227,7 @@ pub async fn update_asset(
             parameter_values,
             true,
         )
-        .await
-        .map_err(map_model_error)?;
+        .await?;
     }
     validate_required_parameters(
         &mut transaction,
@@ -240,8 +235,7 @@ pub async fn update_asset(
         existing.asset_id,
         category_id,
     )
-    .await
-    .map_err(map_model_error)?;
+    .await?;
 
     let asset = fetch_asset_for_update(&mut transaction, existing.asset_id)
         .await?
@@ -255,7 +249,7 @@ pub async fn update_asset(
 
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Update,
         AuditResource::Asset,
         Some(asset.asset_id),
@@ -271,23 +265,64 @@ pub async fn update_asset(
         asset,
         Some(inventory_items),
         Some(parameters),
+        true,
     )))
 }
 
-fn validate_update_permission(
-    actor: &Actor,
-    target_laboratory_id: &LaboratoryId,
-) -> Result<(), UpdateAssetError> {
-    if actor.can_write_laboratory_resource(target_laboratory_id) {
-        Ok(())
-    } else {
-        Err(UpdateAssetError::Forbidden(
-            "You don't have permission to update this asset.".into(),
-        ))
+fn parse_nullable_text(value: Option<Option<String>>) -> NullableUpdate<String> {
+    match value {
+        Some(Some(value)) => {
+            let value = value.trim().to_string();
+            if value.is_empty() {
+                NullableUpdate::Clear
+            } else {
+                NullableUpdate::Set(value)
+            }
+        }
+        Some(None) => NullableUpdate::Clear,
+        None => NullableUpdate::Unchanged,
     }
 }
 
+fn resolve_category_id(
+    update_asset: &UpdateAsset,
+    existing: &super::model::AssetRow,
+) -> Result<Option<Uuid>, UpdateAssetError> {
+    let current = existing
+        .category_id
+        .map(AssetCategoryId::parse)
+        .transpose()
+        .map_err(|e| UpdateAssetError::UnexpectedError(anyhow!("{e}")))?;
+
+    Ok(update_asset
+        .category_id
+        .clone()
+        .resolve(current)
+        .map(Uuid::from))
+}
+
+fn resolve_tracking_mode(
+    update_asset: &UpdateAsset,
+    existing: &super::model::AssetRow,
+) -> Result<AssetTrackingMode, UpdateAssetError> {
+    let current = AssetTrackingMode::parse(&existing.tracking_mode)
+        .map_err(UpdateAssetError::ValidationError)?;
+    let tracking_mode = update_asset.tracking_mode.unwrap_or(current);
+    if tracking_mode != current && existing.inventory_item_count > 0 {
+        return Err(UpdateAssetError::ValidationError(
+            "Cannot change tracking_mode while inventory items exist".into(),
+        ));
+    }
+
+    Ok(tracking_mode)
+}
+
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(
+    name = "Updating asset in the database",
+    skip(transaction, name, model, manufacturer, public_notes, internal_notes),
+    fields(asset_id=%asset_id)
+)]
 async fn update_asset_in_database(
     transaction: &mut Transaction<'_, Postgres>,
     asset_id: Uuid,
@@ -300,7 +335,7 @@ async fn update_asset_in_database(
     public_notes: Option<&str>,
     internal_notes: Option<&str>,
 ) -> Result<(), UpdateAssetError> {
-    sqlx::query(
+    sqlx::query!(
         r#"
         UPDATE assets
         SET
@@ -315,44 +350,19 @@ async fn update_asset_in_database(
             updated_at = now()
         WHERE asset_id = $1
         "#,
+        asset_id,
+        category_id,
+        tracking_mode.as_str(),
+        name,
+        model,
+        manufacturer,
+        default_unit_id,
+        public_notes,
+        internal_notes,
     )
-    .bind(asset_id)
-    .bind(category_id)
-    .bind(tracking_mode.as_str())
-    .bind(name)
-    .bind(model)
-    .bind(manufacturer)
-    .bind(default_unit_id)
-    .bind(public_notes)
-    .bind(internal_notes)
     .execute(transaction.as_mut())
     .await
-    .map_err(|e| map_model_error(map_database_error(e)))?;
+    .map_err(|e| UpdateAssetError::from(map_database_error(e)))?;
 
     Ok(())
-}
-
-fn map_model_error(error: AssetModelError) -> UpdateAssetError {
-    match error {
-        AssetModelError::Validation(message) => UpdateAssetError::ValidationError(message),
-        AssetModelError::Conflict(message) => UpdateAssetError::ConflictError(message),
-        AssetModelError::Unexpected(error) => UpdateAssetError::UnexpectedError(error),
-    }
-}
-
-fn parse_nullable_string(value: Option<Option<String>>) -> NullableUpdate<String> {
-    match value {
-        Some(Some(value)) => empty_to_nullable_update(value),
-        Some(None) => NullableUpdate::Clear,
-        None => NullableUpdate::Unchanged,
-    }
-}
-
-fn empty_to_nullable_update(value: String) -> NullableUpdate<String> {
-    let value = value.trim().to_string();
-    if value.is_empty() {
-        NullableUpdate::Clear
-    } else {
-        NullableUpdate::Set(value)
-    }
 }

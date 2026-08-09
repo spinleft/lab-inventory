@@ -16,5 +16,6 @@ pub use delete::delete_inventory_item;
 pub use get::get_inventory_item;
 pub use list::list_inventory_items;
 pub use merge::merge_inventory_items;
+pub(crate) use model::{fetch_inventory_item_for_update, update_inventory_item_rollback_details};
 pub use split::split_inventory_item;
 pub use update::update_inventory_item;

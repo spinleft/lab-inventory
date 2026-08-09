@@ -90,7 +90,7 @@ async fn serialized_inventory_items_can_claim_attachments_per_serial_item() {
                             {
                                 "upload_id": upload_id(&first_upload),
                                 "display_name": "Serial A Manual",
-                                "visibility": "internal"
+                                "is_public": false
                             }
                         ]
                     },
@@ -100,7 +100,7 @@ async fn serialized_inventory_items_can_claim_attachments_per_serial_item() {
                             {
                                 "upload_id": upload_id(&second_upload),
                                 "display_name": "Serial B Manual",
-                                "visibility": "public"
+                                "is_public": true
                             }
                         ]
                     }
@@ -119,9 +119,9 @@ async fn serialized_inventory_items_can_claim_attachments_per_serial_item() {
     let first_attachments: serde_json::Value = first_response.json().await.unwrap();
     assert_eq!(first_attachments.as_array().unwrap().len(), 1);
     assert_eq!(first_attachments[0]["display_name"], "Serial A Manual");
-    assert_eq!(first_attachments[0]["visibility"], "internal");
+    assert_eq!(first_attachments[0]["is_public"], false);
     assert_eq!(
-        first_attachments[0]["sha256_hex"],
+        first_attachments[0]["file"]["sha256_hex"],
         first_upload["sha256_hex"]
     );
 
@@ -132,9 +132,9 @@ async fn serialized_inventory_items_can_claim_attachments_per_serial_item() {
     let second_attachments: serde_json::Value = second_response.json().await.unwrap();
     assert_eq!(second_attachments.as_array().unwrap().len(), 1);
     assert_eq!(second_attachments[0]["display_name"], "Serial B Manual");
-    assert_eq!(second_attachments[0]["visibility"], "public");
+    assert_eq!(second_attachments[0]["is_public"], true);
     assert_eq!(
-        second_attachments[0]["sha256_hex"],
+        second_attachments[0]["file"]["sha256_hex"],
         second_upload["sha256_hex"]
     );
 
@@ -675,7 +675,7 @@ async fn upload(
     bytes: &[u8],
 ) -> serde_json::Value {
     let response = app
-        .upload_attachment(laboratory_id, file_name, "text/plain", bytes.to_vec())
+        .upload_file(laboratory_id, file_name, "text/plain", bytes.to_vec())
         .await;
     assert_eq!(response.status().as_u16(), 201);
     response.json().await.unwrap()

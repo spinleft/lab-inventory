@@ -23,3 +23,11 @@ pub fn error_chain_fmt(
     }
     Ok(())
 }
+
+pub fn required_text<'a>(value: &'a str, field: &str) -> Result<&'a str, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(format!("{field} is required"));
+    }
+    Ok(trimmed)
+}

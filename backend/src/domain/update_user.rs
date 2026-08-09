@@ -25,6 +25,29 @@ impl<T> NullableUpdate<T> {
     }
 }
 
+impl<T> Into<NullableUpdate<T>> for Option<Option<T>> {
+    fn into(self) -> NullableUpdate<T> {
+        match self {
+            Some(Some(value)) => NullableUpdate::Set(value),
+            Some(None) => NullableUpdate::Clear,
+            None => NullableUpdate::Unchanged,
+        }
+    }
+}
+
+impl<T> NullableUpdate<T> {
+    pub fn parse<V>(
+        value: Option<Option<V>>,
+        parse: impl FnOnce(V) -> Result<T, String>,
+    ) -> Result<NullableUpdate<T>, String> {
+        match value {
+            Some(Some(value)) => parse(value).map(NullableUpdate::Set),
+            Some(None) => Ok(NullableUpdate::Clear),
+            None => Ok(NullableUpdate::Unchanged),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct UpdateUser {
     pub username: Option<UserName>,
@@ -79,7 +102,7 @@ mod tests {
     use uuid::Uuid;
 
     fn laboratory_id() -> LaboratoryId {
-        LaboratoryId::parse(Uuid::new_v4()).unwrap()
+        Uuid::new_v4().into()
     }
 
     #[test]

@@ -265,7 +265,7 @@ async fn range_asset_parameters_allow_units_and_enforce_value_bounds() {
     let app = spawn_app().await;
     app.test_user.login(&app).await;
     let laboratory_id = app.create_laboratory("Asset Parameter Range Lab").await;
-    let nanometer_unit_id = insert_nanometer_unit(&app).await;
+    let nanometer_unit_id = insert_nanometer_unit(&app, laboratory_id).await;
 
     let response = app
         .post_asset_parameter(
@@ -481,11 +481,12 @@ async fn insert_assignment(
     .unwrap();
 }
 
-async fn insert_nanometer_unit(app: &TestApp) -> Uuid {
+async fn insert_nanometer_unit(app: &TestApp, laboratory_id: Uuid) -> Uuid {
     sqlx::query_scalar(
         r#"
         INSERT INTO units (
             unit_id,
+            laboratory_id,
             code,
             name,
             symbol,
@@ -493,11 +494,12 @@ async fn insert_nanometer_unit(app: &TestApp) -> Uuid {
             scale_to_base,
             allow_decimal
         )
-        VALUES ($1, 'nm', 'Nanometer', 'nm', 'length', 0.000000001, true)
+        VALUES ($1, $2, 'nm', 'Nanometer', 'nm', 'length', 0.000000001, true)
         RETURNING unit_id
         "#,
     )
     .bind(Uuid::new_v4())
+    .bind(laboratory_id)
     .fetch_one(&app.db_pool)
     .await
     .unwrap()

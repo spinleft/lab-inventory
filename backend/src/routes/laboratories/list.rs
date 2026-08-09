@@ -1,5 +1,5 @@
 use super::model::{LaboratoryResponse, LaboratoryRow};
-use crate::access_control::get_actor;
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::UserId;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
@@ -35,16 +35,14 @@ pub async fn list_laboratories(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
 ) -> Result<HttpResponse, ListLaboratoriesError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(ListLaboratoriesError::UnexpectedError)?
-        .ok_or(ListLaboratoriesError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
-    if actor.is_lab_admin() && actor.laboratory_id.is_none() {
-        return Ok(HttpResponse::Ok().json(Vec::<LaboratoryResponse>::new()));
-    }
-    if !actor.can_browse_laboratories() {
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Laboratory,
+        Action::Browse(Uuid::nil()),
+    )
+    .await?
+    {
         return Err(ListLaboratoriesError::Forbidden(
             "You don't have permission to list laboratories.".into(),
         ));

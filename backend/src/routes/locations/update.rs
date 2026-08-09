@@ -2,10 +2,10 @@ use super::model::{
     LocationResponse, LocationRow, fetch_location_for_update, map_database_conflict,
     update_location_rollback_details,
 };
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{
-    LaboratoryId, LocationCode, LocationId, LocationName, NullableUpdate, UpdateLocation, UserId,
+    LocationCode, LocationId, LocationName, NullableUpdate, UpdateLocation, UserId,
 };
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
@@ -30,8 +30,7 @@ impl TryFrom<JsonData> for UpdateLocation {
     type Error = String;
 
     fn try_from(value: JsonData) -> Result<Self, Self::Error> {
-        let parent_location_id =
-            parse_nullable_update(value.parent_location_id, LocationId::parse)?;
+        let parent_location_id = value.parent_location_id.map(|id| id.map(Uuid::into)).into();
         let name = value.name.map(LocationName::parse).transpose()?;
         let code = value.code.map(LocationCode::parse).transpose()?;
         let description = match value.description {
@@ -50,17 +49,6 @@ where
     T: Deserialize<'de>,
 {
     Option::<T>::deserialize(deserializer).map(Some)
-}
-
-fn parse_nullable_update<T, V>(
-    value: Option<Option<V>>,
-    parse: impl FnOnce(V) -> Result<T, String>,
-) -> Result<NullableUpdate<T>, String> {
-    match value {
-        Some(Some(value)) => parse(value).map(NullableUpdate::Set),
-        Some(None) => Ok(NullableUpdate::Clear),
-        None => Ok(NullableUpdate::Unchanged),
-    }
 }
 
 #[derive(thiserror::Error)]
@@ -103,15 +91,23 @@ impl ResponseError for UpdateLocationError {
 pub async fn update_location(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    location_id: web::Path<LocationId>,
+    location_id: web::Path<Uuid>,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, UpdateLocationError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(UpdateLocationError::UnexpectedError)?
-        .ok_or(UpdateLocationError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
+    let location_id: LocationId = location_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Location,
+        Action::Update(location_id.into()),
+    )
+    .await?
+    {
+        return Err(UpdateLocationError::Forbidden(
+            "You don't have permission to update this location.".into(),
+        ));
+    }
+
     let update_location = UpdateLocation::try_from(payload.into_inner())
         .map_err(UpdateLocationError::ValidationError)?;
 
@@ -119,12 +115,9 @@ pub async fn update_location(
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    let existing = fetch_location_for_update(&mut transaction, *location_id)
+    let existing = fetch_location_for_update(&mut transaction, location_id)
         .await?
         .ok_or(UpdateLocationError::NotFound("Location not found".into()))?;
-    let laboratory_id = LaboratoryId::parse(existing.laboratory_id)
-        .map_err(|e| UpdateLocationError::UnexpectedError(anyhow::anyhow!("{e}")))?;
-    validate_update_permission(&actor, &laboratory_id)?;
 
     let name = update_location
         .name
@@ -138,11 +131,7 @@ pub async fn update_location(
         .map(|code| code.as_ref())
         .unwrap_or(&existing.code)
         .to_string();
-    let current_parent_location_id = existing
-        .parent_location_id
-        .map(LocationId::parse)
-        .transpose()
-        .map_err(UpdateLocationError::ValidationError)?;
+    let current_parent_location_id = existing.parent_location_id.map(Uuid::into);
     let parent_location_id = update_location
         .parent_location_id
         .resolve(current_parent_location_id);
@@ -178,7 +167,7 @@ pub async fn update_location(
 
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Update,
         AuditResource::Location,
         Some(updated.location_id),
@@ -191,19 +180,6 @@ pub async fn update_location(
         .context("Failed to commit SQL transaction to update a location.")?;
 
     Ok(HttpResponse::Ok().json(LocationResponse::from(updated)))
-}
-
-fn validate_update_permission(
-    actor: &Actor,
-    target_laboratory_id: &LaboratoryId,
-) -> Result<(), UpdateLocationError> {
-    if actor.can_write_laboratory_resource(target_laboratory_id) {
-        Ok(())
-    } else {
-        Err(UpdateLocationError::Forbidden(
-            "You don't have permission to update locations for this laboratory.".into(),
-        ))
-    }
 }
 
 async fn fetch_new_parent(

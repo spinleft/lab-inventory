@@ -1,10 +1,10 @@
 use super::model::{
     LaboratoryResponse, LaboratoryRow, fetch_laboratory, update_laboratory_rollback_details,
 };
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::UserId;
-use crate::utils::error_chain_fmt;
+use crate::utils::{error_chain_fmt, required_text};
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
@@ -74,32 +74,37 @@ pub async fn update_laboratory(
     laboratory_id: web::Path<Uuid>,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, UpdateLaboratoryError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(UpdateLaboratoryError::UnexpectedError)?
-        .ok_or(UpdateLaboratoryError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
-    validate_admin_permission(&actor)?;
-
     let existing =
         fetch_laboratory(&pool, *laboratory_id)
             .await?
             .ok_or(UpdateLaboratoryError::NotFound(
                 "Laboratory not found".into(),
             ))?;
-    validate_scoped_laboratory_permission(&actor, existing.laboratory_id)?;
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Laboratory,
+        Action::Update(existing.laboratory_id),
+    )
+    .await?
+    {
+        return Err(UpdateLaboratoryError::Forbidden(
+            "You don't have permission to update this laboratory.".into(),
+        ));
+    }
 
     let payload = payload.into_inner();
     let name = payload
         .name
         .as_deref()
-        .map(|name| required_text(name, "name"))
+        .map(|name| required_text(name, "name").map_err(UpdateLaboratoryError::ValidationError))
         .transpose()?;
     let address = payload
         .address
         .as_deref()
-        .map(|address| required_text(address, "address"))
+        .map(|address| {
+            required_text(address, "address").map_err(UpdateLaboratoryError::ValidationError)
+        })
         .transpose()?;
     let should_update_description = payload.description.is_some();
     let description = payload
@@ -127,7 +132,7 @@ pub async fn update_laboratory(
 
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Update,
         AuditResource::Laboratory,
         Some(laboratory.laboratory_id),
@@ -140,43 +145,6 @@ pub async fn update_laboratory(
         .context("Failed to commit SQL transaction to update a laboratory.")?;
 
     Ok(HttpResponse::Ok().json(LaboratoryResponse::from(laboratory)))
-}
-
-fn validate_admin_permission(actor: &Actor) -> Result<(), UpdateLaboratoryError> {
-    if actor.is_admin() {
-        Ok(())
-    } else {
-        Err(UpdateLaboratoryError::Forbidden(
-            "You don't have permission to update laboratories.".into(),
-        ))
-    }
-}
-
-fn validate_scoped_laboratory_permission(
-    actor: &Actor,
-    laboratory_id: Uuid,
-) -> Result<(), UpdateLaboratoryError> {
-    if actor.is_lab_admin() && actor.laboratory_id.map(Uuid::from) != Some(laboratory_id) {
-        Err(UpdateLaboratoryError::Forbidden(
-            "You don't have permission to update this laboratory.".into(),
-        ))
-    } else if actor.is_root() || actor.is_super_admin() || actor.is_lab_admin() {
-        Ok(())
-    } else {
-        Err(UpdateLaboratoryError::Forbidden(
-            "You don't have permission to update this laboratory.".into(),
-        ))
-    }
-}
-
-fn required_text<'a>(value: &'a str, field: &str) -> Result<&'a str, UpdateLaboratoryError> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err(UpdateLaboratoryError::ValidationError(format!(
-            "{field} is required"
-        )));
-    }
-    Ok(trimmed)
 }
 
 #[tracing::instrument(

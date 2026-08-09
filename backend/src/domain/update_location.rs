@@ -27,12 +27,12 @@ impl UpdateLocation {
 #[cfg(test)]
 mod tests {
     use super::UpdateLocation;
-    use crate::domain::{LocationCode, LocationId, LocationName, NullableUpdate};
+    use crate::domain::{LocationCode, LocationName, NullableUpdate};
     use uuid::Uuid;
 
     #[test]
     fn update_location_captures_partial_updates() {
-        let parent_location_id = LocationId::parse(Uuid::new_v4()).unwrap();
+        let parent_location_id = Uuid::new_v4().into();
         let name = LocationName::parse("Room A".into()).unwrap();
         let code = LocationCode::parse("room_a".into()).unwrap();
 

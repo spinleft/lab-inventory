@@ -6,12 +6,6 @@ use uuid::Uuid;
 #[serde(transparent)]
 pub struct AssetParameterId(Uuid);
 
-impl AssetParameterId {
-    pub fn parse(id: Uuid) -> Result<Self, String> {
-        Ok(Self(id))
-    }
-}
-
 impl std::fmt::Display for AssetParameterId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
@@ -35,5 +29,11 @@ impl Deref for AssetParameterId {
 impl From<AssetParameterId> for Uuid {
     fn from(parameter_id: AssetParameterId) -> Self {
         parameter_id.0
+    }
+}
+
+impl Into<AssetParameterId> for Uuid {
+    fn into(self) -> AssetParameterId {
+        AssetParameterId(self)
     }
 }

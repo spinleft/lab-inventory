@@ -2,7 +2,7 @@ use super::model::{
     LocationResponse, LocationRow, create_location_rollback_details, fetch_location_for_update,
     map_database_conflict,
 };
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{LaboratoryId, UserId};
 use crate::domain::{LocationCode, LocationId, LocationName, NewLocation};
@@ -27,10 +27,7 @@ impl TryFrom<JsonData> for NewLocation {
     type Error = String;
 
     fn try_from(value: JsonData) -> Result<Self, Self::Error> {
-        let parent_location_id = value
-            .parent_location_id
-            .map(LocationId::parse)
-            .transpose()?;
+        let parent_location_id = value.parent_location_id.map(Uuid::into);
         let name = LocationName::parse(value.name)?;
         let code = LocationCode::parse(value.code)?;
 
@@ -78,24 +75,29 @@ pub async fn create_location(
     laboratory_id: web::Path<Uuid>,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, CreateLocationError> {
-    let laboratory_id = LaboratoryId::parse(laboratory_id.into_inner())
-        .map_err(CreateLocationError::ValidationError)?;
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(CreateLocationError::UnexpectedError)?
-        .ok_or(CreateLocationError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
+    let laboratory_id: LaboratoryId = laboratory_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::Location,
+        Action::Create(laboratory_id.into()),
+    )
+    .await?
+    {
+        return Err(CreateLocationError::Forbidden(
+            "You don't have permission to create locations.".into(),
+        ));
+    }
+
     let new_location = NewLocation::try_from(payload.into_inner())
         .map_err(CreateLocationError::ValidationError)?;
-    validate_create_permission(&actor, &laboratory_id)?;
 
     let mut transaction = pool
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
     let parent = fetch_parent_location(&mut transaction, new_location.parent_location_id).await?;
-    validate_parent(&parent, &laboratory_id)?;
+    validate_parent(&parent, laboratory_id)?;
     let parent_location_id = new_location.parent_location_id;
     let (path, depth) = build_path_and_depth(parent.as_ref(), new_location.code.as_ref());
     let location = insert_location(
@@ -112,7 +114,7 @@ pub async fn create_location(
 
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Create,
         AuditResource::Location,
         Some(location.location_id),
@@ -125,19 +127,6 @@ pub async fn create_location(
         .context("Failed to commit SQL transaction to store a new location.")?;
 
     Ok(HttpResponse::Created().json(LocationResponse::from(location)))
-}
-
-fn validate_create_permission(
-    actor: &Actor,
-    target_laboratory_id: &LaboratoryId,
-) -> Result<(), CreateLocationError> {
-    if actor.can_write_laboratory_resource(target_laboratory_id) {
-        Ok(())
-    } else {
-        Err(CreateLocationError::Forbidden(
-            "You don't have permission to create locations for this laboratory.".into(),
-        ))
-    }
 }
 
 async fn fetch_parent_location(
@@ -158,13 +147,10 @@ async fn fetch_parent_location(
 
 fn validate_parent(
     parent: &Option<LocationRow>,
-    laboratory_id: &LaboratoryId,
+    laboratory_id: LaboratoryId,
 ) -> Result<(), CreateLocationError> {
     if let Some(parent) = parent {
-        if &LaboratoryId::parse(parent.laboratory_id)
-            .map_err(CreateLocationError::ValidationError)?
-            != laboratory_id
-        {
+        if parent.laboratory_id != Uuid::from(laboratory_id) {
             return Err(CreateLocationError::ValidationError(
                 "Parent location does not belong to this laboratory".into(),
             ));

@@ -37,3 +37,9 @@ impl From<AttachmentId> for Uuid {
         attachment_id.0
     }
 }
+
+impl Into<AttachmentId> for Uuid {
+    fn into(self) -> AttachmentId {
+        AttachmentId(self)
+    }
+}

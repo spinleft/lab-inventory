@@ -4,11 +4,11 @@ use super::model::{
     fetch_asset_parameter_ids_for_laboratory, map_database_conflict,
     replace_asset_category_parameter_assignments, update_asset_category_rollback_details,
 };
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{
-    AssetCategoryCode, AssetCategoryId, AssetCategoryName, LaboratoryId, NullableUpdate,
-    UpdateAssetCategory, UserId,
+    AssetCategoryCode, AssetCategoryId, AssetCategoryName, NullableUpdate, UpdateAssetCategory,
+    UserId,
 };
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
@@ -44,8 +44,7 @@ impl TryFrom<JsonData> for UpdateAssetCategory {
     type Error = String;
 
     fn try_from(value: JsonData) -> Result<Self, Self::Error> {
-        let parent_category_id =
-            parse_nullable_update(value.parent_category_id, AssetCategoryId::parse)?;
+        let parent_category_id = value.parent_category_id.map(|id| id.map(Uuid::into)).into();
         let name = value.name.map(AssetCategoryName::parse).transpose()?;
         let code = value.code.map(AssetCategoryCode::parse).transpose()?;
         let description = match value.description {
@@ -53,7 +52,6 @@ impl TryFrom<JsonData> for UpdateAssetCategory {
             Some(None) => NullableUpdate::Clear,
             None => NullableUpdate::Unchanged,
         };
-
         Ok(Self::new(parent_category_id, name, code, description))
     }
 }
@@ -64,17 +62,6 @@ where
     T: Deserialize<'de>,
 {
     Option::<T>::deserialize(deserializer).map(Some)
-}
-
-fn parse_nullable_update<T, V>(
-    value: Option<Option<V>>,
-    parse: impl FnOnce(V) -> Result<T, String>,
-) -> Result<NullableUpdate<T>, String> {
-    match value {
-        Some(Some(value)) => parse(value).map(NullableUpdate::Set),
-        Some(None) => Ok(NullableUpdate::Clear),
-        None => Ok(NullableUpdate::Unchanged),
-    }
 }
 
 #[derive(thiserror::Error)]
@@ -117,15 +104,23 @@ impl ResponseError for UpdateAssetCategoryError {
 pub async fn update_asset_category(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    category_id: web::Path<AssetCategoryId>,
+    category_id: web::Path<Uuid>,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, UpdateAssetCategoryError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(UpdateAssetCategoryError::UnexpectedError)?
-        .ok_or(UpdateAssetCategoryError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
+    let category_id: AssetCategoryId = category_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::AssetCategory,
+        Action::Update(category_id.into()),
+    )
+    .await?
+    {
+        return Err(UpdateAssetCategoryError::Forbidden(
+            "You don't have permission to update this asset category.".into(),
+        ));
+    }
+
     let payload = payload.into_inner();
     let parameter_assignments = payload
         .parameter_assignments
@@ -140,14 +135,11 @@ pub async fn update_asset_category(
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    let existing = fetch_asset_category_for_update(&mut transaction, *category_id)
+    let existing = fetch_asset_category_for_update(&mut transaction, category_id)
         .await?
         .ok_or(UpdateAssetCategoryError::NotFound(
             "Asset category not found".into(),
         ))?;
-    let laboratory_id = LaboratoryId::parse(existing.laboratory_id)
-        .map_err(|e| UpdateAssetCategoryError::UnexpectedError(anyhow::anyhow!("{e}")))?;
-    validate_update_permission(&actor, &laboratory_id)?;
     let existing_parameter_assignments = fetch_asset_category_parameter_assignments_for_update(
         &mut transaction,
         existing.category_id,
@@ -174,11 +166,7 @@ pub async fn update_asset_category(
         .map(|code| code.as_ref())
         .unwrap_or(&existing.code)
         .to_string();
-    let current_parent_category_id = existing
-        .parent_category_id
-        .map(AssetCategoryId::parse)
-        .transpose()
-        .map_err(UpdateAssetCategoryError::ValidationError)?;
+    let current_parent_category_id = existing.parent_category_id.map(Uuid::into);
     let parent_category_id = update_category
         .parent_category_id
         .resolve(current_parent_category_id);
@@ -226,7 +214,7 @@ pub async fn update_asset_category(
 
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Update,
         AuditResource::AssetCategory,
         Some(updated.category_id),
@@ -242,19 +230,6 @@ pub async fn update_asset_category(
         updated,
         parameter_assignments,
     )))
-}
-
-fn validate_update_permission(
-    actor: &Actor,
-    target_laboratory_id: &LaboratoryId,
-) -> Result<(), UpdateAssetCategoryError> {
-    if actor.can_write_laboratory_resource(target_laboratory_id) {
-        Ok(())
-    } else {
-        Err(UpdateAssetCategoryError::Forbidden(
-            "You don't have permission to update asset categories for this laboratory.".into(),
-        ))
-    }
 }
 
 fn parse_parameter_assignments(

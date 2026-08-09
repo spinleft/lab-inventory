@@ -1,12 +1,14 @@
-use super::model::{
-    InventoryItemError, InventoryItemPatch, InventoryItemResponse, actor_for_user,
-    apply_inventory_item_patch, fetch_inventory_items_for_update, parse_nullable_string,
-    parse_nullable_uuid, record_inventory_item_audit, update_inventory_item_rollback_details,
-    validate_requested_ids, validate_write_permission,
+﻿use super::model::{
+    InventoryItemDatabaseError, InventoryItemResponse, apply_inventory_item_patch,
+    fetch_inventory_items_for_update, update_inventory_item_rollback_details,
+    validate_requested_ids,
 };
-use crate::audit::AuditAction;
-use crate::domain::{NullableUpdate, UserId};
-use actix_web::{HttpResponse, web};
+use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::audit::{AuditAction, AuditResource, record_audit};
+use crate::domain::{InventoryItemIds, UpdateInventoryItem, UserId};
+use crate::utils::error_chain_fmt;
+use actix_web::http::StatusCode;
+use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use serde::{Deserialize, Deserializer};
 use sqlx::PgPool;
@@ -27,19 +29,23 @@ pub struct JsonData {
     internal_notes: Option<Option<String>>,
 }
 
-impl From<&JsonData> for InventoryItemPatch {
-    fn from(value: &JsonData) -> Self {
-        Self {
-            serial_number: None,
-            batch_number: parse_nullable_string(value.batch_number.clone()),
-            quantity_on_hand: None,
-            quantity_allocated: None,
-            quantity_unit_id: None,
-            location_id: parse_nullable_uuid(value.location_id),
-            status: value.status.clone(),
-            public_notes: parse_nullable_string(value.public_notes.clone()),
-            internal_notes: parse_nullable_string(value.internal_notes.clone()),
-        }
+impl TryFrom<&JsonData> for UpdateInventoryItem {
+    type Error = String;
+
+    fn try_from(value: &JsonData) -> Result<Self, Self::Error> {
+        Self::parse(
+            None,
+            value.batch_number.clone(),
+            None,
+            None,
+            None,
+            value
+                .location_id
+                .map(|location_id| location_id.map(Uuid::into)),
+            value.status.clone(),
+            value.public_notes.clone(),
+            value.internal_notes.clone(),
+        )
     }
 }
 
@@ -51,6 +57,49 @@ where
     Option::<T>::deserialize(deserializer).map(Some)
 }
 
+#[derive(thiserror::Error)]
+pub enum BatchUpdateInventoryItemsError {
+    #[error("{0}")]
+    ValidationError(String),
+    #[error("{0}")]
+    Forbidden(String),
+    #[error("{0}")]
+    NotFound(String),
+    #[error("{0}")]
+    ConflictError(String),
+    #[error(transparent)]
+    UnexpectedError(#[from] anyhow::Error),
+}
+
+impl std::fmt::Debug for BatchUpdateInventoryItemsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+impl ResponseError for BatchUpdateInventoryItemsError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            BatchUpdateInventoryItemsError::ValidationError(_) => StatusCode::BAD_REQUEST,
+            BatchUpdateInventoryItemsError::Forbidden(_) => StatusCode::FORBIDDEN,
+            BatchUpdateInventoryItemsError::NotFound(_) => StatusCode::NOT_FOUND,
+            BatchUpdateInventoryItemsError::ConflictError(_) => StatusCode::CONFLICT,
+            BatchUpdateInventoryItemsError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<InventoryItemDatabaseError> for BatchUpdateInventoryItemsError {
+    fn from(error: InventoryItemDatabaseError) -> Self {
+        match error {
+            InventoryItemDatabaseError::Validation(message) => Self::ValidationError(message),
+            InventoryItemDatabaseError::NotFound(message) => Self::NotFound(message),
+            InventoryItemDatabaseError::Conflict(message) => Self::ConflictError(message),
+            InventoryItemDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
+        }
+    }
+}
+
 #[tracing::instrument(
     name = "Batch update inventory items",
     skip(pool, payload),
@@ -60,60 +109,69 @@ pub async fn batch_update_inventory_items(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
     payload: web::Json<JsonData>,
-) -> Result<HttpResponse, InventoryItemError> {
-    let actor = actor_for_user(&pool, actor_user_id).await?;
+) -> Result<HttpResponse, BatchUpdateInventoryItemsError> {
     let payload = payload.into_inner();
-    let patch = InventoryItemPatch::from(&payload);
-    validate_patch_has_updates(&patch)?;
+    let inventory_item_ids = InventoryItemIds::parse(payload.inventory_item_ids.clone())
+        .map_err(BatchUpdateInventoryItemsError::ValidationError)?;
+    let inventory_item_ids: Vec<_> = inventory_item_ids
+        .into_inner()
+        .into_iter()
+        .map(Uuid::from)
+        .collect();
+    let patch = UpdateInventoryItem::try_from(&payload)
+        .map_err(BatchUpdateInventoryItemsError::ValidationError)?;
+    if !patch.has_batch_updates() {
+        return Err(BatchUpdateInventoryItemsError::ValidationError(
+            "Batch update requires at least one update field".into(),
+        ));
+    }
+    for inventory_item_id in &inventory_item_ids {
+        if !validate_permission(
+            &pool,
+            &actor_user_id,
+            ResourceType::InventoryItem,
+            Action::Update(*inventory_item_id),
+        )
+        .await?
+        {
+            return Err(BatchUpdateInventoryItemsError::Forbidden(
+                "You don't have permission to update these inventory items.".into(),
+            ));
+        }
+    }
 
     let mut transaction = pool
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
     let existing_items =
-        fetch_inventory_items_for_update(&mut transaction, &payload.inventory_item_ids).await?;
-    validate_requested_ids(&payload.inventory_item_ids, &existing_items)?;
-    for item in &existing_items {
-        validate_write_permission(&actor, item.laboratory_id)?;
-    }
+        fetch_inventory_items_for_update(&mut transaction, &inventory_item_ids).await?;
+    validate_requested_ids(&inventory_item_ids, &existing_items)?;
 
     let mut updated_items = Vec::with_capacity(existing_items.len());
     for existing in existing_items {
         let updated =
             apply_inventory_item_patch(&mut transaction, &existing, patch.clone()).await?;
-        record_inventory_item_audit(
+        record_audit(
             &mut transaction,
-            &actor,
+            actor_user_id,
             AuditAction::Update,
-            updated.inventory_item_id,
+            AuditResource::InventoryItem,
+            Some(updated.inventory_item_id),
             update_inventory_item_rollback_details(&existing),
         )
         .await?;
         updated_items.push(updated);
     }
-
     transaction
         .commit()
         .await
         .context("Failed to commit SQL transaction to batch update inventory items.")?;
-    let response = updated_items
-        .into_iter()
-        .map(InventoryItemResponse::from)
-        .collect::<Vec<_>>();
-    Ok(HttpResponse::Ok().json(response))
-}
 
-fn validate_patch_has_updates(patch: &InventoryItemPatch) -> Result<(), InventoryItemError> {
-    if !matches!(patch.batch_number, NullableUpdate::Unchanged)
-        || !matches!(patch.location_id, NullableUpdate::Unchanged)
-        || patch.status.is_some()
-        || !matches!(patch.public_notes, NullableUpdate::Unchanged)
-        || !matches!(patch.internal_notes, NullableUpdate::Unchanged)
-    {
-        Ok(())
-    } else {
-        Err(InventoryItemError::ValidationError(
-            "Batch update requires at least one update field".into(),
-        ))
-    }
+    Ok(HttpResponse::Ok().json(
+        updated_items
+            .into_iter()
+            .map(|item| InventoryItemResponse::from_row(item, true))
+            .collect::<Vec<_>>(),
+    ))
 }

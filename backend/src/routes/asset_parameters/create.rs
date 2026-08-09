@@ -3,7 +3,7 @@ use super::model::{
     AssetParameterRow, create_asset_parameter_rollback_details, fetch_unit_dimension_for_update,
     map_database_error,
 };
-use crate::access_control::{Actor, get_actor};
+use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{
     AssetParameterCode, AssetParameterDataType, AssetParameterName, AssetParameterOptionLabel,
@@ -117,15 +117,19 @@ pub async fn create_asset_parameter(
     laboratory_id: web::Path<Uuid>,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, CreateAssetParameterError> {
-    let laboratory_id = LaboratoryId::parse(laboratory_id.into_inner())
-        .map_err(CreateAssetParameterError::ValidationError)?;
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(CreateAssetParameterError::UnexpectedError)?
-        .ok_or(CreateAssetParameterError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
-    validate_create_permission(&actor, &laboratory_id)?;
+    let laboratory_id: LaboratoryId = laboratory_id.into_inner().into();
+    if !validate_permission(
+        &pool,
+        &actor_user_id,
+        ResourceType::AssetParameter,
+        Action::Create(laboratory_id.into()),
+    )
+    .await?
+    {
+        return Err(CreateAssetParameterError::Forbidden(
+            "You don't have permission to create asset parameters.".into(),
+        ));
+    }
 
     let new_parameter = NewAssetParameter::try_from(payload.into_inner())
         .map_err(CreateAssetParameterError::ValidationError)?;
@@ -165,7 +169,7 @@ pub async fn create_asset_parameter(
 
     record_audit(
         &mut transaction,
-        &actor,
+        actor_user_id,
         AuditAction::Create,
         AuditResource::AssetParameter,
         Some(parameter.parameter_type_id),
@@ -178,19 +182,6 @@ pub async fn create_asset_parameter(
         .context("Failed to commit SQL transaction to store a new asset parameter.")?;
 
     Ok(HttpResponse::Created().json(AssetParameterResponse::from_parts(parameter, options)))
-}
-
-fn validate_create_permission(
-    actor: &Actor,
-    target_laboratory_id: &LaboratoryId,
-) -> Result<(), CreateAssetParameterError> {
-    if actor.can_write_laboratory_resource(target_laboratory_id) {
-        Ok(())
-    } else {
-        Err(CreateAssetParameterError::Forbidden(
-            "You don't have permission to create asset parameters for this laboratory.".into(),
-        ))
-    }
 }
 
 fn validate_options(
