@@ -1,21 +1,24 @@
-use crate::authentication::reject_anonymous_users;
+use crate::authentication::{
+    GuestRegistrationHasher, GuestRegistrationRateLimiter, reject_anonymous_users,
+};
 use crate::configuration::{ApplicationSettings, DatabaseSettings, FederationSettings, Settings};
 use crate::file_storage::FileStorage;
 use crate::routes::{
     accept_pairing, assign_asset_attachment, assign_inventory_item_attachment,
     batch_delete_inventory_items, batch_update_inventory_items, change_password, create_asset,
-    create_asset_category, create_asset_parameter, create_borrow_request, create_inventory_items,
-    create_laboratory, create_location, create_pairing_code, create_trust, create_unit,
-    create_user, delete_asset, delete_asset_category, delete_asset_parameter, delete_attachment,
-    delete_file_upload, delete_inventory_item, delete_laboratory, delete_location, delete_unit,
-    delete_user, download_attachment, get_asset, get_asset_category, get_asset_parameter,
-    get_attachment, get_inventory_item, get_laboratory, get_location, get_unit, get_user,
-    health_check, inbound_get, initialize_local_node, list_asset_attachments,
+    create_asset_category, create_asset_parameter, create_borrow_request,
+    create_guest_registration_code, create_inventory_items, create_laboratory, create_location,
+    create_pairing_code, create_trust, create_unit, create_user, delete_asset,
+    delete_asset_category, delete_asset_parameter, delete_attachment, delete_file_upload,
+    delete_inventory_item, delete_laboratory, delete_location, delete_unit, delete_user,
+    download_attachment, enforce_guest_registration_rate_limit, get_asset, get_asset_category,
+    get_asset_parameter, get_attachment, get_inventory_item, get_laboratory, get_location,
+    get_unit, get_user, health_check, inbound_get, initialize_local_node, list_asset_attachments,
     list_asset_categories, list_asset_parameters, list_assets, list_audit_logs,
     list_borrow_requests, list_guest_links, list_inventory_item_attachments, list_inventory_items,
     list_laboratories, list_laboratory_attachments, list_locations, list_trusts, list_units,
     list_users, login, logout, me, merge_guest_link, merge_inventory_items, proxy_get,
-    resolve_borrow_request, revoke_trust, split_inventory_item, update_asset,
+    register_guest, resolve_borrow_request, revoke_trust, split_inventory_item, update_asset,
     update_asset_category, update_asset_parameter, update_attachment, update_inventory_item,
     update_laboratory, update_location, update_unit, update_user, upload_file,
 };
@@ -44,6 +47,7 @@ pub struct Application {
 impl Application {
     pub async fn build(configuration: Settings) -> Result<Self, anyhow::Error> {
         let connection_pool = get_connection_pool(&configuration.database);
+        let rate_limit_namespace = configuration.database.database_name.clone();
 
         let address = format!(
             "{}:{}",
@@ -58,6 +62,7 @@ impl Application {
             configuration.file_storage,
             configuration.federation,
             configuration.redis_uri,
+            rate_limit_namespace,
         )
         .await?;
 
@@ -84,12 +89,20 @@ async fn run(
     file_storage: crate::configuration::FileStorageSettings,
     federation: FederationSettings,
     redis_uri: Secret<String>,
+    rate_limit_namespace: String,
 ) -> Result<Server, anyhow::Error> {
     initialize_local_node(&db_pool, &federation).await?;
     let db_pool = Data::new(db_pool);
     let file_storage = Data::new(FileStorage::new(file_storage)?);
     let federation = Data::new(federation);
     let federation_client = Data::new(reqwest::Client::builder().tls_info(true).build()?);
+    let registration_hasher = GuestRegistrationHasher::new(application.hmac_secret.clone());
+    let registration_rate_limiter = GuestRegistrationRateLimiter::new(
+        redis_uri.expose_secret(),
+        &rate_limit_namespace,
+        registration_hasher.clone(),
+    )
+    .await?;
     let secret_key = Key::derive_from(application.hmac_secret.expose_secret().as_bytes());
     let redis_store = RedisSessionStore::new(redis_uri.expose_secret()).await?;
 
@@ -99,6 +112,8 @@ async fn run(
         file_storage,
         federation,
         federation_client,
+        Data::new(registration_hasher),
+        Data::new(registration_rate_limiter),
         secret_key,
         application.cookie_secure,
         application.cors_allowed_origins,
@@ -114,6 +129,8 @@ fn build_server(
     file_storage: Data<FileStorage>,
     federation: Data<FederationSettings>,
     federation_client: Data<reqwest::Client>,
+    registration_hasher: Data<GuestRegistrationHasher>,
+    registration_rate_limiter: Data<GuestRegistrationRateLimiter>,
     secret_key: Key,
     cookie_secure: bool,
     cors_allowed_origins: Vec<String>,
@@ -133,6 +150,8 @@ fn build_server(
             .app_data(file_storage.clone())
             .app_data(federation.clone())
             .app_data(federation_client.clone())
+            .app_data(registration_hasher.clone())
+            .app_data(registration_rate_limiter.clone())
     })
     .listen(listener)?
     .run();
@@ -176,6 +195,11 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
             .route("/health_check", web::get().to(health_check))
             .route("/auth/login", web::post().to(login))
             .route("/auth/logout", web::post().to(logout))
+            .service(
+                web::resource("/auth/guest-registration")
+                    .wrap(from_fn(enforce_guest_registration_rate_limit))
+                    .route(web::post().to(register_guest)),
+            )
             .route(
                 "/federation/inbound/pairing/accept",
                 web::post().to(accept_pairing),
@@ -204,6 +228,10 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                     )
                     .route("/laboratories", web::post().to(create_laboratory))
                     .route("/laboratories", web::get().to(list_laboratories))
+                    .route(
+                        "/laboratories/{laboratory_id}/guest-registration-codes",
+                        web::post().to(create_guest_registration_code),
+                    )
                     .route(
                         "/laboratories/{laboratory_id}/federation/pairing-codes",
                         web::post().to(create_pairing_code),

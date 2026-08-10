@@ -18,6 +18,7 @@ pub struct Actor {
 pub enum ResourceType {
     Laboratory,
     User,
+    GuestRegistrationCode,
     Unit,
     Location,
     Asset,
@@ -103,6 +104,11 @@ impl Actor {
             return true;
         }
         false
+    }
+
+    pub fn can_create_guest_registration_code(&self, laboratory_id: LaboratoryId) -> bool {
+        matches!(self.user_type, UserType::LabAdmin | UserType::User)
+            && self.laboratory_id == Some(laboratory_id)
     }
 
     pub async fn can_view_user(
@@ -730,6 +736,12 @@ pub async fn validate_permission(
                     && actor.can_manage_user(update_user_role)),
                 _ => Ok(false),
             },
+            ResourceType::GuestRegistrationCode => match action {
+                Action::Create(laboratory_id) => {
+                    Ok(actor.can_create_guest_registration_code(laboratory_id.into()))
+                }
+                _ => Ok(false),
+            },
             ResourceType::Unit => match action {
                 Action::Create(laboratory_id) => {
                     Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
@@ -878,5 +890,37 @@ pub async fn validate_permission(
         }
     } else {
         Ok(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Actor;
+    use crate::domain::{LaboratoryId, UserId, UserType};
+    use uuid::Uuid;
+
+    fn actor(user_type: UserType, laboratory_id: Option<LaboratoryId>) -> Actor {
+        Actor {
+            user_id: UserId(Uuid::new_v4()),
+            user_type,
+            laboratory_id,
+        }
+    }
+
+    #[test]
+    fn only_lab_admins_and_users_can_create_codes_for_their_own_laboratory() {
+        let laboratory_id: LaboratoryId = Uuid::new_v4().into();
+        let other_laboratory_id: LaboratoryId = Uuid::new_v4().into();
+
+        for user_type in [UserType::LabAdmin, UserType::User] {
+            let actor = actor(user_type, Some(laboratory_id));
+            assert!(actor.can_create_guest_registration_code(laboratory_id));
+            assert!(!actor.can_create_guest_registration_code(other_laboratory_id));
+        }
+
+        for user_type in [UserType::Guest, UserType::Root, UserType::SuperAdmin] {
+            let actor = actor(user_type, Some(laboratory_id));
+            assert!(!actor.can_create_guest_registration_code(laboratory_id));
+        }
     }
 }

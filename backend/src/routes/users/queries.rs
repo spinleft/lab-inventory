@@ -13,7 +13,7 @@ use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 #[derive(thiserror::Error)]
-pub(super) enum UserDatabaseError {
+pub(in crate::routes) enum UserDatabaseError {
     #[error("{0}")]
     Validation(String),
     #[error("{0}")]

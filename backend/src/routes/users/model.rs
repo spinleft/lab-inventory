@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 #[derive(Serialize)]
-pub(super) struct UserResponse {
+pub(in crate::routes) struct UserResponse {
     user_id: Uuid,
     username: String,
     email: Option<String>,

@@ -84,6 +84,7 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
         "federation_pairing_codes",
         "federation_request_nonces",
         "federation_guest_links",
+        "guest_registration_codes",
     ];
     for table_name in required_tables {
         let exists: Option<i32> = sqlx::query_scalar(
@@ -338,6 +339,31 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
             "idx_federation_request_nonces_expires_at",
             "idx_federation_trusts_local_laboratory",
             "idx_federation_trusts_remote",
+        ]
+    );
+
+    let guest_registration_indexes: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT indexname
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname IN (
+            'uq_guest_registration_codes_laboratory_active',
+            'uq_guest_registration_codes_code_active',
+            'idx_guest_registration_codes_expires_at'
+          )
+        ORDER BY indexname
+        "#,
+    )
+    .fetch_all(&app.db_pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        guest_registration_indexes,
+        vec![
+            "idx_guest_registration_codes_expires_at",
+            "uq_guest_registration_codes_code_active",
+            "uq_guest_registration_codes_laboratory_active",
         ]
     );
 }

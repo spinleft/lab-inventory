@@ -156,6 +156,29 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
+    pub async fn post_guest_registration_code(&self, laboratory_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .post(format!(
+                "{}/api/v1/laboratories/{laboratory_id}/guest-registration-codes",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn post_guest_registration<Body>(&self, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(format!("{}/api/v1/auth/guest-registration", &self.address))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
     pub async fn get_me(&self) -> reqwest::Response {
         self.api_client
             .get(format!("{}/api/v1/auth/me", &self.address))

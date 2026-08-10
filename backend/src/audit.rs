@@ -55,6 +55,7 @@ impl AuditAction {
 pub enum AuditResource {
     Laboratory,
     User,
+    GuestRegistrationCode,
     AssetCategory,
     Location,
     Asset,
@@ -72,6 +73,7 @@ impl AuditResource {
         match self {
             Self::Laboratory => "laboratory",
             Self::User => "user",
+            Self::GuestRegistrationCode => "guest_registration_code",
             Self::AssetCategory => "asset_category",
             Self::Location => "location",
             Self::Asset => "asset",
