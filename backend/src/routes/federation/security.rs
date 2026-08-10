@@ -1,4 +1,6 @@
-use super::model::{FederationError, RemoteNodeRow, fetch_active_trust, fetch_remote_node};
+use super::model::{FederationError, RemoteNodeRow};
+use super::queries::{fetch_active_trust, fetch_remote_node};
+use super::service::remember_nonce;
 use crate::configuration::FederationSettings;
 use actix_web::HttpRequest;
 use actix_web::http::header::HeaderMap;
@@ -326,37 +328,6 @@ fn parse_i64_header(headers: &HeaderMap, name: &'static str) -> Result<i64, Fede
         .parse()
         .map_err(|_| FederationError::Unauthorized(format!("Invalid federation header: {name}")))
 }
-
-async fn remember_nonce(
-    pool: &PgPool,
-    remote_node_id: Uuid,
-    nonce: &str,
-    ttl_seconds: i64,
-) -> Result<(), FederationError> {
-    sqlx::query("DELETE FROM federation_request_nonces WHERE expires_at <= now()")
-        .execute(pool)
-        .await
-        .map_err(|e| FederationError::UnexpectedError(e.into()))?;
-    let result = sqlx::query(
-        r#"
-        INSERT INTO federation_request_nonces (remote_node_id, nonce, expires_at)
-        VALUES ($1, $2, now() + ($3 || ' seconds')::interval)
-        "#,
-    )
-    .bind(remote_node_id)
-    .bind(nonce)
-    .bind(ttl_seconds.to_string())
-    .execute(pool)
-    .await;
-    match result {
-        Ok(_) => Ok(()),
-        Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("23505") => Err(
-            FederationError::Unauthorized("Federation request nonce has already been used".into()),
-        ),
-        Err(error) => Err(FederationError::UnexpectedError(error.into())),
-    }
-}
-
 fn validate_remote_url(url: &Url, settings: &FederationSettings) -> Result<(), FederationError> {
     match url.scheme() {
         "https" => {}

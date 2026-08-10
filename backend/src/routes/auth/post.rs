@@ -1,21 +1,17 @@
+use super::model::MessageResponse;
+use super::queries::touch_last_login;
 use crate::authentication::{AuthError, Credentials, validate_credentials};
 use crate::session_state::TypedSession;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use secrecy::Secret;
-use serde::Serialize;
 use sqlx::PgPool;
 
 #[derive(serde::Deserialize)]
 pub struct JsonData {
     username: String,
     password: Secret<String>,
-}
-
-#[derive(Serialize)]
-struct MessageResponse {
-    message: &'static str,
 }
 
 #[derive(thiserror::Error)]
@@ -66,11 +62,7 @@ pub async fn login(
     match validate_credentials(credentials, &pool).await {
         Ok(user_id) => {
             tracing::Span::current().record("user_id", tracing::field::display(&user_id));
-            sqlx::query("UPDATE users SET last_login_at = now() WHERE user_id = $1")
-                .bind(user_id)
-                .execute(pool.get_ref())
-                .await
-                .map_err(|e| LoginError::UnexpectedError(e.into()))?;
+            touch_last_login(&pool, user_id).await?;
             session.renew();
             session
                 .insert_user_id(user_id)

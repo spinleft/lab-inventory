@@ -204,7 +204,7 @@ async fn seed_remote_asset(app: &TestApp, laboratory_id: Uuid) -> Uuid {
             &serde_json::json!({
                 "tracking_mode": "quantity",
                 "name": "Federated Reagent",
-                "default_unit_id": unit_id,
+                "inventory_unit_id": unit_id,
                 "public_notes": "shared",
                 "internal_notes": "secret"
             }),

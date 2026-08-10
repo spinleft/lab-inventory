@@ -1,17 +1,16 @@
-use super::model::{
-    LocationResponse, LocationRow, create_location_rollback_details, fetch_location_for_update,
-    map_database_conflict,
-};
+use super::model::{LocationResponse, create_location_rollback_details};
+use super::queries::{LocationDatabaseError, insert_location};
+use super::service::{build_path_and_depth, resolve_new_parent};
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{LaboratoryId, UserId};
-use crate::domain::{LocationCode, LocationId, LocationName, NewLocation};
+use crate::domain::{LocationCode, LocationName, NewLocation};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use serde::Deserialize;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -31,7 +30,12 @@ impl TryFrom<JsonData> for NewLocation {
         let name = LocationName::parse(value.name)?;
         let code = LocationCode::parse(value.code)?;
 
-        Ok(Self::new(parent_location_id, name, code, value.description))
+        Ok(Self {
+            parent_location_id,
+            name,
+            code,
+            description: value.description,
+        })
     }
 }
 
@@ -60,6 +64,16 @@ impl ResponseError for CreateLocationError {
             CreateLocationError::Forbidden(_) => StatusCode::FORBIDDEN,
             CreateLocationError::ConflictError(_) => StatusCode::CONFLICT,
             CreateLocationError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<LocationDatabaseError> for CreateLocationError {
+    fn from(error: LocationDatabaseError) -> Self {
+        match error {
+            LocationDatabaseError::Validation(message) => Self::ValidationError(message),
+            LocationDatabaseError::Conflict(message) => Self::ConflictError(message),
+            LocationDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
         }
     }
 }
@@ -96,14 +110,17 @@ pub async fn create_location(
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    let parent = fetch_parent_location(&mut transaction, new_location.parent_location_id).await?;
-    validate_parent(&parent, laboratory_id)?;
-    let parent_location_id = new_location.parent_location_id;
+    let parent = resolve_new_parent(
+        &mut transaction,
+        laboratory_id,
+        new_location.parent_location_id,
+    )
+    .await?;
     let (path, depth) = build_path_and_depth(parent.as_ref(), new_location.code.as_ref());
     let location = insert_location(
         &mut transaction,
         laboratory_id,
-        parent_location_id,
+        new_location.parent_location_id,
         new_location.name.as_ref(),
         new_location.code.as_ref(),
         &path,
@@ -127,116 +144,4 @@ pub async fn create_location(
         .context("Failed to commit SQL transaction to store a new location.")?;
 
     Ok(HttpResponse::Created().json(LocationResponse::from(location)))
-}
-
-async fn fetch_parent_location(
-    transaction: &mut Transaction<'_, Postgres>,
-    parent_location_id: Option<LocationId>,
-) -> Result<Option<LocationRow>, CreateLocationError> {
-    let Some(parent_location_id) = parent_location_id else {
-        return Ok(None);
-    };
-
-    fetch_location_for_update(transaction, parent_location_id)
-        .await?
-        .ok_or(CreateLocationError::ValidationError(
-            "Parent location not found".into(),
-        ))
-        .map(Some)
-}
-
-fn validate_parent(
-    parent: &Option<LocationRow>,
-    laboratory_id: LaboratoryId,
-) -> Result<(), CreateLocationError> {
-    if let Some(parent) = parent {
-        if parent.laboratory_id != Uuid::from(laboratory_id) {
-            return Err(CreateLocationError::ValidationError(
-                "Parent location does not belong to this laboratory".into(),
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn build_path_and_depth(parent: Option<&LocationRow>, code: &str) -> (String, i32) {
-    match parent {
-        Some(parent) => (format!("{}.{}", parent.path, code), parent.depth + 1),
-        None => (code.to_string(), 0),
-    }
-}
-
-#[tracing::instrument(
-    name = "Saving new location in the database",
-    skip(transaction, name, code, path, description),
-    fields(laboratory_id=%laboratory_id)
-)]
-async fn insert_location(
-    transaction: &mut Transaction<'_, Postgres>,
-    laboratory_id: LaboratoryId,
-    parent_location_id: Option<LocationId>,
-    name: &str,
-    code: &str,
-    path: &str,
-    depth: i32,
-    description: Option<&str>,
-) -> Result<LocationRow, CreateLocationError> {
-    sqlx::query_as!(
-        LocationRow,
-        r#"
-        INSERT INTO locations (
-            location_id,
-            laboratory_id,
-            parent_location_id,
-            name,
-            code,
-            path,
-            depth,
-            description
-        )
-        VALUES ($1, $2, $3, $4, $5, $6::text::ltree, $7, $8)
-        RETURNING
-            location_id,
-            laboratory_id,
-            parent_location_id,
-            name,
-            code,
-            path::text AS "path!",
-            depth,
-            description,
-            created_at,
-            updated_at
-        "#,
-        Uuid::new_v4(),
-        *laboratory_id,
-        parent_location_id.map(Uuid::from),
-        name,
-        code,
-        path,
-        depth,
-        description,
-    )
-    .fetch_one(transaction.as_mut())
-    .await
-    .map_err(map_database_error)
-}
-
-fn map_database_error(error: sqlx::Error) -> CreateLocationError {
-    if let Some(message) = map_database_conflict(
-        &error,
-        "Location name already exists under this parent",
-        "Location code already exists under this parent",
-        "Location path already exists",
-        "Location already exists",
-    ) {
-        return CreateLocationError::ConflictError(message);
-    }
-
-    if let sqlx::Error::Database(database_error) = &error {
-        if database_error.code().as_deref() == Some("23503") {
-            return CreateLocationError::ValidationError("Invalid laboratory".into());
-        }
-    }
-
-    CreateLocationError::UnexpectedError(error.into())
 }

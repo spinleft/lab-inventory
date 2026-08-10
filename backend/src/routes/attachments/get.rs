@@ -1,4 +1,5 @@
-use super::model::{AttachmentResponse, AttachmentRow};
+use super::model::AttachmentResponse;
+use super::queries::fetch_attachment;
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::{AttachmentId, UserId};
 use crate::utils::error_chain_fmt;
@@ -67,42 +68,4 @@ pub async fn get_attachment(
         .ok_or_else(|| GetAttachmentError::NotFound("Attachment not found".into()))?;
 
     Ok(HttpResponse::Ok().json(AttachmentResponse::from(row)))
-}
-
-async fn fetch_attachment(
-    pool: &PgPool,
-    attachment_id: AttachmentId,
-) -> Result<Option<AttachmentRow>, GetAttachmentError> {
-    sqlx::query_as!(
-        AttachmentRow,
-        r#"
-            SELECT
-                assignments.attachment_id,
-                assignments.laboratory_id,
-                assignments.file_id,
-                assignments.asset_id,
-                assignments.inventory_item_id,
-                assignments.display_name,
-                assignments.description,
-                assignments.is_public,
-                assignments.assigned_by_user_id,
-                assignments.created_at,
-                assignments.updated_at,
-                files.storage_backend,
-                files.storage_key,
-                files.original_file_name,
-                files.mime_type,
-                files.file_size_bytes,
-                files.sha256_hex,
-                files.uploaded_by_user_id,
-                files.created_at AS file_created_at
-            FROM asset_attachment_assignments AS assignments
-            JOIN files ON files.file_id = assignments.file_id
-            WHERE assignments.attachment_id = $1
-            "#,
-        Uuid::from(attachment_id)
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| GetAttachmentError::UnexpectedError(e.into()))
 }

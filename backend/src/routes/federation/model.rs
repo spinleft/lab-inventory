@@ -1,14 +1,17 @@
-use crate::configuration::FederationSettings;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError};
-use anyhow::Context;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::{Value, json};
-use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
+/// The error every federation route answers with.
+///
+/// Federation spans two audiences — an administrator driving pairing from the
+/// UI and another server speaking the signed protocol — so one type carries both
+/// the ordinary outcomes and the protocol-level ones (`Unauthorized` for a
+/// failed signature, `BadGateway` for a remote node that misbehaved).
 #[derive(thiserror::Error)]
 pub enum FederationError {
     #[error("Federation is disabled")]
@@ -85,6 +88,22 @@ pub(super) struct TrustRow {
     pub(super) created_at: DateTime<Utc>,
     pub(super) updated_at: DateTime<Utc>,
     pub(super) revoked_at: Option<DateTime<Utc>>,
+}
+
+/// A trust listed for display, with the remote node's address joined in so the
+/// row can be serialized straight to the client.
+#[derive(Serialize, sqlx::FromRow)]
+pub(super) struct TrustWithRemoteRow {
+    trust_id: Uuid,
+    local_laboratory_id: Uuid,
+    remote_node_id: Uuid,
+    remote_base_url: String,
+    remote_laboratory_id: Uuid,
+    remote_laboratory_name: Option<String>,
+    status: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    revoked_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Serialize)]
@@ -182,277 +201,14 @@ pub(super) struct LaboratoryIdentityRow {
     pub(super) name: String,
 }
 
-pub async fn initialize_local_node(
-    pool: &PgPool,
-    settings: &FederationSettings,
-) -> Result<(), anyhow::Error> {
-    let mut transaction = pool
-        .begin()
-        .await
-        .context("Failed to begin local federation node initialization")?;
-    let row = fetch_local_node_for_update(&mut transaction).await?;
-    match row {
-        Some(row) => {
-            if row.public_base_url != settings.public_base_url {
-                sqlx::query(
-                    r#"
-                    UPDATE federation_local_nodes
-                    SET public_base_url = $2,
-                        updated_at = now()
-                    WHERE node_id = $1
-                    "#,
-                )
-                .bind(row.node_id)
-                .bind(&settings.public_base_url)
-                .execute(transaction.as_mut())
-                .await
-                .context("Failed to update federation local node public_base_url")?;
-                LocalNodeRow {
-                    public_base_url: settings.public_base_url.clone(),
-                    ..row
-                }
-            } else {
-                row
-            }
-        }
-        None => {
-            let node_id = Uuid::new_v4();
-            sqlx::query_as::<_, LocalNodeRow>(
-                r#"
-                INSERT INTO federation_local_nodes (node_id, public_base_url)
-                VALUES ($1, $2)
-                RETURNING node_id, public_base_url
-                "#,
-            )
-            .bind(node_id)
-            .bind(&settings.public_base_url)
-            .fetch_one(transaction.as_mut())
-            .await
-            .context("Failed to insert federation local node")?
-        }
-    };
-    transaction
-        .commit()
-        .await
-        .context("Failed to commit local federation node initialization")?;
-    Ok(())
-}
-
-pub(super) async fn fetch_local_node(pool: &PgPool) -> Result<LocalNodeRow, FederationError> {
-    sqlx::query_as::<_, LocalNodeRow>(
-        r#"
-        SELECT node_id, public_base_url
-        FROM federation_local_nodes
-        ORDER BY created_at
-        LIMIT 1
-        "#,
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| FederationError::UnexpectedError(e.into()))?
-    .ok_or_else(|| FederationError::UnexpectedError(anyhow::anyhow!("Local node not initialized")))
-}
-
-async fn fetch_local_node_for_update(
-    transaction: &mut Transaction<'_, Postgres>,
-) -> Result<Option<LocalNodeRow>, anyhow::Error> {
-    sqlx::query_as::<_, LocalNodeRow>(
-        r#"
-        SELECT node_id, public_base_url
-        FROM federation_local_nodes
-        ORDER BY created_at
-        LIMIT 1
-        FOR UPDATE
-        "#,
-    )
-    .fetch_optional(transaction.as_mut())
-    .await
-    .context("Failed to fetch federation local node")
-}
-
-pub(super) async fn fetch_laboratory_identity(
-    pool: &PgPool,
-    laboratory_id: Uuid,
-) -> Result<LaboratoryIdentityRow, FederationError> {
-    sqlx::query_as::<_, LaboratoryIdentityRow>(
-        r#"
-        SELECT laboratory_id, name
-        FROM laboratories
-        WHERE laboratory_id = $1
-        "#,
-    )
-    .bind(laboratory_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| FederationError::UnexpectedError(e.into()))?
-    .ok_or_else(|| FederationError::NotFound("Laboratory not found".into()))
-}
-
-pub(super) async fn fetch_remote_node(
-    pool: &PgPool,
-    remote_node_id: Uuid,
-) -> Result<RemoteNodeRow, FederationError> {
-    sqlx::query_as::<_, RemoteNodeRow>(
-        r#"
-        SELECT
-            remote_node_id,
-            base_url,
-            display_name,
-            shared_secret,
-            shared_secret_hash,
-            tls_certificate_sha256,
-            status,
-            key_version,
-            last_handshake_at
-        FROM federation_remote_nodes
-        WHERE remote_node_id = $1
-        "#,
-    )
-    .bind(remote_node_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| FederationError::UnexpectedError(e.into()))?
-    .ok_or_else(|| FederationError::Unauthorized("Unknown federation node".into()))
-}
-
-pub(super) async fn fetch_active_trust(
-    pool: &PgPool,
-    local_laboratory_id: Uuid,
-    remote_node_id: Uuid,
-    remote_laboratory_id: Uuid,
-) -> Result<TrustRow, FederationError> {
-    sqlx::query_as::<_, TrustRow>(
-        r#"
-        SELECT
-            trust_id,
-            local_laboratory_id,
-            remote_node_id,
-            remote_laboratory_id,
-            remote_laboratory_name,
-            status,
-            created_at,
-            updated_at,
-            revoked_at
-        FROM federation_laboratory_trusts
-        WHERE local_laboratory_id = $1
-          AND remote_node_id = $2
-          AND remote_laboratory_id = $3
-          AND status = 'active'
-        "#,
-    )
-    .bind(local_laboratory_id)
-    .bind(remote_node_id)
-    .bind(remote_laboratory_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| FederationError::UnexpectedError(e.into()))?
-    .ok_or_else(|| FederationError::Forbidden("Laboratory trust is not active".into()))
-}
-
-pub(super) async fn upsert_remote_node(
-    transaction: &mut Transaction<'_, Postgres>,
-    remote_node_id: Uuid,
-    base_url: &str,
-    display_name: Option<&str>,
-    shared_secret: &str,
-    shared_secret_hash: &str,
-    tls_certificate_sha256: Option<&str>,
-    key_version: i32,
-) -> Result<RemoteNodeRow, FederationError> {
-    sqlx::query_as::<_, RemoteNodeRow>(
-        r#"
-        INSERT INTO federation_remote_nodes (
-            remote_node_id,
-            base_url,
-            display_name,
-            shared_secret,
-            shared_secret_hash,
-            tls_certificate_sha256,
-            key_version,
-            last_handshake_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, now())
-        ON CONFLICT (remote_node_id)
-        DO UPDATE SET
-            base_url = EXCLUDED.base_url,
-            display_name = EXCLUDED.display_name,
-            shared_secret = EXCLUDED.shared_secret,
-            shared_secret_hash = EXCLUDED.shared_secret_hash,
-            tls_certificate_sha256 = EXCLUDED.tls_certificate_sha256,
-            key_version = EXCLUDED.key_version,
-            status = 'active',
-            last_handshake_at = now(),
-            updated_at = now()
-        RETURNING
-            remote_node_id,
-            base_url,
-            display_name,
-            shared_secret,
-            shared_secret_hash,
-            tls_certificate_sha256,
-            status,
-            key_version,
-            last_handshake_at
-        "#,
-    )
-    .bind(remote_node_id)
-    .bind(base_url)
-    .bind(display_name)
-    .bind(shared_secret)
-    .bind(shared_secret_hash)
-    .bind(tls_certificate_sha256)
-    .bind(key_version)
-    .fetch_one(transaction.as_mut())
-    .await
-    .map_err(map_database_error)
-}
-
-pub(super) async fn upsert_trust(
-    transaction: &mut Transaction<'_, Postgres>,
-    local_laboratory_id: Uuid,
-    remote_node_id: Uuid,
-    remote_laboratory_id: Uuid,
-    remote_laboratory_name: Option<&str>,
-    created_by_user_id: Option<Uuid>,
-) -> Result<TrustRow, FederationError> {
-    sqlx::query_as::<_, TrustRow>(
-        r#"
-        INSERT INTO federation_laboratory_trusts (
-            trust_id,
-            local_laboratory_id,
-            remote_node_id,
-            remote_laboratory_id,
-            remote_laboratory_name,
-            created_by_user_id
-        )
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (local_laboratory_id, remote_node_id, remote_laboratory_id)
-        DO UPDATE SET
-            remote_laboratory_name = EXCLUDED.remote_laboratory_name,
-            status = 'active',
-            revoked_at = NULL,
-            updated_at = now()
-        RETURNING
-            trust_id,
-            local_laboratory_id,
-            remote_node_id,
-            remote_laboratory_id,
-            remote_laboratory_name,
-            status,
-            created_at,
-            updated_at,
-            revoked_at
-        "#,
-    )
-    .bind(Uuid::new_v4())
-    .bind(local_laboratory_id)
-    .bind(remote_node_id)
-    .bind(remote_laboratory_id)
-    .bind(remote_laboratory_name)
-    .bind(created_by_user_id)
-    .fetch_one(transaction.as_mut())
-    .await
-    .map_err(map_database_error)
+/// The local user a proxied request is made on behalf of, whose name and role
+/// are carried to the remote node in the signed headers.
+#[derive(sqlx::FromRow)]
+pub(super) struct ProxyUserRow {
+    pub(super) user_id: Uuid,
+    pub(super) username: String,
+    pub(super) user_type_name: String,
+    pub(super) laboratory_id: Option<Uuid>,
 }
 
 pub(super) fn trust_audit_details(trust: &TrustRow) -> Value {
@@ -470,22 +226,4 @@ pub(super) fn guest_link_audit_details(link_id: Uuid, target_guest_user_id: Uuid
         "link_id": link_id,
         "target_guest_user_id": target_guest_user_id,
     })
-}
-
-fn map_database_error(error: sqlx::Error) -> FederationError {
-    if let sqlx::Error::Database(database_error) = &error {
-        match database_error.code().as_deref() {
-            Some("23505") => {
-                return FederationError::ConflictError("Federation record already exists".into());
-            }
-            Some("23503") => {
-                return FederationError::ValidationError("Invalid referenced record".into());
-            }
-            Some("23514") => {
-                return FederationError::ValidationError("Invalid federation data".into());
-            }
-            _ => {}
-        }
-    }
-    FederationError::UnexpectedError(error.into())
 }

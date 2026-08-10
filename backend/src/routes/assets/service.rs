@@ -8,9 +8,8 @@ use super::model::{
     ResolvedAssetParameterValue,
 };
 use super::queries::{
-    self, AssetDatabaseError, delete_asset_parameter_value,
-    fetch_inventory_items_for_asset_for_update, fetch_parameter_definitions,
-    fetch_required_parameters, fetch_unit, insert_inventory_item, update_inventory_item_quantities,
+    self, AssetDatabaseError, delete_asset_parameter_value, fetch_parameter_definitions,
+    fetch_required_parameters, fetch_unit, insert_inventory_item, rescale_inventory_quantities,
     upsert_asset_parameter_value, validate_location, validate_option,
 };
 use crate::domain::{
@@ -21,89 +20,52 @@ use sqlx::{Postgres, Transaction};
 use std::collections::HashSet;
 use uuid::Uuid;
 
-/// Inserts every inventory item of a new asset, checking that each referenced
-/// location belongs to the same laboratory.
-pub(super) async fn insert_inventory_items(
+/// Inserts one inventory item of a new asset, checking that its location belongs
+/// to the same laboratory.
+pub(super) async fn insert_asset_inventory_item(
     transaction: &mut Transaction<'_, Postgres>,
     laboratory_id: LaboratoryId,
     asset_id: Uuid,
     tracking_mode: AssetTrackingMode,
-    items: &[NewInventoryItem],
-) -> Result<Vec<AssetInventoryItemRow>, AssetDatabaseError> {
-    let mut rows = Vec::with_capacity(items.len());
-    for item in items {
-        if let Some(location_id) = item.location_id {
-            validate_location(transaction, laboratory_id, location_id.into()).await?;
-        }
-        rows.push(
-            insert_inventory_item(transaction, laboratory_id, asset_id, tracking_mode, item)
-                .await?,
-        );
+    item: &NewInventoryItem,
+) -> Result<AssetInventoryItemRow, AssetDatabaseError> {
+    if let Some(location_id) = item.location_id {
+        validate_location(transaction, laboratory_id, location_id.into()).await?;
     }
 
-    Ok(rows)
+    insert_inventory_item(transaction, laboratory_id, asset_id, tracking_mode, item).await
 }
 
-/// Rewrites every inventory item of an asset into `target_unit_id` after the
-/// asset's default unit changed.
-pub(super) async fn convert_inventory_items_to_unit(
+/// Keeps the recorded quantities meaning the same physical amount after the
+/// asset's inventory unit changed.
+///
+/// Serialized assets are left alone: one item is one physical thing, its
+/// `quantity_on_hand` is pinned to 1 by a table constraint, and the unit is only
+/// a label for it. The dimension check still runs so the new unit cannot measure
+/// something unrelated.
+pub(super) async fn convert_inventory_quantities_to_unit(
     transaction: &mut Transaction<'_, Postgres>,
     asset_id: Uuid,
-    target_unit_id: Uuid,
-) -> Result<(), AssetDatabaseError> {
-    let items = fetch_inventory_items_for_asset_for_update(transaction, asset_id).await?;
-
-    for item in items {
-        if item.quantity_unit_id == target_unit_id {
-            continue;
-        }
-
-        let quantity_on_hand = convert_quantity_between_units(
-            transaction,
-            item.quantity_unit_id,
-            target_unit_id,
-            item.quantity_on_hand,
-        )
-        .await?;
-        let quantity_allocated = convert_quantity_between_units(
-            transaction,
-            item.quantity_unit_id,
-            target_unit_id,
-            item.quantity_allocated,
-        )
-        .await?;
-
-        update_inventory_item_quantities(
-            transaction,
-            item.inventory_item_id,
-            quantity_on_hand,
-            quantity_allocated,
-            target_unit_id,
-        )
-        .await?;
-    }
-
-    Ok(())
-}
-
-async fn convert_quantity_between_units(
-    transaction: &mut Transaction<'_, Postgres>,
+    tracking_mode: AssetTrackingMode,
     source_unit_id: Uuid,
     target_unit_id: Uuid,
-    source_quantity: f64,
-) -> Result<f64, AssetDatabaseError> {
+) -> Result<(), AssetDatabaseError> {
     if source_unit_id == target_unit_id {
-        return Ok(source_quantity);
+        return Ok(());
     }
     let source_unit = fetch_unit(transaction, source_unit_id).await?;
     let target_unit = fetch_unit(transaction, target_unit_id).await?;
     if source_unit.dimension != target_unit.dimension {
         return Err(AssetDatabaseError::Validation(
-            "Asset default unit dimension does not match inventory item unit dimension".into(),
+            "New inventory unit must measure the same dimension as the current one".into(),
         ));
     }
+    if tracking_mode == AssetTrackingMode::Serialized {
+        return Ok(());
+    }
 
-    Ok(source_quantity * source_unit.scale_to_base / target_unit.scale_to_base)
+    let factor = source_unit.scale_to_base / target_unit.scale_to_base;
+    rescale_inventory_quantities(transaction, asset_id, factor).await
 }
 
 /// Applies a batch of parameter value writes. With `allow_delete` a `None`
@@ -175,11 +137,11 @@ async fn resolve_parameter_value(
         data_type: definition.data_type.clone(),
         value_text: None,
         value_number: None,
-        value_number_base: None,
+        value_number_in_base: None,
         value_range_start: None,
         value_range_end: None,
-        value_range_start_base: None,
-        value_range_end_base: None,
+        value_range_start_in_base: None,
+        value_range_end_in_base: None,
         unit_id: None,
         value_boolean: None,
         value_date: None,
@@ -193,7 +155,7 @@ async fn resolve_parameter_value(
                 normalize_unit_value(transaction, definition, unit_id.map(Uuid::from), number)
                     .await?;
             resolved.value_number = Some(number);
-            resolved.value_number_base = number_base;
+            resolved.value_number_in_base = number_base;
             resolved.unit_id = unit_id;
         }
         AssetParameterValue::Range {
@@ -207,8 +169,8 @@ async fn resolve_parameter_value(
             let (_, end_base) = normalize_unit_value(transaction, definition, unit_id, end).await?;
             resolved.value_range_start = Some(start);
             resolved.value_range_end = Some(end);
-            resolved.value_range_start_base = start_base;
-            resolved.value_range_end_base = end_base;
+            resolved.value_range_start_in_base = start_base;
+            resolved.value_range_end_in_base = end_base;
             resolved.unit_id = unit_id;
         }
         AssetParameterValue::Boolean(boolean) => resolved.value_boolean = Some(boolean),

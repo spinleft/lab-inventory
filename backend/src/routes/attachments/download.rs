@@ -1,3 +1,4 @@
+use super::queries::fetch_attachment_file;
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::{AttachmentId, FileStorageKey, UserId};
 use crate::file_storage::FileStorage;
@@ -87,31 +88,6 @@ pub async fn download_attachment(
         .body(bytes))
 }
 
-#[derive(sqlx::FromRow)]
-struct AttachmentFileRow {
-    storage_key: String,
-    original_file_name: String,
-    mime_type: Option<String>,
-}
-
-async fn fetch_attachment_file(
-    pool: &PgPool,
-    attachment_id: AttachmentId,
-) -> Result<Option<AttachmentFileRow>, DownloadAttachmentError> {
-    sqlx::query_as!(
-        AttachmentFileRow,
-        r#"
-            SELECT storage_key, original_file_name, mime_type
-            FROM asset_attachment_assignments AS assignments
-            JOIN files ON files.file_id = assignments.file_id
-            WHERE assignments.attachment_id = $1
-            "#,
-        Uuid::from(attachment_id)
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| DownloadAttachmentError::UnexpectedError(anyhow!("{e}")))
-}
 
 fn content_disposition_filename(file_name: &str) -> String {
     file_name

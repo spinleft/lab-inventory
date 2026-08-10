@@ -1,4 +1,5 @@
-use super::model::{LocationResponse, fetch_location};
+use super::model::LocationResponse;
+use super::queries::fetch_location;
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::{LocationId, UserId};
 use crate::utils::error_chain_fmt;

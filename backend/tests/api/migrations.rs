@@ -229,7 +229,6 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
             'idx_asset_inventory_items_laboratory_batch_number',
             'idx_asset_inventory_items_laboratory_location_id',
             'idx_asset_inventory_items_location_laboratory_id',
-            'idx_asset_inventory_items_quantity_unit_id',
             'uq_asset_inventory_items_item_laboratory',
             'uq_assets_asset_laboratory_tracking_mode'
           )
@@ -248,7 +247,6 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
             "idx_asset_inventory_items_laboratory_location_id",
             "idx_asset_inventory_items_laboratory_status",
             "idx_asset_inventory_items_location_laboratory_id",
-            "idx_asset_inventory_items_quantity_unit_id",
             "idx_asset_inventory_items_unique_asset_serial_number",
             "idx_asset_inventory_items_unique_quantity_aggregate",
             "uq_asset_inventory_items_item_laboratory",
@@ -358,7 +356,7 @@ async fn inventory_quantity_constraints_are_enforced_by_the_database() {
             laboratory_id,
             tracking_mode,
             name,
-            default_unit_id
+            inventory_unit_id
         )
         VALUES ($1, $2, 'quantity', 'Resistors', $3)
         "#,
@@ -378,16 +376,14 @@ async fn inventory_quantity_constraints_are_enforced_by_the_database() {
             laboratory_id,
             tracking_mode,
             quantity_on_hand,
-            quantity_allocated,
-            quantity_unit_id
+            quantity_allocated
         )
-        VALUES ($1, $2, $3, 'quantity', 2, 3, $4)
+        VALUES ($1, $2, $3, 'quantity', 2, 3)
         "#,
     )
     .bind(uuid::Uuid::new_v4())
     .bind(asset_id)
     .bind(laboratory_id)
-    .bind(unit_id)
     .execute(&app.db_pool)
     .await;
     assert!(result.is_err());
@@ -403,7 +399,7 @@ async fn attachment_constraints_are_enforced_by_the_database() {
         .await;
     let asset_id = insert_test_asset(&app, laboratory_id, unit_id).await;
     let inventory_item_id =
-        insert_quantity_inventory_item(&app, asset_id, laboratory_id, unit_id, Some("ATTACH"))
+        insert_quantity_inventory_item(&app, asset_id, laboratory_id, Some("ATTACH"))
             .await;
 
     let legacy_columns: Vec<String> = sqlx::query_scalar(
@@ -508,16 +504,14 @@ async fn inventory_item_laboratory_consistency_is_enforced_by_the_database() {
             laboratory_id,
             tracking_mode,
             quantity_on_hand,
-            quantity_allocated,
-            quantity_unit_id
+            quantity_allocated
         )
-        VALUES ($1, $2, $3, 'quantity', 1, 0, $4)
+        VALUES ($1, $2, $3, 'quantity', 1, 0)
         "#,
     )
     .bind(uuid::Uuid::new_v4())
     .bind(asset_id)
     .bind(other_laboratory_id)
-    .bind(unit_id)
     .execute(&app.db_pool)
     .await;
     assert!(asset_mismatch.is_err());
@@ -531,16 +525,14 @@ async fn inventory_item_laboratory_consistency_is_enforced_by_the_database() {
             tracking_mode,
             quantity_on_hand,
             quantity_allocated,
-            quantity_unit_id,
             location_id
         )
-        VALUES ($1, $2, $3, 'quantity', 1, 0, $4, $5)
+        VALUES ($1, $2, $3, 'quantity', 1, 0, $4)
         "#,
     )
     .bind(uuid::Uuid::new_v4())
     .bind(asset_id)
     .bind(asset_laboratory_id)
-    .bind(unit_id)
     .bind(other_location_id)
     .execute(&app.db_pool)
     .await;
@@ -554,7 +546,7 @@ async fn inventory_item_batch_and_serial_constraints_are_enforced_by_the_databas
     let unit_id = app.unit_id("pcs").await;
     let asset_id = insert_test_asset(&app, laboratory_id, unit_id).await;
 
-    insert_quantity_inventory_item(&app, asset_id, laboratory_id, unit_id, Some("BATCH-001")).await;
+    insert_quantity_inventory_item(&app, asset_id, laboratory_id, Some("BATCH-001")).await;
     let duplicate_batch = sqlx::query(
         r#"
         INSERT INTO asset_inventory_items (
@@ -564,16 +556,14 @@ async fn inventory_item_batch_and_serial_constraints_are_enforced_by_the_databas
             tracking_mode,
             batch_number,
             quantity_on_hand,
-            quantity_allocated,
-            quantity_unit_id
+            quantity_allocated
         )
-        VALUES ($1, $2, $3, 'quantity', 'BATCH-001', 1, 0, $4)
+        VALUES ($1, $2, $3, 'quantity', 'BATCH-001', 1, 0)
         "#,
     )
     .bind(uuid::Uuid::new_v4())
     .bind(asset_id)
     .bind(laboratory_id)
-    .bind(unit_id)
     .execute(&app.db_pool)
     .await;
     assert!(duplicate_batch.is_err());
@@ -587,16 +577,14 @@ async fn inventory_item_batch_and_serial_constraints_are_enforced_by_the_databas
             tracking_mode,
             batch_number,
             quantity_on_hand,
-            quantity_allocated,
-            quantity_unit_id
+            quantity_allocated
         )
-        VALUES ($1, $2, $3, 'quantity', '   ', 1, 0, $4)
+        VALUES ($1, $2, $3, 'quantity', '   ', 1, 0)
         "#,
     )
     .bind(uuid::Uuid::new_v4())
     .bind(asset_id)
     .bind(laboratory_id)
-    .bind(unit_id)
     .execute(&app.db_pool)
     .await;
     assert!(blank_batch.is_err());
@@ -610,16 +598,14 @@ async fn inventory_item_batch_and_serial_constraints_are_enforced_by_the_databas
             tracking_mode,
             serial_number,
             quantity_on_hand,
-            quantity_allocated,
-            quantity_unit_id
+            quantity_allocated
         )
-        VALUES ($1, $2, $3, 'serialized', '   ', 1, 0, $4)
+        VALUES ($1, $2, $3, 'serialized', '   ', 1, 0)
         "#,
     )
     .bind(uuid::Uuid::new_v4())
     .bind(asset_id)
     .bind(laboratory_id)
-    .bind(unit_id)
     .execute(&app.db_pool)
     .await;
     assert!(blank_serial.is_err());
@@ -641,21 +627,19 @@ async fn inventory_item_tracking_mode_matches_asset_and_cascades_on_asset_delete
             tracking_mode,
             serial_number,
             quantity_on_hand,
-            quantity_allocated,
-            quantity_unit_id
+            quantity_allocated
         )
-        VALUES ($1, $2, $3, 'serialized', 'SERIAL-001', 1, 0, $4)
+        VALUES ($1, $2, $3, 'serialized', 'SERIAL-001', 1, 0)
         "#,
     )
     .bind(uuid::Uuid::new_v4())
     .bind(asset_id)
     .bind(laboratory_id)
-    .bind(unit_id)
     .execute(&app.db_pool)
     .await;
     assert!(tracking_mismatch.is_err());
 
-    insert_quantity_inventory_item(&app, asset_id, laboratory_id, unit_id, Some("CASCADE")).await;
+    insert_quantity_inventory_item(&app, asset_id, laboratory_id, Some("CASCADE")).await;
     sqlx::query("DELETE FROM assets WHERE asset_id = $1")
         .bind(asset_id)
         .execute(&app.db_pool)
@@ -683,7 +667,7 @@ async fn insert_test_asset(
             laboratory_id,
             tracking_mode,
             name,
-            default_unit_id
+            inventory_unit_id
         )
         VALUES ($1, $2, 'quantity', $3, $4)
         RETURNING asset_id
@@ -730,7 +714,6 @@ async fn insert_quantity_inventory_item(
     app: &crate::helpers::TestApp,
     asset_id: uuid::Uuid,
     laboratory_id: uuid::Uuid,
-    unit_id: uuid::Uuid,
     batch_number: Option<&str>,
 ) -> uuid::Uuid {
     sqlx::query_scalar(
@@ -742,10 +725,9 @@ async fn insert_quantity_inventory_item(
             tracking_mode,
             batch_number,
             quantity_on_hand,
-            quantity_allocated,
-            quantity_unit_id
+            quantity_allocated
         )
-        VALUES ($1, $2, $3, 'quantity', $4, 1, 0, $5)
+        VALUES ($1, $2, $3, 'quantity', $4, 1, 0)
         RETURNING inventory_item_id
         "#,
     )
@@ -753,7 +735,6 @@ async fn insert_quantity_inventory_item(
     .bind(asset_id)
     .bind(laboratory_id)
     .bind(batch_number)
-    .bind(unit_id)
     .fetch_one(&app.db_pool)
     .await
     .unwrap()

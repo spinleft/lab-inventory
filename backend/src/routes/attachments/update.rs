@@ -1,6 +1,6 @@
-use super::model::{
-    AttachmentResponse, AttachmentRow, fetch_attachment_for_update,
-    update_attachment_rollback_details,
+use super::model::{AttachmentResponse, update_attachment_rollback_details};
+use super::queries::{
+    AttachmentDatabaseError, fetch_attachment_for_update, update_attachment_in_database,
 };
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
@@ -12,7 +12,7 @@ use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use serde::{Deserialize, Deserializer};
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(Clone, Deserialize)]
@@ -37,7 +37,11 @@ impl TryFrom<JsonData> for UpdateAttachment {
             Some(None) => NullableUpdate::Clear,
             None => NullableUpdate::Unchanged,
         };
-        Ok(Self::new(display_name, description, value.is_public))
+        Ok(Self {
+            display_name,
+            description,
+            is_public: value.is_public,
+        })
     }
 }
 
@@ -57,8 +61,20 @@ pub enum UpdateAttachmentError {
     Forbidden(String),
     #[error("{0}")]
     NotFound(String),
+    #[error("{0}")]
+    ConflictError(String),
     #[error(transparent)]
     UnexpectedError(#[from] anyhow::Error),
+}
+
+impl From<AttachmentDatabaseError> for UpdateAttachmentError {
+    fn from(error: AttachmentDatabaseError) -> Self {
+        match error {
+            AttachmentDatabaseError::Validation(message) => Self::ValidationError(message),
+            AttachmentDatabaseError::Conflict(message) => Self::ConflictError(message),
+            AttachmentDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
+        }
+    }
 }
 
 impl std::fmt::Debug for UpdateAttachmentError {
@@ -73,6 +89,7 @@ impl ResponseError for UpdateAttachmentError {
             UpdateAttachmentError::ValidationError(_) => StatusCode::BAD_REQUEST,
             UpdateAttachmentError::Forbidden(_) => StatusCode::FORBIDDEN,
             UpdateAttachmentError::NotFound(_) => StatusCode::NOT_FOUND,
+            UpdateAttachmentError::ConflictError(_) => StatusCode::CONFLICT,
             UpdateAttachmentError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -123,7 +140,7 @@ pub async fn update_attachment(
         .resolve(existing.description.clone());
     let is_public = update_attachment.is_public.unwrap_or(existing.is_public);
 
-    let updated = update_attachment_assignment_in_database(
+    let updated = update_attachment_in_database(
         &mut transaction,
         attachment_id,
         &display_name,
@@ -148,62 +165,4 @@ pub async fn update_attachment(
         .context("Failed to commit SQL transaction to update attachment")?;
 
     Ok(HttpResponse::Ok().json(AttachmentResponse::from(updated)))
-}
-
-#[tracing::instrument(
-    name = "Updating asset category in the database",
-    skip(transaction, display_name, description, is_public),
-    fields(attachment_id=%attachment_id)
-)]
-async fn update_attachment_assignment_in_database(
-    transaction: &mut Transaction<'_, Postgres>,
-    attachment_id: AttachmentId,
-    display_name: &str,
-    description: Option<&str>,
-    is_public: bool,
-) -> Result<AttachmentRow, UpdateAttachmentError> {
-    sqlx::query_as!(
-        AttachmentRow,
-        r#"
-            WITH updated_assignment AS (
-                UPDATE asset_attachment_assignments
-                SET
-                    display_name = $2,
-                    description = $3,
-                    is_public = $4,
-                    updated_at = now()
-                WHERE attachment_id = $1
-                RETURNING *
-            )
-            SELECT
-                assignments.attachment_id,
-                assignments.laboratory_id,
-                assignments.file_id,
-                assignments.asset_id,
-                assignments.inventory_item_id,
-                assignments.display_name,
-                assignments.description,
-                assignments.is_public,
-                assignments.assigned_by_user_id,
-                assignments.created_at,
-                assignments.updated_at,
-                files.storage_backend,
-                files.storage_key,
-                files.original_file_name,
-                files.mime_type,
-                files.file_size_bytes,
-                files.sha256_hex,
-                files.uploaded_by_user_id,
-                files.created_at AS file_created_at
-            FROM updated_assignment AS assignments
-            JOIN files ON files.file_id = assignments.file_id
-            "#,
-        Uuid::from(attachment_id),
-        display_name,
-        description,
-        is_public,
-    )
-    .fetch_one(transaction.as_mut())
-    .await
-    .map_err(|e| UpdateAttachmentError::UnexpectedError(e.into()))
 }

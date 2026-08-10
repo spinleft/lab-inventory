@@ -29,7 +29,7 @@ export const inventoryStatusSchema = z.enum([
 const inventoryItemAssetSchema = z.object({
   asset_id: z.string().uuid(),
   category_id: z.string().uuid().nullable(),
-  default_unit_id: z.string().uuid(),
+  inventory_unit_id: z.string().uuid(),
   manufacturer: z.string().nullable(),
   model: z.string().nullable(),
   name: z.string(),
@@ -48,7 +48,6 @@ export const inventoryItemSchema = z.object({
   public_notes: z.string().nullable(),
   quantity_allocated: z.number(),
   quantity_on_hand: z.number(),
-  quantity_unit_id: z.string().uuid(),
   serial_number: z.string().nullable(),
   status: inventoryStatusSchema,
   tracking_mode: assetTrackingModeSchema,

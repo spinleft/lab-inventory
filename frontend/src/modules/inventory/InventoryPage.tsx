@@ -176,7 +176,6 @@ type InventoryForm = {
   public_notes: string;
   quantity_allocated: string;
   quantity_on_hand: string;
-  quantity_unit_id: string;
   serial_mode: "serials" | "count";
   serial_number: string;
   serial_numbers: string;
@@ -1480,7 +1479,7 @@ export function InventoryEditor({
     : null;
   const trackingMode = editingItem?.tracking_mode ?? selectedAsset?.tracking_mode ?? null;
   const quantityUnitId =
-    editingItem?.asset.default_unit_id ?? selectedAsset?.default_unit_id ?? values.quantity_unit_id;
+    editingItem?.asset.inventory_unit_id ?? selectedAsset?.inventory_unit_id ?? "";
   const isSaving = createInventoryItems.isPending || updateInventoryItem.isPending;
 
   useEffect(() => {
@@ -1496,7 +1495,6 @@ export function InventoryEditor({
       setValues({
         ...emptyInventoryForm(),
         asset_id: editor.asset?.asset_id ?? "",
-        quantity_unit_id: editor.asset?.default_unit_id ?? "",
       });
       setPendingAttachments([]);
       setSerialAttachments({});
@@ -1507,15 +1505,6 @@ export function InventoryEditor({
     setPendingAttachments([]);
     setSerialAttachments({});
   }, [editor]);
-
-  useEffect(() => {
-    if (!isCreate || !selectedAsset) {
-      return;
-    }
-    setValues((current) => {
-      return { ...current, quantity_unit_id: selectedAsset.default_unit_id };
-    });
-  }, [isCreate, selectedAsset]);
 
   function updateField<K extends keyof InventoryForm>(key: K, value: InventoryForm[K]) {
     setValues((current) => ({ ...current, [key]: value }));
@@ -2171,11 +2160,12 @@ function InventoryItemCell({
     return (
       <span className="asset-muted-cell">
         <strong>
-          {formatNumber(item.quantity_on_hand)} {unitSymbol(item.quantity_unit_id, unitsById)}
+          {formatNumber(item.quantity_on_hand)}{" "}
+          {unitSymbol(item.asset.inventory_unit_id, unitsById)}
         </strong>
         <span>
           已分配 {formatNumber(item.quantity_allocated)}{" "}
-          {unitSymbol(item.quantity_unit_id, unitsById)}
+          {unitSymbol(item.asset.inventory_unit_id, unitsById)}
         </span>
       </span>
     );
@@ -2442,7 +2432,6 @@ function formFromInventoryItem(item: InventoryItem): InventoryForm {
     public_notes: item.public_notes ?? "",
     quantity_allocated: String(item.quantity_allocated),
     quantity_on_hand: String(item.quantity_on_hand),
-    quantity_unit_id: item.asset.default_unit_id,
     serial_number: item.serial_number ?? "",
     status: item.status,
   };
@@ -2458,7 +2447,6 @@ function emptyInventoryForm(): InventoryForm {
     public_notes: "",
     quantity_allocated: "0",
     quantity_on_hand: "",
-    quantity_unit_id: "",
     serial_mode: "serials",
     serial_number: "",
     serial_numbers: "",

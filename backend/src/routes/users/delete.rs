@@ -1,4 +1,5 @@
-use super::model::{DeletedUserRow, delete_user_rollback_details, fetch_user};
+use super::model::delete_user_rollback_details;
+use super::queries::{UserDatabaseError, delete_user_from_database, fetch_user};
 use crate::access_control::get_actor;
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
@@ -8,7 +9,7 @@ use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(thiserror::Error)]
@@ -36,6 +37,16 @@ impl ResponseError for DeleteUserError {
             DeleteUserError::Forbidden(_) => StatusCode::FORBIDDEN,
             DeleteUserError::ConflictError(_) => StatusCode::CONFLICT,
             DeleteUserError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<UserDatabaseError> for DeleteUserError {
+    fn from(error: UserDatabaseError) -> Self {
+        match error {
+            UserDatabaseError::Validation(message) => Self::ValidationError(message),
+            UserDatabaseError::Conflict(message) => Self::ConflictError(message),
+            UserDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
         }
     }
 }
@@ -111,62 +122,4 @@ pub async fn delete_user(
         .context("Failed to commit SQL transaction to delete a user.")?;
 
     Ok(HttpResponse::NoContent().finish())
-}
-
-#[tracing::instrument(
-    name = "Deleting user from the database",
-    skip(transaction),
-    fields(user_id=%user_id)
-)]
-async fn delete_user_from_database(
-    transaction: &mut Transaction<'_, Postgres>,
-    user_id: Uuid,
-) -> Result<DeletedUserRow, DeleteUserError> {
-    sqlx::query_as!(
-        DeletedUserRow,
-        r#"
-        WITH deleted_user AS (
-            DELETE FROM users
-            WHERE user_id = $1
-            RETURNING
-                users.user_id,
-                users.username,
-                users.password_hash,
-                users.email,
-                users.phone_number,
-                users.user_type_id,
-                users.laboratory_id,
-                users.created_at,
-                users.last_login_at
-        )
-        SELECT
-            deleted_user.user_id,
-            deleted_user.username,
-            deleted_user.password_hash,
-            deleted_user.email,
-            deleted_user.phone_number,
-            user_types.user_type_id AS "user_type_id?",
-            user_types.name AS "user_type_name?",
-            laboratories.laboratory_id AS "laboratory_id?",
-            deleted_user.created_at,
-            deleted_user.last_login_at
-        FROM deleted_user
-        INNER JOIN user_types USING (user_type_id)
-        LEFT JOIN laboratories USING (laboratory_id)
-        "#,
-        user_id
-    )
-    .fetch_one(transaction.as_mut())
-    .await
-    .map_err(map_database_error)
-}
-
-fn map_database_error(error: sqlx::Error) -> DeleteUserError {
-    if let sqlx::Error::Database(database_error) = &error {
-        if database_error.code().as_deref() == Some("23503") {
-            return DeleteUserError::ConflictError("User is referenced by other records".into());
-        }
-    }
-
-    DeleteUserError::UnexpectedError(error.into())
 }

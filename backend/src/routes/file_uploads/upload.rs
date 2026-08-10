@@ -1,6 +1,5 @@
-use super::model::FileUploadResponse;
+use super::queries::{FileUploadDatabaseError, insert_file_upload};
 use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::StoredFile;
 use crate::domain::{FileName, LaboratoryId, UserId};
 use crate::file_storage::FileStorage;
 use crate::utils::error_chain_fmt;
@@ -38,6 +37,14 @@ impl ResponseError for UploadFileError {
     }
 }
 
+impl From<FileUploadDatabaseError> for UploadFileError {
+    fn from(error: FileUploadDatabaseError) -> Self {
+        match error {
+            FileUploadDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
+        }
+    }
+}
+
 #[tracing::instrument(
     name = "Upload file",
     skip(pool, storage, payload),
@@ -69,20 +76,24 @@ pub async fn upload_file(
         .store_upload(laboratory_id, &upload.original_file_name, &upload.bytes)
         .await?;
 
+    // The blob is already on disk at this point, so a failed insert has to take
+    // it back out rather than leave an orphan behind.
+    let expires_at = Utc::now() + Duration::minutes(storage.upload_token_ttl_minutes() as i64);
     match insert_file_upload(
         &pool,
         laboratory_id,
         actor_user_id,
-        &upload,
+        upload.original_file_name.as_ref(),
+        upload.mime_type.as_deref(),
         &stored,
-        storage.upload_token_ttl_minutes(),
+        expires_at,
     )
     .await
     {
         Ok(response) => Ok(HttpResponse::Created().json(response)),
         Err(error) => {
             let _ = storage.delete(&stored.storage_key).await;
-            Err(error)
+            Err(error.into())
         }
     }
 }
@@ -152,55 +163,4 @@ async fn read_single_file(
     upload.ok_or_else(|| {
         UploadFileError::ValidationError("Multipart field `file` is required".into())
     })
-}
-
-async fn insert_file_upload(
-    pool: &PgPool,
-    laboratory_id: LaboratoryId,
-    uploaded_by_user_id: UserId,
-    upload: &MultipartUpload,
-    stored: &StoredFile,
-    ttl_minutes: u64,
-) -> Result<FileUploadResponse, UploadFileError> {
-    let upload_id = Uuid::new_v4();
-    let expires_at = Utc::now() + Duration::minutes(ttl_minutes as i64);
-    sqlx::query_as::<_, FileUploadResponse>(
-        r#"
-        INSERT INTO file_uploads (
-            upload_id,
-            laboratory_id,
-            storage_backend,
-            storage_key,
-            original_file_name,
-            mime_type,
-            file_size_bytes,
-            sha256_hex,
-            uploaded_by_user_id,
-            expires_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        RETURNING
-            upload_id,
-            laboratory_id,
-            original_file_name,
-            mime_type,
-            file_size_bytes,
-            sha256_hex,
-            expires_at,
-            created_at
-        "#,
-    )
-    .bind(upload_id)
-    .bind(Uuid::from(laboratory_id))
-    .bind(stored.storage_backend.as_str())
-    .bind(stored.storage_key.as_ref())
-    .bind(upload.original_file_name.as_ref())
-    .bind(upload.mime_type.as_deref())
-    .bind(stored.file_size_bytes.as_i64())
-    .bind(stored.sha256_hex.as_ref())
-    .bind(Uuid::from(uploaded_by_user_id))
-    .bind(expires_at)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| UploadFileError::UnexpectedError(e.into()))
 }

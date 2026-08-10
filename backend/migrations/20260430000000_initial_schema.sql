@@ -239,7 +239,7 @@ CREATE TABLE assets (
     name TEXT NOT NULL,
     model TEXT,
     manufacturer TEXT,
-    default_unit_id uuid NOT NULL REFERENCES units (unit_id),
+    inventory_unit_id uuid NOT NULL REFERENCES units (unit_id),
     public_notes TEXT,
     internal_notes TEXT,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -256,7 +256,7 @@ CREATE UNIQUE INDEX uq_assets_asset_laboratory_tracking_mode
     ON assets (asset_id, laboratory_id, tracking_mode);
 CREATE INDEX idx_assets_laboratory_id ON assets (laboratory_id);
 CREATE INDEX idx_assets_category_id ON assets (category_id);
-CREATE INDEX idx_assets_default_unit_id ON assets (default_unit_id);
+CREATE INDEX idx_assets_inventory_unit_id ON assets (inventory_unit_id);
 CREATE INDEX idx_assets_search_trgm
     ON assets USING gin ((name || ' ' || COALESCE(model, '') || ' ' || COALESCE(manufacturer, '')) gin_trgm_ops);
 
@@ -336,11 +336,11 @@ CREATE TABLE asset_parameter_values (
 
     value_text text,
     value_number double precision,
-    value_number_base double precision,
+    value_number_in_base double precision,
     value_range_start double precision,
     value_range_end double precision,
-    value_range_start_base double precision,
-    value_range_end_base double precision,
+    value_range_start_in_base double precision,
+    value_range_end_in_base double precision,
     unit_id uuid REFERENCES units(unit_id),
     value_boolean boolean,
     value_date date,
@@ -356,22 +356,22 @@ CREATE TABLE asset_parameter_values (
         REFERENCES asset_parameter_options(parameter_type_id, option_id),
 
     CHECK (
-      (data_type = 'text' AND value_text IS NOT NULL AND value_number IS NULL AND value_number_base IS NULL AND value_range_start IS NULL AND value_range_end IS NULL AND value_range_start_base IS NULL AND value_range_end_base IS NULL AND unit_id IS NULL AND value_boolean IS NULL AND value_date IS NULL AND value_option_id IS NULL)
+      (data_type = 'text' AND value_text IS NOT NULL AND value_number IS NULL AND value_number_in_base IS NULL AND value_range_start IS NULL AND value_range_end IS NULL AND value_range_start_in_base IS NULL AND value_range_end_in_base IS NULL AND unit_id IS NULL AND value_boolean IS NULL AND value_date IS NULL AND value_option_id IS NULL)
       OR
-      (data_type = 'number' AND value_number IS NOT NULL AND value_range_start IS NULL AND value_range_end IS NULL AND value_range_start_base IS NULL AND value_range_end_base IS NULL AND value_text IS NULL AND value_boolean IS NULL AND value_date IS NULL AND value_option_id IS NULL)
+      (data_type = 'number' AND value_number IS NOT NULL AND value_range_start IS NULL AND value_range_end IS NULL AND value_range_start_in_base IS NULL AND value_range_end_in_base IS NULL AND value_text IS NULL AND value_boolean IS NULL AND value_date IS NULL AND value_option_id IS NULL)
       OR
-      (data_type = 'range' AND value_range_start IS NOT NULL AND value_range_end IS NOT NULL AND value_range_start <= value_range_end AND value_text IS NULL AND value_number IS NULL AND value_number_base IS NULL AND value_boolean IS NULL AND value_date IS NULL AND value_option_id IS NULL)
+      (data_type = 'range' AND value_range_start IS NOT NULL AND value_range_end IS NOT NULL AND value_range_start <= value_range_end AND value_text IS NULL AND value_number IS NULL AND value_number_in_base IS NULL AND value_boolean IS NULL AND value_date IS NULL AND value_option_id IS NULL)
       OR
-      (data_type = 'boolean' AND value_boolean IS NOT NULL AND value_text IS NULL AND value_number IS NULL AND value_number_base IS NULL AND value_range_start IS NULL AND value_range_end IS NULL AND value_range_start_base IS NULL AND value_range_end_base IS NULL AND unit_id IS NULL AND value_date IS NULL AND value_option_id IS NULL)
+      (data_type = 'boolean' AND value_boolean IS NOT NULL AND value_text IS NULL AND value_number IS NULL AND value_number_in_base IS NULL AND value_range_start IS NULL AND value_range_end IS NULL AND value_range_start_in_base IS NULL AND value_range_end_in_base IS NULL AND unit_id IS NULL AND value_date IS NULL AND value_option_id IS NULL)
       OR
-      (data_type = 'date' AND value_date IS NOT NULL AND value_text IS NULL AND value_number IS NULL AND value_number_base IS NULL AND value_range_start IS NULL AND value_range_end IS NULL AND value_range_start_base IS NULL AND value_range_end_base IS NULL AND unit_id IS NULL AND value_boolean IS NULL AND value_option_id IS NULL)
+      (data_type = 'date' AND value_date IS NOT NULL AND value_text IS NULL AND value_number IS NULL AND value_number_in_base IS NULL AND value_range_start IS NULL AND value_range_end IS NULL AND value_range_start_in_base IS NULL AND value_range_end_in_base IS NULL AND unit_id IS NULL AND value_boolean IS NULL AND value_option_id IS NULL)
       OR
-      (data_type = 'enum' AND value_option_id IS NOT NULL AND value_text IS NULL AND value_number IS NULL AND value_number_base IS NULL AND value_range_start IS NULL AND value_range_end IS NULL AND value_range_start_base IS NULL AND value_range_end_base IS NULL AND unit_id IS NULL AND value_boolean IS NULL AND value_date IS NULL)
+      (data_type = 'enum' AND value_option_id IS NOT NULL AND value_text IS NULL AND value_number IS NULL AND value_number_in_base IS NULL AND value_range_start IS NULL AND value_range_end IS NULL AND value_range_start_in_base IS NULL AND value_range_end_in_base IS NULL AND unit_id IS NULL AND value_boolean IS NULL AND value_date IS NULL)
     ),
     CHECK (
-      value_range_start_base IS NULL
-      OR value_range_end_base IS NULL
-      OR value_range_start_base <= value_range_end_base
+      value_range_start_in_base IS NULL
+      OR value_range_end_in_base IS NULL
+      OR value_range_start_in_base <= value_range_end_in_base
     )
 );
 
@@ -384,7 +384,6 @@ CREATE TABLE asset_inventory_items (
     batch_number TEXT,
     quantity_on_hand NUMERIC NOT NULL,
     quantity_allocated NUMERIC NOT NULL DEFAULT 0,
-    quantity_unit_id uuid NOT NULL REFERENCES units (unit_id),
     location_id uuid,
     status TEXT NOT NULL DEFAULT 'available',
     public_notes TEXT,
@@ -428,14 +427,12 @@ CREATE UNIQUE INDEX idx_asset_inventory_items_unique_quantity_aggregate
         asset_id,
         COALESCE(batch_number, ''),
         COALESCE(location_id, '00000000-0000-0000-0000-000000000000'::uuid),
-        status,
-        quantity_unit_id
+        status
     )
     WHERE tracking_mode = 'quantity';
 CREATE INDEX idx_asset_inventory_items_asset_laboratory_id ON asset_inventory_items (asset_id, laboratory_id);
 CREATE INDEX idx_asset_inventory_items_laboratory_id ON asset_inventory_items (laboratory_id);
 CREATE INDEX idx_asset_inventory_items_location_laboratory_id ON asset_inventory_items (location_id, laboratory_id);
-CREATE INDEX idx_asset_inventory_items_quantity_unit_id ON asset_inventory_items (quantity_unit_id);
 CREATE INDEX idx_asset_inventory_items_laboratory_asset_id ON asset_inventory_items (laboratory_id, asset_id);
 CREATE INDEX idx_asset_inventory_items_laboratory_status ON asset_inventory_items (laboratory_id, status);
 CREATE INDEX idx_asset_inventory_items_laboratory_batch_number ON asset_inventory_items (laboratory_id, batch_number);

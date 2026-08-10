@@ -1,8 +1,6 @@
-use anyhow::anyhow;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::{Value, json};
-use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -136,32 +134,4 @@ impl From<UserRow> for UserResponse {
             last_login_at: row.last_login_at,
         }
     }
-}
-
-pub(super) async fn fetch_user(pool: &PgPool, user_id: Uuid) -> Result<UserRow, anyhow::Error> {
-    sqlx::query_as!(
-        UserRow,
-        r#"
-        SELECT
-            users.user_id,
-            users.username,
-            users.email,
-            users.phone_number,
-            user_types.user_type_id,
-            user_types.name AS user_type_name,
-            laboratories.laboratory_id AS "laboratory_id?",
-            laboratories.name AS "laboratory_name?",
-            users.created_at,
-            users.last_login_at
-        FROM users
-        INNER JOIN user_types USING (user_type_id)
-        LEFT JOIN laboratories USING (laboratory_id)
-        WHERE users.user_id = $1
-        "#,
-        user_id
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| anyhow!(e))?
-    .ok_or(anyhow!("User not found"))
 }

@@ -1,4 +1,4 @@
-use super::model::FileUploadRow;
+use super::queries::{delete_file_upload_from_database, fetch_file_upload_for_update};
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::{FileStorageKey, FileUploadId, UserId};
 use crate::file_storage::FileStorage;
@@ -6,8 +6,7 @@ use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::{Context, anyhow};
-use sqlx::{PgPool, Postgres, Transaction};
-use uuid::Uuid;
+use sqlx::PgPool;
 
 #[derive(thiserror::Error)]
 pub enum DeleteFileUploadError {
@@ -82,16 +81,7 @@ pub async fn delete_file_upload(
     let storage_key = FileStorageKey::parse(upload.storage_key.clone())
         .map_err(|e| DeleteFileUploadError::UnexpectedError(anyhow!("{e}")))?;
 
-    sqlx::query(
-        r#"
-        DELETE FROM file_uploads
-        WHERE upload_id = $1
-        "#,
-    )
-    .bind(upload.upload_id)
-    .execute(transaction.as_mut())
-    .await
-    .map_err(|e| DeleteFileUploadError::UnexpectedError(e.into()))?;
+    delete_file_upload_from_database(&mut transaction, upload.upload_id).await?;
 
     transaction
         .commit()
@@ -100,34 +90,4 @@ pub async fn delete_file_upload(
     storage.delete(&storage_key).await?;
 
     Ok(HttpResponse::NoContent().finish())
-}
-
-async fn fetch_file_upload_for_update(
-    transaction: &mut Transaction<'_, Postgres>,
-    upload_id: FileUploadId,
-) -> Result<Option<FileUploadRow>, DeleteFileUploadError> {
-    sqlx::query_as!(
-        FileUploadRow,
-        r#"
-        SELECT
-            upload_id,
-            laboratory_id,
-            storage_backend,
-            storage_key,
-            original_file_name,
-            mime_type,
-            file_size_bytes,
-            sha256_hex,
-            uploaded_by_user_id,
-            expires_at,
-            consumed_at
-        FROM file_uploads
-        WHERE upload_id = $1
-        FOR UPDATE
-        "#,
-        Uuid::from(upload_id)
-    )
-    .fetch_optional(transaction.as_mut())
-    .await
-    .map_err(|e| DeleteFileUploadError::UnexpectedError(e.into()))
 }

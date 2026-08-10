@@ -1,4 +1,5 @@
-use super::model::{UserResponse, UserRow};
+use super::model::UserResponse;
+use super::queries::fetch_users;
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::UserId;
 use crate::utils::error_chain_fmt;
@@ -52,29 +53,4 @@ pub async fn list_users(
     }
 
     Ok(HttpResponse::Ok().json(users))
-}
-
-async fn fetch_users(pool: &PgPool) -> Result<Vec<UserRow>, ListUsersError> {
-    sqlx::query_as!(
-        UserRow,
-        r#"
-        SELECT
-            users.user_id,
-            users.username,
-            users.email,
-            users.phone_number,
-            user_types.user_type_id AS "user_type_id?",
-            user_types.name AS "user_type_name?",
-            laboratories.laboratory_id AS "laboratory_id?",
-            laboratories.name AS "laboratory_name?",
-            users.created_at,
-            users.last_login_at
-        FROM users
-        INNER JOIN user_types USING (user_type_id)
-        LEFT JOIN laboratories USING (laboratory_id)
-        "#,
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| ListUsersError::UnexpectedError(e.into()))
 }

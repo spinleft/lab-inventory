@@ -40,7 +40,6 @@ export const assetInventoryItemSchema = z.object({
   public_notes: z.string().nullable(),
   quantity_allocated: z.number(),
   quantity_on_hand: z.number(),
-  quantity_unit_id: z.string().uuid(),
   serial_number: z.string().nullable(),
   status: z.string(),
   tracking_mode: assetTrackingModeSchema,
@@ -52,14 +51,14 @@ const assetParameterRuntimeValueSchema = z
     boolean: z.boolean().nullable().optional(),
     date: z.string().nullable().optional(),
     number: z.number().nullable().optional(),
-    number_base: z.number().nullable().optional(),
+    number_in_base: z.number().nullable().optional(),
     option_code: z.string().nullable().optional(),
     option_id: z.string().uuid().nullable().optional(),
     option_label: z.string().nullable().optional(),
     range_end: z.number().nullable().optional(),
-    range_end_base: z.number().nullable().optional(),
+    range_end_in_base: z.number().nullable().optional(),
     range_start: z.number().nullable().optional(),
-    range_start_base: z.number().nullable().optional(),
+    range_start_in_base: z.number().nullable().optional(),
     text: z.string().nullable().optional(),
     unit_id: z.string().uuid().nullable().optional(),
   })
@@ -84,9 +83,9 @@ export const assetSchema = z.object({
   asset_id: z.string().uuid(),
   category_id: z.string().uuid().nullable(),
   created_at: z.string(),
-  default_unit_id: z.string().uuid(),
   internal_notes: z.string().nullable(),
   inventory_items: z.array(assetInventoryItemSchema).optional(),
+  inventory_unit_id: z.string().uuid(),
   inventory_summary: assetInventorySummarySchema,
   laboratory_id: z.string().uuid(),
   manufacturer: z.string().nullable(),
@@ -163,9 +162,9 @@ export type AssetParameterValuePayload = {
 export type AssetPayload = {
   attachments?: AttachmentClaim[];
   category_id?: string | null;
-  default_unit_id?: string;
   internal_notes?: string | null;
   inventory_items?: AssetInventoryItemPayload[];
+  inventory_unit_id?: string;
   manufacturer?: string | null;
   model?: string | null;
   name?: string;
@@ -250,7 +249,7 @@ export function useCreateAsset() {
       payload,
     }: {
       laboratoryId: string;
-      payload: Required<Pick<AssetPayload, "default_unit_id" | "name" | "tracking_mode">> &
+      payload: Required<Pick<AssetPayload, "inventory_unit_id" | "name" | "tracking_mode">> &
         AssetPayload;
     }) => {
       const client = createApiClient(apiBaseUrl);

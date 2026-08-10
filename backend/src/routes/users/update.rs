@@ -1,4 +1,5 @@
-use super::model::{UserResponse, UserRow, fetch_user, update_user_rollback_details};
+use super::model::{UserResponse, UserRow, update_user_rollback_details};
+use super::queries::{UserDatabaseError, fetch_user, update_user_in_database};
 use crate::access_control::get_actor;
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
@@ -16,7 +17,7 @@ use uuid::Uuid;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct JsonData {
+pub struct UpdateUserJsonData {
     username: Option<String>,
     user_type: Option<String>,
     #[serde(default, deserialize_with = "deserialize_nullable")]
@@ -35,7 +36,7 @@ where
     Option::<T>::deserialize(deserializer).map(Some)
 }
 
-impl JsonData {
+impl UpdateUserJsonData {
     fn updates_role_or_laboratory(&self) -> bool {
         self.user_type.is_some() || self.laboratory_id.is_some()
     }
@@ -95,6 +96,16 @@ impl ResponseError for UpdateUserError {
     }
 }
 
+impl From<UserDatabaseError> for UpdateUserError {
+    fn from(error: UserDatabaseError) -> Self {
+        match error {
+            UserDatabaseError::Validation(message) => Self::ValidationError(message),
+            UserDatabaseError::Conflict(message) => Self::ConflictError(message),
+            UserDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
+        }
+    }
+}
+
 #[tracing::instrument(
     name = "Update a user",
     skip(pool, payload),
@@ -104,7 +115,7 @@ pub async fn update_user(
     pool: web::Data<PgPool>,
     actor_user_id: UserId,
     target_user_id: web::Path<Uuid>,
-    payload: web::Json<JsonData>,
+    payload: web::Json<UpdateUserJsonData>,
 ) -> Result<HttpResponse, UpdateUserError> {
     let actor = get_actor(&pool, actor_user_id)
         .await
@@ -189,64 +200,6 @@ pub async fn update_user(
     Ok(HttpResponse::Ok().json(UserResponse::from(user)))
 }
 
-async fn update_user_in_database(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    user_id: Uuid,
-    username: Option<&str>,
-    user_type_name: &str,
-    laboratory_id: Option<Uuid>,
-    email: Option<&str>,
-    phone_number: Option<&str>,
-) -> Result<UserRow, UpdateUserError> {
-    sqlx::query_as!(
-        UserRow,
-        r#"
-        WITH updated_user AS (
-            UPDATE users
-            SET
-                username = COALESCE($2, username),
-                user_type_id = (SELECT user_type_id FROM user_types WHERE name = $3),
-                laboratory_id = $4,
-                email = $5,
-                phone_number = $6
-            WHERE user_id = $1
-            RETURNING
-                users.user_id,
-                users.username,
-                users.email,
-                users.phone_number,
-                users.user_type_id,
-                users.laboratory_id,
-                users.created_at,
-                users.last_login_at
-        )
-        SELECT
-            updated_user.user_id,
-            updated_user.username,
-            updated_user.email,
-            updated_user.phone_number,
-            user_types.user_type_id AS "user_type_id?",
-            user_types.name AS "user_type_name?",
-            laboratories.laboratory_id AS "laboratory_id?",
-            laboratories.name AS "laboratory_name?",
-            updated_user.created_at,
-            updated_user.last_login_at
-        FROM updated_user
-        INNER JOIN user_types USING (user_type_id)
-        LEFT JOIN laboratories USING (laboratory_id)
-        "#,
-        user_id,
-        username,
-        user_type_name,
-        laboratory_id,
-        email,
-        phone_number,
-    )
-    .fetch_one(transaction.as_mut())
-    .await
-    .map_err(map_database_error)
-}
-
 fn parse_user_type(user: &UserRow) -> Result<UserType, UpdateUserError> {
     UserType::parse(
         user.user_type_name
@@ -270,17 +223,4 @@ where
         NullableUpdate::Set(value) => Some(value.into()),
         NullableUpdate::Clear => None,
     }
-}
-
-pub fn map_database_error(error: sqlx::Error) -> UpdateUserError {
-    if let sqlx::Error::Database(database_error) = &error {
-        match database_error.code().as_deref() {
-            Some("23505") => return UpdateUserError::ConflictError("User already exists".into()),
-            Some("23503") => {
-                return UpdateUserError::ValidationError("Invalid referenced record".into());
-            }
-            _ => {}
-        }
-    }
-    UpdateUserError::UnexpectedError(error.into())
 }

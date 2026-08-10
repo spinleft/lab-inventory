@@ -5,7 +5,6 @@ use crate::domain::{
 use anyhow::Context;
 use anyhow::Ok;
 use anyhow::anyhow;
-use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 

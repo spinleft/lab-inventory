@@ -4,13 +4,13 @@ use super::queries::{
     fetch_parameter_values_for_asset_for_update, insert_asset, validate_category,
 };
 use super::service::{
-    apply_asset_parameter_updates, insert_inventory_items, validate_required_parameters,
+    apply_asset_parameter_updates, insert_asset_inventory_item, validate_required_parameters,
 };
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{
-    AssetName, AssetTrackingMode, LaboratoryId, NewAsset, NewAttachment, NewInventoryItem, UnitId,
-    UserId,
+    AssetName, AssetTrackingMode, FileUploadId, LaboratoryId, NewAsset, NewAttachment,
+    NewInventoryItem, UserId, ensure_unique_uploads,
 };
 use crate::routes::attachments::{
     AssignAttachmentError, AttachmentJsonData, AttachmentTarget, assign_uploaded_attachments,
@@ -21,8 +21,7 @@ use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::{Context, anyhow};
 use serde::Deserialize;
 use serde_json::Value;
-use sqlx::PgPool;
-use std::collections::HashSet;
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -33,7 +32,7 @@ pub struct JsonData {
     name: String,
     model: Option<String>,
     manufacturer: Option<String>,
-    default_unit_id: Uuid,
+    inventory_unit_id: Uuid,
     public_notes: Option<String>,
     internal_notes: Option<String>,
     inventory_items: Option<Vec<InventoryItemJsonData>>,
@@ -55,7 +54,6 @@ struct InventoryItemJsonData {
     batch_number: Option<String>,
     quantity_on_hand: Option<f64>,
     quantity_allocated: Option<f64>,
-    quantity_unit_id: Option<Uuid>,
     location_id: Option<Uuid>,
     status: Option<String>,
     public_notes: Option<String>,
@@ -63,20 +61,118 @@ struct InventoryItemJsonData {
     attachments: Option<Vec<AttachmentJsonData>>,
 }
 
+impl JsonData {
+    /// Every upload the payload references, on the asset itself or on one of its
+    /// inventory items.
+    fn upload_ids(&self) -> impl Iterator<Item = FileUploadId> {
+        self.attachments
+            .iter()
+            .flatten()
+            .chain(
+                self.inventory_items
+                    .iter()
+                    .flatten()
+                    .flat_map(|item| item.attachments.iter().flatten()),
+            )
+            .map(AttachmentJsonData::upload_id)
+    }
+}
+
+/// The whole create request after validation: the asset and everything that is
+/// written alongside it in the same transaction.
+struct CreateAssetInput {
+    asset: NewAsset,
+    attachments: Vec<NewAttachment>,
+    parameter_values: Vec<AssetParameterValueInput>,
+    inventory_items: Vec<NewInventoryItemInput>,
+}
+
+/// One inventory item together with the attachments assigned to it.
+struct NewInventoryItemInput {
+    item: NewInventoryItem,
+    attachments: Vec<NewAttachment>,
+}
+
+impl TryFrom<JsonData> for CreateAssetInput {
+    type Error = String;
+
+    fn try_from(mut payload: JsonData) -> Result<Self, Self::Error> {
+        let attachments = parse_attachments(payload.attachments.take())?;
+        let parameter_values = payload
+            .parameters
+            .take()
+            .unwrap_or_default()
+            .into_iter()
+            .map(AssetParameterValueInput::from)
+            .collect();
+        let item_payloads = payload.inventory_items.take().unwrap_or_default();
+        let asset = NewAsset::try_from(payload)?;
+
+        let inventory_items = item_payloads
+            .into_iter()
+            .map(|item| NewInventoryItemInput::parse(item, asset.tracking_mode))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let input = Self {
+            asset,
+            attachments,
+            parameter_values,
+            inventory_items,
+        };
+        ensure_unique_uploads(input.all_attachments())?;
+
+        Ok(input)
+    }
+}
+
+impl CreateAssetInput {
+    /// Every attachment the request writes, on the asset itself or on one of its
+    /// inventory items.
+    fn all_attachments(&self) -> impl Iterator<Item = &NewAttachment> {
+        self.attachments.iter().chain(
+            self.inventory_items
+                .iter()
+                .flat_map(|item| item.attachments.iter()),
+        )
+    }
+}
+
+impl NewInventoryItemInput {
+    fn parse(
+        mut payload: InventoryItemJsonData,
+        tracking_mode: AssetTrackingMode,
+    ) -> Result<Self, String> {
+        let attachments = parse_attachments(payload.attachments.take())?;
+        let item = NewInventoryItem::parse_for_tracking_mode(
+            tracking_mode,
+            payload.serial_number,
+            payload.batch_number,
+            payload.quantity_on_hand,
+            payload.quantity_allocated,
+            payload.location_id.map(Uuid::into),
+            payload.status,
+            payload.public_notes,
+            payload.internal_notes,
+        )?;
+
+        Ok(Self { item, attachments })
+    }
+}
+
 impl TryFrom<JsonData> for NewAsset {
     type Error = String;
 
     fn try_from(value: JsonData) -> Result<Self, Self::Error> {
-        Ok(Self::new(
-            value.category_id.map(Uuid::into),
-            AssetTrackingMode::parse(&value.tracking_mode)?,
-            AssetName::parse(value.name)?,
-            empty_to_none(value.model),
-            empty_to_none(value.manufacturer),
-            value.default_unit_id.into(),
-            empty_to_none(value.public_notes),
-            empty_to_none(value.internal_notes),
-        ))
+        Ok(Self {
+            category_id: value.category_id.map(Uuid::into),
+            tracking_mode: AssetTrackingMode::parse(&value.tracking_mode)?,
+            name: AssetName::parse(value.name)?,
+            model: empty_to_none(value.model),
+            manufacturer: empty_to_none(value.manufacturer),
+            inventory_unit_id: value.inventory_unit_id.into(),
+            public_notes: empty_to_none(value.public_notes),
+            internal_notes: empty_to_none(value.internal_notes),
+        })
     }
 }
 
@@ -87,6 +183,22 @@ impl From<ParameterValueJsonData> for AssetParameterValueInput {
             value: Some(value.value),
         }
     }
+}
+
+fn parse_attachments(
+    attachments: Option<Vec<AttachmentJsonData>>,
+) -> Result<Vec<NewAttachment>, String> {
+    attachments
+        .unwrap_or_default()
+        .into_iter()
+        .map(NewAttachment::try_from)
+        .collect()
+}
+
+fn empty_to_none(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 #[derive(thiserror::Error)]
@@ -167,99 +279,26 @@ pub async fn create_asset(
         ));
     }
 
-    let mut payload = payload.into_inner();
-    validate_upload_permissions(&pool, &actor_user_id, &payload).await?;
-    let asset_attachments = parse_attachments(payload.attachments.take())?;
-    let parameter_values: Vec<_> = payload
-        .parameters
-        .take()
-        .unwrap_or_default()
-        .into_iter()
-        .map(AssetParameterValueInput::from)
-        .collect();
-    let inventory_payloads = payload.inventory_items.take().unwrap_or_default();
-    let new_asset = NewAsset::try_from(payload).map_err(CreateAssetError::ValidationError)?;
-
-    let mut inventory_items = Vec::with_capacity(inventory_payloads.len());
-    let mut inventory_attachments = Vec::with_capacity(inventory_payloads.len());
-    for mut inventory_payload in inventory_payloads {
-        inventory_attachments.push(parse_attachments(inventory_payload.attachments.take())?);
-        inventory_items.push(
-            parse_inventory_item(
-                inventory_payload,
-                new_asset.tracking_mode,
-                new_asset.default_unit_id,
-            )
-            .map_err(CreateAssetError::ValidationError)?,
-        );
-    }
-    validate_unique_uploads(&asset_attachments, &inventory_attachments)?;
+    let payload = payload.into_inner();
+    validate_upload_permissions(&pool, &actor_user_id, payload.upload_ids()).await?;
+    let input = CreateAssetInput::try_from(payload).map_err(CreateAssetError::ValidationError)?;
 
     let mut transaction = pool
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    validate_category(
-        &mut transaction,
-        laboratory_id,
-        new_asset.category_id.map(Uuid::from),
-    )
-    .await?;
-    let asset = insert_asset(&mut transaction, laboratory_id, &new_asset).await?;
-    let created_inventory_items = insert_inventory_items(
-        &mut transaction,
-        laboratory_id,
-        asset.asset_id,
-        new_asset.tracking_mode,
-        &inventory_items,
-    )
-    .await?;
-    assign_uploaded_attachments(
-        &mut transaction,
-        actor_user_id,
-        AttachmentTarget::Asset(asset.asset_id),
-        Some(laboratory_id),
-        &asset_attachments,
-    )
-    .await?;
-    for (item, attachments) in created_inventory_items
-        .iter()
-        .zip(inventory_attachments.iter())
-    {
-        assign_uploaded_attachments(
-            &mut transaction,
-            actor_user_id,
-            AttachmentTarget::InventoryItem(item.inventory_item_id),
-            Some(laboratory_id),
-            attachments,
-        )
-        .await?;
-    }
-    apply_asset_parameter_updates(
-        &mut transaction,
-        laboratory_id,
-        asset.asset_id,
-        &parameter_values,
-        false,
-    )
-    .await?;
-    validate_required_parameters(
-        &mut transaction,
-        laboratory_id,
-        asset.asset_id,
-        asset.category_id,
-    )
-    .await?;
+    let asset_id =
+        insert_asset_graph(&mut transaction, actor_user_id, laboratory_id, &input).await?;
 
-    let asset = fetch_asset_for_update(&mut transaction, asset.asset_id)
+    let asset = fetch_asset_for_update(&mut transaction, asset_id)
         .await?
         .ok_or(CreateAssetError::UnexpectedError(anyhow!(
             "Created asset not found"
         )))?;
     let inventory_items =
-        fetch_inventory_items_for_asset_for_update(&mut transaction, asset.asset_id).await?;
+        fetch_inventory_items_for_asset_for_update(&mut transaction, asset_id).await?;
     let parameters =
-        fetch_parameter_values_for_asset_for_update(&mut transaction, asset.asset_id).await?;
+        fetch_parameter_values_for_asset_for_update(&mut transaction, asset_id).await?;
 
     record_audit(
         &mut transaction,
@@ -283,15 +322,65 @@ pub async fn create_asset(
     )))
 }
 
-fn parse_attachments(
-    attachments: Option<Vec<AttachmentJsonData>>,
-) -> Result<Vec<NewAttachment>, CreateAssetError> {
-    attachments
-        .unwrap_or_default()
-        .into_iter()
-        .map(NewAttachment::try_from)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(CreateAssetError::ValidationError)
+/// Writes the asset and everything hanging off it, returning the new asset id.
+async fn insert_asset_graph(
+    transaction: &mut Transaction<'_, Postgres>,
+    actor_user_id: UserId,
+    laboratory_id: LaboratoryId,
+    input: &CreateAssetInput,
+) -> Result<Uuid, CreateAssetError> {
+    validate_category(
+        transaction,
+        laboratory_id,
+        input.asset.category_id.map(Uuid::from),
+    )
+    .await?;
+    let asset = insert_asset(transaction, laboratory_id, &input.asset).await?;
+    assign_uploaded_attachments(
+        transaction,
+        actor_user_id,
+        AttachmentTarget::Asset(asset.asset_id),
+        Some(laboratory_id),
+        &input.attachments,
+    )
+    .await?;
+
+    for inventory_item in &input.inventory_items {
+        let row = insert_asset_inventory_item(
+            transaction,
+            laboratory_id,
+            asset.asset_id,
+            input.asset.tracking_mode,
+            &inventory_item.item,
+        )
+        .await?;
+        assign_uploaded_attachments(
+            transaction,
+            actor_user_id,
+            AttachmentTarget::InventoryItem(row.inventory_item_id),
+            Some(laboratory_id),
+            &inventory_item.attachments,
+        )
+        .await?;
+    }
+
+    apply_asset_parameter_updates(
+        transaction,
+        laboratory_id,
+        asset.asset_id,
+        &input.parameter_values,
+        false,
+    )
+    .await?;
+    validate_required_parameters(
+        transaction,
+        laboratory_id,
+        asset.asset_id,
+        asset.category_id,
+    )
+    .await?;
+
+    Ok(asset.asset_id)
 }
 
 /// Creating an asset does not by itself grant the right to assign an upload, so
@@ -299,20 +388,8 @@ fn parse_attachments(
 async fn validate_upload_permissions(
     pool: &PgPool,
     actor_user_id: &UserId,
-    payload: &JsonData,
+    upload_ids: impl Iterator<Item = FileUploadId>,
 ) -> Result<(), CreateAssetError> {
-    let upload_ids = payload
-        .attachments
-        .iter()
-        .flatten()
-        .chain(
-            payload
-                .inventory_items
-                .iter()
-                .flatten()
-                .flat_map(|item| item.attachments.iter().flatten()),
-        )
-        .map(AttachmentJsonData::upload_id);
     for upload_id in upload_ids {
         if !validate_permission(
             pool,
@@ -329,51 +406,4 @@ async fn validate_upload_permissions(
     }
 
     Ok(())
-}
-
-/// An upload can only become one attachment, so it may appear at most once across
-/// the asset and all of its inventory items.
-fn validate_unique_uploads(
-    asset_attachments: &[NewAttachment],
-    inventory_attachments: &[Vec<NewAttachment>],
-) -> Result<(), CreateAssetError> {
-    let mut upload_ids = HashSet::new();
-    for attachment in asset_attachments
-        .iter()
-        .chain(inventory_attachments.iter().flatten())
-    {
-        if !upload_ids.insert(attachment.upload_id) {
-            return Err(CreateAssetError::ValidationError(
-                "An upload can only be assigned once in a create request".into(),
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-fn parse_inventory_item(
-    value: InventoryItemJsonData,
-    tracking_mode: AssetTrackingMode,
-    default_unit_id: UnitId,
-) -> Result<NewInventoryItem, String> {
-    NewInventoryItem::parse_for_tracking_mode(
-        tracking_mode,
-        value.serial_number,
-        value.batch_number,
-        value.quantity_on_hand,
-        value.quantity_allocated,
-        value.quantity_unit_id.map(Uuid::into),
-        default_unit_id,
-        value.location_id.map(Uuid::into),
-        value.status,
-        value.public_notes,
-        value.internal_notes,
-    )
-}
-
-fn empty_to_none(value: Option<String>) -> Option<String> {
-    value
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
 }

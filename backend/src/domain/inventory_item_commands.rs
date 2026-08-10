@@ -1,5 +1,5 @@
 use crate::domain::{
-    InventoryItemId, InventoryStatus, LocationId, NullableUpdate, UnitId, normalize_optional_text,
+    InventoryItemId, InventoryStatus, LocationId, NullableUpdate, normalize_optional_text,
     nullable_text,
 };
 use std::collections::HashSet;
@@ -32,7 +32,6 @@ impl InventoryItemIds {
 #[derive(Clone, Debug)]
 pub struct SplitInventoryItem {
     pub quantity: f64,
-    pub quantity_unit_id: Option<UnitId>,
     pub batch_number: NullableUpdate<String>,
     pub location_id: NullableUpdate<LocationId>,
     pub status: Option<InventoryStatus>,
@@ -41,10 +40,8 @@ pub struct SplitInventoryItem {
 }
 
 impl SplitInventoryItem {
-    #[allow(clippy::too_many_arguments)]
     pub fn parse(
         quantity: f64,
-        quantity_unit_id: Option<UnitId>,
         batch_number: Option<Option<String>>,
         location_id: Option<Option<LocationId>>,
         status: Option<String>,
@@ -56,7 +53,6 @@ impl SplitInventoryItem {
         }
         Ok(Self {
             quantity,
-            quantity_unit_id,
             batch_number: nullable_text(batch_number),
             location_id: location_id.into(),
             status: status.as_deref().map(InventoryStatus::parse).transpose()?,
@@ -108,8 +104,8 @@ mod tests {
 
     #[test]
     fn split_quantity_must_be_positive_and_finite() {
-        assert!(SplitInventoryItem::parse(0.0, None, None, None, None, None, None).is_err());
-        assert!(SplitInventoryItem::parse(f64::NAN, None, None, None, None, None, None).is_err());
+        assert!(SplitInventoryItem::parse(0.0, None, None, None, None, None).is_err());
+        assert!(SplitInventoryItem::parse(f64::NAN, None, None, None, None, None).is_err());
     }
 
     #[test]

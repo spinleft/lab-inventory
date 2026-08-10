@@ -1,9 +1,10 @@
-﻿use super::model::{
-    InventoryItemDatabaseError, InventoryItemResponse, add_quantities_to_item,
-    convert_quantity_between_units, fetch_inventory_item_for_update,
-    find_quantity_aggregate_for_update, insert_inventory_item, resolve_asset_quantity_unit,
-    set_quantity_on_hand, split_inventory_item_rollback_details, validate_location,
-    validate_quantity_item,
+﻿use super::model::{InventoryItemResponse, split_inventory_item_rollback_details};
+use super::queries::{
+    InventoryItemDatabaseError, fetch_inventory_item_for_update,
+    find_quantity_aggregate_for_update, validate_location,
+};
+use super::service::{
+    add_quantities_to_item, insert_inventory_item, set_quantity_on_hand, validate_quantity_item,
 };
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
@@ -20,7 +21,6 @@ use uuid::Uuid;
 #[serde(deny_unknown_fields)]
 pub struct JsonData {
     quantity: f64,
-    quantity_unit_id: Option<Uuid>,
     #[serde(default, deserialize_with = "deserialize_nullable")]
     batch_number: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_nullable")]
@@ -42,7 +42,6 @@ impl TryFrom<JsonData> for SplitInventoryItemCommand {
     fn try_from(value: JsonData) -> Result<Self, Self::Error> {
         Self::parse(
             value.quantity,
-            value.quantity_unit_id.map(Uuid::into),
             value.batch_number,
             value
                 .location_id
@@ -163,25 +162,12 @@ pub async fn split_inventory_item(
     if let Some(location_id) = target_location_id {
         validate_location(&mut transaction, source_before.laboratory_id, location_id).await?;
     }
-    let target_unit_id = resolve_asset_quantity_unit(
-        command.quantity_unit_id.map(Uuid::from),
-        source_before.asset_default_unit_id,
-    )
-    .map_err(SplitInventoryItemError::ValidationError)?;
-    let target_quantity = convert_quantity_between_units(
-        &mut transaction,
-        source_before.quantity_unit_id,
-        target_unit_id,
-        command.quantity,
-    )
-    .await?;
     if target_batch_number == source_before.batch_number
         && target_location_id == source_before.location_id
         && target_status == source_before.status
-        && target_unit_id == source_before.quantity_unit_id
     {
         return Err(SplitInventoryItemError::ValidationError(
-            "Split target must differ by batch, location, status, or unit".into(),
+            "Split target must differ by batch, location, or status".into(),
         ));
     }
 
@@ -192,7 +178,6 @@ pub async fn split_inventory_item(
         target_batch_number.as_deref(),
         target_location_id,
         &target_status,
-        target_unit_id,
         Some(source_before.inventory_item_id),
     )
     .await?;
@@ -207,7 +192,7 @@ pub async fn split_inventory_item(
             add_quantities_to_item(
                 &mut transaction,
                 target.inventory_item_id,
-                target_quantity,
+                command.quantity,
                 0.0,
             )
             .await?
@@ -220,9 +205,8 @@ pub async fn split_inventory_item(
                 "quantity",
                 None,
                 target_batch_number.as_deref(),
-                target_quantity,
+                command.quantity,
                 0.0,
-                target_unit_id,
                 target_location_id,
                 &target_status,
                 command

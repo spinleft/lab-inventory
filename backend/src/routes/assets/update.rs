@@ -6,7 +6,8 @@ use super::queries::{
     fetch_parameter_values_for_asset_for_update, update_asset_in_database, validate_category,
 };
 use super::service::{
-    apply_asset_parameter_updates, convert_inventory_items_to_unit, validate_required_parameters,
+    apply_asset_parameter_updates, convert_inventory_quantities_to_unit,
+    validate_required_parameters,
 };
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
@@ -34,7 +35,7 @@ pub struct JsonData {
     model: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_nullable")]
     manufacturer: Option<Option<String>>,
-    default_unit_id: Option<Uuid>,
+    inventory_unit_id: Option<Uuid>,
     #[serde(default, deserialize_with = "deserialize_nullable")]
     public_notes: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_nullable")]
@@ -62,16 +63,16 @@ impl TryFrom<JsonData> for UpdateAsset {
             .transpose()?;
         let name = value.name.map(AssetName::parse).transpose()?;
 
-        Ok(Self::new(
+        Ok(Self {
             category_id,
             tracking_mode,
             name,
-            parse_nullable_text(value.model),
-            parse_nullable_text(value.manufacturer),
-            value.default_unit_id.map(Uuid::into),
-            parse_nullable_text(value.public_notes),
-            parse_nullable_text(value.internal_notes),
-        ))
+            model: parse_nullable_text(value.model),
+            manufacturer: parse_nullable_text(value.manufacturer),
+            inventory_unit_id: value.inventory_unit_id.map(Uuid::into),
+            public_notes: parse_nullable_text(value.public_notes),
+            internal_notes: parse_nullable_text(value.internal_notes),
+        })
     }
 }
 
@@ -183,10 +184,10 @@ pub async fn update_asset(
     let category_id = resolve_category_id(&update_asset, &existing)?;
     validate_category(&mut transaction, laboratory_id, category_id).await?;
     let tracking_mode = resolve_tracking_mode(&update_asset, &existing)?;
-    let default_unit_id = update_asset
-        .default_unit_id
+    let inventory_unit_id = update_asset
+        .inventory_unit_id
         .map(Uuid::from)
-        .unwrap_or(existing.default_unit_id);
+        .unwrap_or(existing.inventory_unit_id);
 
     update_asset_in_database(
         &mut transaction,
@@ -206,7 +207,7 @@ pub async fn update_asset(
             .manufacturer
             .resolve(existing.manufacturer.clone())
             .as_deref(),
-        default_unit_id,
+        inventory_unit_id,
         update_asset
             .public_notes
             .resolve(existing.public_notes.clone())
@@ -218,10 +219,14 @@ pub async fn update_asset(
     )
     .await?;
 
-    if default_unit_id != existing.default_unit_id {
-        convert_inventory_items_to_unit(&mut transaction, existing.asset_id, default_unit_id)
-            .await?;
-    }
+    convert_inventory_quantities_to_unit(
+        &mut transaction,
+        existing.asset_id,
+        tracking_mode,
+        existing.inventory_unit_id,
+        inventory_unit_id,
+    )
+    .await?;
     if let Some(parameter_values) = parameter_values.as_deref() {
         apply_asset_parameter_updates(
             &mut transaction,

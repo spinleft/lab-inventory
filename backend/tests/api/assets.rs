@@ -27,14 +27,13 @@ async fn create_list_get_assets_with_inventory_parameters_and_audit() {
                 "name": "Oscilloscope Probe",
                 "model": "P2200",
                 "manufacturer": "Tektronix",
-                "default_unit_id": unit_id,
+                "inventory_unit_id": unit_id,
                 "public_notes": "Shared probe",
                 "inventory_items": [
                     {
                         "batch_number": "BATCH-001",
                         "quantity_on_hand": 5,
                         "quantity_allocated": 1,
-                        "quantity_unit_id": unit_id,
                         "status": "available"
                     }
                 ],
@@ -237,7 +236,7 @@ async fn create_asset_rejects_invalid_inventory_required_parameters_and_duplicat
                 "category_id": category_id(&category),
                 "tracking_mode": "quantity",
                 "name": "Missing Required",
-                "default_unit_id": unit_id
+                "inventory_unit_id": unit_id
             }),
         )
         .await;
@@ -249,7 +248,7 @@ async fn create_asset_rejects_invalid_inventory_required_parameters_and_duplicat
             &serde_json::json!({
                 "tracking_mode": "serialized",
                 "name": "Serialized With Quantity",
-                "default_unit_id": unit_id,
+                "inventory_unit_id": unit_id,
                 "inventory_items": [
                     { "serial_number": "SN-1", "quantity_on_hand": 1 }
                 ]
@@ -264,7 +263,7 @@ async fn create_asset_rejects_invalid_inventory_required_parameters_and_duplicat
             &serde_json::json!({
                 "tracking_mode": "quantity",
                 "name": "Quantity With Serial",
-                "default_unit_id": unit_id,
+                "inventory_unit_id": unit_id,
                 "inventory_items": [
                     { "serial_number": "SN-2", "quantity_on_hand": 1 }
                 ]
@@ -273,16 +272,17 @@ async fn create_asset_rejects_invalid_inventory_required_parameters_and_duplicat
         .await;
     assert_eq!(quantity_with_serial.status().as_u16(), 400);
 
-    let inventory_unit_mismatch = app
+    // Inventory items take their unit from the asset, so naming one is unknown input.
+    let inventory_item_unit = app
         .post_asset(
             laboratory_id,
             &serde_json::json!({
                 "tracking_mode": "quantity",
-                "name": "Inventory Unit Mismatch",
-                "default_unit_id": unit_id,
+                "name": "Inventory Item Unit",
+                "inventory_unit_id": unit_id,
                 "inventory_items": [
                     {
-                        "batch_number": "UNIT-MISMATCH",
+                        "batch_number": "UNIT-REJECTED",
                         "quantity_on_hand": 1,
                         "quantity_unit_id": other_unit_id
                     }
@@ -290,13 +290,13 @@ async fn create_asset_rejects_invalid_inventory_required_parameters_and_duplicat
             }),
         )
         .await;
-    assert_eq!(inventory_unit_mismatch.status().as_u16(), 400);
+    assert_eq!(inventory_item_unit.status().as_u16(), 400);
 
     let body = serde_json::json!({
         "tracking_mode": "quantity",
         "name": "Duplicated Asset",
         "model": "DUP",
-        "default_unit_id": unit_id
+        "inventory_unit_id": unit_id
     });
     let response = app.post_asset(laboratory_id, &body).await;
     assert_eq!(response.status().as_u16(), 201);
@@ -318,7 +318,7 @@ async fn update_asset_applies_partial_changes_parameters_and_tracking_mode_rules
             &serde_json::json!({
                 "tracking_mode": "quantity",
                 "name": "Configurable Asset",
-                "default_unit_id": unit_id,
+                "inventory_unit_id": unit_id,
                 "parameters": [
                     {
                         "parameter_type_id": parameter_id(&parameter),
@@ -359,7 +359,7 @@ async fn update_asset_applies_partial_changes_parameters_and_tracking_mode_rules
             &serde_json::json!({
                 "tracking_mode": "quantity",
                 "name": "Stocked Asset",
-                "default_unit_id": unit_id,
+                "inventory_unit_id": unit_id,
                 "inventory_items": [
                     { "batch_number": "STOCK", "quantity_on_hand": 1 }
                 ]
@@ -378,7 +378,7 @@ async fn update_asset_applies_partial_changes_parameters_and_tracking_mode_rules
 }
 
 #[tokio::test]
-async fn update_asset_default_unit_converts_inventory_quantities() {
+async fn update_asset_inventory_unit_converts_inventory_quantities() {
     let app = spawn_app().await;
     let laboratory_id = app.create_laboratory("Asset Unit Conversion Lab").await;
     let centimeter_unit_id = app.unit_id("cm").await;
@@ -391,7 +391,7 @@ async fn update_asset_default_unit_converts_inventory_quantities() {
             &serde_json::json!({
                 "tracking_mode": "quantity",
                 "name": "Cable",
-                "default_unit_id": centimeter_unit_id,
+                "inventory_unit_id": centimeter_unit_id,
                 "inventory_items": [
                     {
                         "batch_number": "CUT-1",
@@ -414,27 +414,22 @@ async fn update_asset_default_unit_converts_inventory_quantities() {
     let response = app
         .patch_asset(
             asset_id(&asset),
-            &serde_json::json!({ "default_unit_id": meter_unit_id }),
+            &serde_json::json!({ "inventory_unit_id": meter_unit_id }),
         )
         .await;
     assert_eq!(response.status().as_u16(), 200);
     let updated: serde_json::Value = response.json().await.unwrap();
-    assert_eq!(updated["default_unit_id"], meter_unit_id.to_string());
-    assert_eq!(
-        updated["inventory_items"][0]["quantity_unit_id"],
-        meter_unit_id.to_string()
-    );
+    assert_eq!(updated["inventory_unit_id"], meter_unit_id.to_string());
     assert_eq!(updated["inventory_items"][0]["quantity_on_hand"], 2.5);
     assert_eq!(updated["inventory_items"][0]["quantity_allocated"], 0.5);
     assert_eq!(updated["inventory_summary"]["quantity_on_hand"], 2.5);
     assert_eq!(updated["inventory_summary"]["quantity_allocated"], 0.5);
 
-    let stored: (f64, f64, Uuid) = sqlx::query_as(
+    let stored: (f64, f64) = sqlx::query_as(
         r#"
         SELECT
             quantity_on_hand::double precision,
-            quantity_allocated::double precision,
-            quantity_unit_id
+            quantity_allocated::double precision
         FROM asset_inventory_items
         WHERE inventory_item_id = $1
         "#,
@@ -443,7 +438,7 @@ async fn update_asset_default_unit_converts_inventory_quantities() {
     .fetch_one(&app.db_pool)
     .await
     .unwrap();
-    assert_eq!(stored, (2.5, 0.5, meter_unit_id));
+    assert_eq!(stored, (2.5, 0.5));
 }
 
 #[tokio::test]
@@ -460,7 +455,7 @@ async fn delete_asset_cascades_inventory_parameter_values_and_attachments() {
             &serde_json::json!({
                 "tracking_mode": "quantity",
                 "name": "Delete Me",
-                "default_unit_id": unit_id,
+                "inventory_unit_id": unit_id,
                 "inventory_items": [
                     { "batch_number": "DEL", "quantity_on_hand": 1 }
                 ],
@@ -537,7 +532,7 @@ async fn asset_permissions_follow_laboratory_scope() {
             &serde_json::json!({
                 "tracking_mode": "quantity",
                 "name": "Other Asset",
-                "default_unit_id": unit_id,
+                "inventory_unit_id": unit_id,
                 "internal_notes": "Other lab internal notes"
             }),
         )
@@ -555,7 +550,7 @@ async fn asset_permissions_follow_laboratory_scope() {
             &serde_json::json!({
                 "tracking_mode": "quantity",
                 "name": "Own Asset",
-                "default_unit_id": unit_id
+                "inventory_unit_id": unit_id
             }),
         )
         .await;
@@ -585,7 +580,7 @@ async fn asset_permissions_follow_laboratory_scope() {
             &serde_json::json!({
                 "tracking_mode": "quantity",
                 "name": "Other Asset",
-                "default_unit_id": unit_id
+                "inventory_unit_id": unit_id
             }),
         )
         .await;
@@ -662,7 +657,7 @@ async fn create_parameterized_asset(
             &serde_json::json!({
                 "tracking_mode": "quantity",
                 "name": name,
-                "default_unit_id": unit_id,
+                "inventory_unit_id": unit_id,
                 "parameters": parameters
             }),
         )

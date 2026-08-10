@@ -1,5 +1,6 @@
-use super::model::{
-    AssetCategoryResponse, AssetCategoryRow, fetch_asset_category,
+use super::model::AssetCategoryResponse;
+use super::queries::{
+    fetch_asset_categories, fetch_asset_category,
     fetch_asset_category_parameter_assignments_for_categories,
 };
 use crate::access_control::{Action, ResourceType, validate_permission};
@@ -100,36 +101,4 @@ pub async fn list_asset_categories(
         .collect();
 
     Ok(HttpResponse::Ok().json(categories))
-}
-
-async fn fetch_asset_categories(
-    pool: &PgPool,
-    laboratory_id: LaboratoryId,
-    root_path: Option<&str>,
-) -> Result<Vec<AssetCategoryRow>, ListAssetCategoriesError> {
-    sqlx::query_as!(
-        AssetCategoryRow,
-        r#"
-        SELECT
-            category_id,
-            laboratory_id,
-            parent_category_id,
-            name,
-            code,
-            path::text AS "path!",
-            depth,
-            description,
-            created_at,
-            updated_at
-        FROM asset_categories
-        WHERE laboratory_id = $1
-          AND ($2::text IS NULL OR path <@ $2::text::ltree)
-        ORDER BY path
-        "#,
-        *laboratory_id,
-        root_path,
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| ListAssetCategoriesError::UnexpectedError(e.into()))
 }

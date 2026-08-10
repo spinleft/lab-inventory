@@ -1,8 +1,6 @@
-use anyhow::Context;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::{Value, json};
-use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -97,76 +95,4 @@ pub(super) fn delete_unit_rollback_details(unit: &UnitRow) -> Value {
             },
         },
     })
-}
-
-pub(super) async fn fetch_unit(
-    pool: &PgPool,
-    unit_id: Uuid,
-) -> Result<Option<UnitRow>, anyhow::Error> {
-    sqlx::query_as!(
-        UnitRow,
-        r#"
-        SELECT unit_id, laboratory_id, code, name, symbol, dimension, scale_to_base, allow_decimal, created_at
-        FROM units
-        WHERE unit_id = $1
-        "#,
-        unit_id,
-    )
-    .fetch_optional(pool)
-    .await
-    .context("Failed to fetch unit")
-}
-
-pub(super) async fn fetch_unit_for_update(
-    transaction: &mut Transaction<'_, Postgres>,
-    unit_id: Uuid,
-) -> Result<Option<UnitRow>, anyhow::Error> {
-    sqlx::query_as!(
-        UnitRow,
-        r#"
-        SELECT unit_id, laboratory_id, code, name, symbol, dimension, scale_to_base, allow_decimal, created_at
-        FROM units
-        WHERE unit_id = $1
-        FOR UPDATE
-        "#,
-        unit_id,
-    )
-    .fetch_optional(transaction.as_mut())
-    .await
-    .context("Failed to fetch unit for update")
-}
-
-pub(super) enum UnitDatabaseError {
-    Conflict(String),
-    Validation(String),
-}
-
-pub(super) fn map_unit_database_error(
-    error: &sqlx::Error,
-    duplicate_code: &str,
-    generic_unique: &str,
-    invalid_unit: &str,
-    invalid_dimension: &str,
-) -> Option<UnitDatabaseError> {
-    let sqlx::Error::Database(database_error) = error else {
-        return None;
-    };
-
-    match (
-        database_error.code().as_deref(),
-        database_error.constraint(),
-    ) {
-        (Some("23505"), Some("units_laboratory_id_code_key")) => {
-            Some(UnitDatabaseError::Conflict(duplicate_code.into()))
-        }
-        (Some("23505"), _) => Some(UnitDatabaseError::Conflict(generic_unique.into())),
-        (Some("23514"), _) => Some(UnitDatabaseError::Validation(invalid_unit.into())),
-        (Some("23503"), Some("units_dimension_fkey")) => {
-            Some(UnitDatabaseError::Validation(invalid_dimension.into()))
-        }
-        (Some("23503"), _) => Some(UnitDatabaseError::Validation(
-            "Invalid referenced record".into(),
-        )),
-        _ => None,
-    }
 }

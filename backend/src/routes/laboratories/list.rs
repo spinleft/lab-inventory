@@ -1,4 +1,5 @@
-use super::model::{LaboratoryResponse, LaboratoryRow};
+use super::model::LaboratoryResponse;
+use super::queries::fetch_laboratories;
 use crate::access_control::{Action, ResourceType, get_actor, validate_permission};
 use crate::domain::UserId;
 use crate::utils::error_chain_fmt;
@@ -63,23 +64,4 @@ pub async fn list_laboratories(
         .collect();
 
     Ok(HttpResponse::Ok().json(laboratories))
-}
-
-async fn fetch_laboratories(
-    pool: &PgPool,
-    laboratory_id: Option<Uuid>,
-) -> Result<Vec<LaboratoryRow>, ListLaboratoriesError> {
-    sqlx::query_as!(
-        LaboratoryRow,
-        r#"
-        SELECT laboratory_id, name, address, description, contact, created_at, updated_at
-        FROM laboratories
-        WHERE $1::uuid IS NULL OR laboratory_id = $1
-        ORDER BY name
-        "#,
-        laboratory_id,
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| ListLaboratoriesError::UnexpectedError(e.into()))
 }

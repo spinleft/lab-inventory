@@ -206,7 +206,7 @@ async fn create_asset(
             &serde_json::json!({
                 "tracking_mode": tracking_mode,
                 "name": name,
-                "default_unit_id": unit_id
+                "inventory_unit_id": unit_id
             }),
         )
         .await;
@@ -226,7 +226,6 @@ async fn create_inventory_item(
             &serde_json::json!({
                 "batch_number": batch_number,
                 "quantity_on_hand": 1,
-                "quantity_unit_id": app.unit_id("pcs").await,
             }),
         )
         .await;

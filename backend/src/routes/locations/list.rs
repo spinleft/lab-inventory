@@ -1,4 +1,5 @@
-use super::model::{LocationResponse, LocationRow, fetch_location};
+use super::model::LocationResponse;
+use super::queries::{fetch_location, fetch_locations};
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::{LaboratoryId, LocationId, UserId};
 use crate::utils::error_chain_fmt;
@@ -86,36 +87,4 @@ pub async fn list_locations(
         .collect();
 
     Ok(HttpResponse::Ok().json(locations))
-}
-
-async fn fetch_locations(
-    pool: &PgPool,
-    laboratory_id: LaboratoryId,
-    root_path: Option<&str>,
-) -> Result<Vec<LocationRow>, ListLocationsError> {
-    sqlx::query_as!(
-        LocationRow,
-        r#"
-        SELECT
-            location_id,
-            laboratory_id,
-            parent_location_id,
-            name,
-            code,
-            path::text AS "path!",
-            depth,
-            description,
-            created_at,
-            updated_at
-        FROM locations
-        WHERE laboratory_id = $1
-          AND ($2::text IS NULL OR path <@ $2::text::ltree)
-        ORDER BY path
-        "#,
-        *laboratory_id,
-        root_path,
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| ListLocationsError::UnexpectedError(e.into()))
 }

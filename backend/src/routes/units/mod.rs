@@ -3,6 +3,7 @@ mod delete;
 mod get;
 mod list;
 mod model;
+mod queries;
 mod update;
 
 pub use create::create_unit;

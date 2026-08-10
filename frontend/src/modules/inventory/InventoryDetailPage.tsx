@@ -215,11 +215,11 @@ export function InventoryDetailPage() {
             <DetailItem label="位置" value={locationLabel(item.location_id, locationById)} />
             <DetailItem
               label="库存数量"
-              value={`${formatNumber(item.quantity_on_hand)} ${unitLabel(item.quantity_unit_id, unitsById)}`}
+              value={`${formatNumber(item.quantity_on_hand)} ${unitLabel(item.asset.inventory_unit_id, unitsById)}`}
             />
             <DetailItem
               label="已分配"
-              value={`${formatNumber(item.quantity_allocated)} ${unitLabel(item.quantity_unit_id, unitsById)}`}
+              value={`${formatNumber(item.quantity_allocated)} ${unitLabel(item.asset.inventory_unit_id, unitsById)}`}
             />
             <DetailItem label="公开备注" value={item.public_notes ?? "未填写"} />
             <DetailItem label="内部备注" value={item.internal_notes ?? "未填写"} />
@@ -251,8 +251,8 @@ export function InventoryDetailPage() {
             <DetailItem label="型号" value={item.asset.model ?? "未填写"} />
             <DetailItem label="厂商" value={item.asset.manufacturer ?? "未填写"} />
             <DetailItem
-              label="默认单位"
-              value={unitLabel(item.asset.default_unit_id, unitsById)}
+              label="库存单位"
+              value={unitLabel(item.asset.inventory_unit_id, unitsById)}
             />
           </dl>
         </div>

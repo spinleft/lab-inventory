@@ -1,4 +1,5 @@
-use super::model::{AssetParameterResponse, fetch_asset_parameter, fetch_asset_parameter_options};
+use super::model::AssetParameterResponse;
+use super::queries::{fetch_asset_parameter, fetch_asset_parameter_options};
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::{AssetParameterId, UserId};
 use crate::utils::error_chain_fmt;

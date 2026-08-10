@@ -1,7 +1,10 @@
-use super::model::{FederationError, fetch_active_trust, fetch_local_node, fetch_remote_node};
+use super::model::FederationError;
 use super::public_data::parse_read_target;
+use super::queries::{
+    fetch_active_trust, fetch_local_node, fetch_proxy_user, fetch_remote_node,
+};
 use super::security::{OutboundFederationIdentity, ensure_enabled, signed_headers, verify_tls_pin};
-use crate::access_control::get_actor;
+use super::service::federation_actor;
 use crate::configuration::FederationSettings;
 use crate::domain::{UserId, UserType};
 use actix_web::http::StatusCode;
@@ -17,14 +20,6 @@ pub struct ProxyPath {
     remote_node_id: Uuid,
     remote_laboratory_id: Uuid,
     tail: Option<String>,
-}
-
-#[derive(sqlx::FromRow)]
-struct ProxyUserRow {
-    user_id: Uuid,
-    username: String,
-    user_type_name: String,
-    laboratory_id: Option<Uuid>,
 }
 
 #[tracing::instrument(
@@ -44,10 +39,7 @@ pub async fn proxy_get(
     let path = path.into_inner();
     let tail = path.tail.unwrap_or_default();
     parse_read_target(&tail)?;
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(FederationError::UnexpectedError)?
-        .ok_or_else(|| FederationError::Forbidden("Actor not found in the database".into()))?;
+    let actor = federation_actor(&pool, actor_user_id).await?;
     if !(actor.is_lab_admin() || actor.is_regular_user()) {
         return Err(FederationError::Forbidden(
             "Only laboratory administrators and users can use federation".into(),
@@ -105,22 +97,6 @@ pub async fn proxy_get(
     })?;
     verify_tls_pin(&response, remote_node.tls_certificate_sha256.as_deref())?;
     relay_response(response).await
-}
-
-async fn fetch_proxy_user(pool: &PgPool, user_id: Uuid) -> Result<ProxyUserRow, FederationError> {
-    sqlx::query_as::<_, ProxyUserRow>(
-        r#"
-        SELECT users.user_id, users.username, user_types.name AS user_type_name, users.laboratory_id
-        FROM users
-        JOIN user_types USING (user_type_id)
-        WHERE users.user_id = $1
-        "#,
-    )
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| FederationError::UnexpectedError(e.into()))?
-    .ok_or_else(|| FederationError::Forbidden("Current user not found".into()))
 }
 
 fn build_remote_url(

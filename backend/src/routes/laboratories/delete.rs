@@ -1,4 +1,7 @@
-use super::model::{delete_laboratory_rollback_details, fetch_laboratory};
+use super::model::delete_laboratory_rollback_details;
+use super::queries::{
+    LaboratoryDatabaseError, delete_laboratory_from_database, fetch_laboratory,
+};
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::UserId;
@@ -6,7 +9,7 @@ use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(thiserror::Error)]
@@ -34,6 +37,15 @@ impl ResponseError for DeleteLaboratoryError {
             DeleteLaboratoryError::NotFound(_) => StatusCode::NOT_FOUND,
             DeleteLaboratoryError::ConflictError(_) => StatusCode::CONFLICT,
             DeleteLaboratoryError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<LaboratoryDatabaseError> for DeleteLaboratoryError {
+    fn from(error: LaboratoryDatabaseError) -> Self {
+        match error {
+            LaboratoryDatabaseError::Conflict(message) => Self::ConflictError(message),
+            LaboratoryDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
         }
     }
 }
@@ -87,36 +99,4 @@ pub async fn delete_laboratory(
         .context("Failed to commit SQL transaction to delete a laboratory.")?;
 
     Ok(HttpResponse::NoContent().finish())
-}
-
-#[tracing::instrument(
-    name = "Deleting laboratory from the database",
-    skip(transaction),
-    fields(laboratory_id=%laboratory_id)
-)]
-async fn delete_laboratory_from_database(
-    transaction: &mut Transaction<'_, Postgres>,
-    laboratory_id: Uuid,
-) -> Result<(), DeleteLaboratoryError> {
-    sqlx::query!(
-        "DELETE FROM laboratories WHERE laboratory_id = $1",
-        laboratory_id
-    )
-    .execute(transaction.as_mut())
-    .await
-    .map_err(map_database_error)?;
-
-    Ok(())
-}
-
-fn map_database_error(error: sqlx::Error) -> DeleteLaboratoryError {
-    if let sqlx::Error::Database(database_error) = &error {
-        if database_error.code().as_deref() == Some("23503") {
-            return DeleteLaboratoryError::ConflictError(
-                "Laboratory is referenced by other records".into(),
-            );
-        }
-    }
-
-    DeleteLaboratoryError::UnexpectedError(error.into())
 }

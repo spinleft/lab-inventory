@@ -1,11 +1,7 @@
-use anyhow::Context;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::json;
-use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
-
-use crate::domain::AttachmentId;
 
 #[derive(Serialize, sqlx::FromRow)]
 pub(crate) struct AttachmentRow {
@@ -103,6 +99,14 @@ pub(crate) enum AttachmentTarget {
     InventoryItem(Uuid),
 }
 
+/// Just the columns a download needs to stream the stored blob back.
+#[derive(sqlx::FromRow)]
+pub(super) struct AttachmentFileRow {
+    pub(super) storage_key: String,
+    pub(super) original_file_name: String,
+    pub(super) mime_type: Option<String>,
+}
+
 pub(super) fn create_attachment_rollback_details(row: &AttachmentRow) -> serde_json::Value {
     json!({
         "rollback": {
@@ -167,43 +171,4 @@ pub(super) fn update_attachment_rollback_details(row: &AttachmentRow) -> serde_j
             },
         },
     })
-}
-
-pub(super) async fn fetch_attachment_for_update(
-    transaction: &mut Transaction<'_, Postgres>,
-    attachment_id: AttachmentId,
-) -> Result<Option<AttachmentRow>, anyhow::Error> {
-    sqlx::query_as!(
-        AttachmentRow,
-        r#"
-            SELECT
-                assignments.attachment_id,
-                assignments.laboratory_id,
-                assignments.file_id,
-                assignments.asset_id,
-                assignments.inventory_item_id,
-                assignments.display_name,
-                assignments.description,
-                assignments.is_public,
-                assignments.assigned_by_user_id,
-                assignments.created_at,
-                assignments.updated_at,
-                files.storage_backend,
-                files.storage_key,
-                files.original_file_name,
-                files.mime_type,
-                files.file_size_bytes,
-                files.sha256_hex,
-                files.uploaded_by_user_id,
-                files.created_at AS file_created_at
-            FROM asset_attachment_assignments AS assignments
-            JOIN files ON files.file_id = assignments.file_id
-            WHERE assignments.attachment_id = $1
-            FOR UPDATE
-        "#,
-        Uuid::from(attachment_id)
-    )
-    .fetch_optional(transaction.as_mut())
-    .await
-    .context("Failed to fetch attachment for update")
 }

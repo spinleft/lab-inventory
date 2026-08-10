@@ -8,22 +8,6 @@ pub struct UpdateAssetCategory {
     pub description: NullableUpdate<String>,
 }
 
-impl UpdateAssetCategory {
-    pub fn new(
-        parent_category_id: NullableUpdate<AssetCategoryId>,
-        name: Option<AssetCategoryName>,
-        code: Option<AssetCategoryCode>,
-        description: NullableUpdate<String>,
-    ) -> Self {
-        Self {
-            parent_category_id,
-            name,
-            code,
-            description,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::UpdateAssetCategory;
@@ -36,12 +20,12 @@ mod tests {
         let name = AssetCategoryName::parse("Microscopes".into()).unwrap();
         let code = AssetCategoryCode::parse("microscopes".into()).unwrap();
 
-        let update = UpdateAssetCategory::new(
-            NullableUpdate::Set(parent_category_id),
-            Some(name),
-            Some(code),
-            NullableUpdate::Clear,
-        );
+        let update = UpdateAssetCategory {
+            parent_category_id: NullableUpdate::Set(parent_category_id),
+            name: Some(name),
+            code: Some(code),
+            description: NullableUpdate::Clear,
+        };
 
         assert!(matches!(
             update.parent_category_id,

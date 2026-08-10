@@ -1,3 +1,5 @@
+use super::model::{MessageResponse, change_password_rollback_details};
+use super::queries::update_password_in_database;
 use crate::access_control::get_actor;
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::authentication::{AuthError, hash_password, validate_password_for_user};
@@ -7,10 +9,8 @@ use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use secrecy::{ExposeSecret, Secret};
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
-use sqlx::{PgPool, Postgres, Transaction};
-use uuid::Uuid;
+use serde::Deserialize;
+use sqlx::PgPool;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -18,17 +18,6 @@ pub struct JsonData {
     current_password: Secret<String>,
     new_password: Secret<String>,
     new_password_check: Secret<String>,
-}
-
-#[derive(Serialize)]
-struct MessageResponse {
-    message: &'static str,
-}
-
-#[derive(sqlx::FromRow)]
-struct ChangedPasswordUser {
-    user_id: Uuid,
-    previous_password_hash: String,
 }
 
 #[derive(thiserror::Error)]
@@ -122,59 +111,4 @@ pub async fn change_password(
     Ok(HttpResponse::Ok().json(MessageResponse {
         message: "Password changed",
     }))
-}
-
-#[tracing::instrument(
-    name = "Updating current user's password in the database",
-    skip(transaction, password_hash),
-    fields(user_id=%user_id)
-)]
-async fn update_password_in_database(
-    transaction: &mut Transaction<'_, Postgres>,
-    user_id: Uuid,
-    password_hash: &str,
-) -> Result<ChangedPasswordUser, ChangePasswordError> {
-    sqlx::query_as!(
-        ChangedPasswordUser,
-        r#"
-        WITH previous_user AS (
-            SELECT user_id, password_hash AS previous_password_hash
-            FROM users
-            WHERE user_id = $1
-            FOR UPDATE
-        ),
-        updated_user AS (
-            UPDATE users
-            SET password_hash = $2
-            FROM previous_user
-            WHERE users.user_id = previous_user.user_id
-            RETURNING users.user_id
-        )
-        SELECT
-            previous_user.user_id,
-            previous_user.previous_password_hash
-        FROM previous_user
-        INNER JOIN updated_user USING (user_id)
-        "#,
-        user_id,
-        password_hash,
-    )
-    .fetch_one(transaction.as_mut())
-    .await
-    .map_err(|e| ChangePasswordError::UnexpectedError(e.into()))
-}
-
-fn change_password_rollback_details(user: &ChangedPasswordUser) -> Value {
-    json!({
-        "rollback": {
-            "operation": "update",
-            "resource_type": "user",
-            "where": {
-                "user_id": user.user_id,
-            },
-            "values": {
-                "password_hash": &user.previous_password_hash,
-            },
-        },
-    })
 }

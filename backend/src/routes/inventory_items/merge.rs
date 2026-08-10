@@ -1,9 +1,11 @@
 ﻿use super::model::{
-    InventoryItemDatabaseError, InventoryItemResponse, InventoryItemRow, add_quantities_to_item,
-    delete_inventory_item_from_database, fetch_inventory_items_for_update,
-    merge_inventory_items_rollback_details, move_inventory_item_attachments,
-    validate_quantity_item, validate_requested_ids,
+    InventoryItemResponse, InventoryItemRow, merge_inventory_items_rollback_details,
 };
+use super::queries::{
+    InventoryItemDatabaseError, delete_inventory_item_from_database,
+    fetch_inventory_items_for_update, move_inventory_item_attachments,
+};
+use super::service::{add_quantities_to_item, validate_quantity_item, validate_requested_ids};
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{MergeInventoryItems as MergeInventoryItemsCommand, UserId};
@@ -191,7 +193,6 @@ fn validate_merge_compatible(
 ) -> Result<(), MergeInventoryItemsError> {
     if target.laboratory_id == source.laboratory_id
         && target.asset_id == source.asset_id
-        && target.quantity_unit_id == source.quantity_unit_id
         && target.batch_number == source.batch_number
         && target.location_id == source.location_id
         && target.status == source.status
@@ -199,8 +200,7 @@ fn validate_merge_compatible(
         Ok(())
     } else {
         Err(MergeInventoryItemsError::ValidationError(
-            "Source inventory items must match target asset, unit, batch, location, and status"
-                .into(),
+            "Source inventory items must match target asset, batch, location, and status".into(),
         ))
     }
 }

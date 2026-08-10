@@ -1,8 +1,6 @@
-use anyhow::anyhow;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::{Value, json};
-use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -88,22 +86,4 @@ impl From<LaboratoryRow> for LaboratoryResponse {
             updated_at: row.updated_at,
         }
     }
-}
-
-pub(super) async fn fetch_laboratory(
-    pool: &PgPool,
-    laboratory_id: Uuid,
-) -> Result<Option<LaboratoryRow>, anyhow::Error> {
-    sqlx::query_as!(
-        LaboratoryRow,
-        r#"
-        SELECT laboratory_id, name, address, description, contact, created_at, updated_at
-        FROM laboratories
-        WHERE laboratory_id = $1
-        "#,
-        laboratory_id
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| anyhow!(e))
 }

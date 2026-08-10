@@ -446,7 +446,7 @@ async fn insert_test_inventory_item(app: &TestApp, laboratory_id: Uuid, location
             laboratory_id,
             tracking_mode,
             name,
-            default_unit_id
+            inventory_unit_id
         )
         VALUES ($1, $2, 'quantity', $3, $4)
         RETURNING asset_id
@@ -469,17 +469,15 @@ async fn insert_test_inventory_item(app: &TestApp, laboratory_id: Uuid, location
             tracking_mode,
             quantity_on_hand,
             quantity_allocated,
-            quantity_unit_id,
             location_id
         )
-        VALUES ($1, $2, $3, 'quantity', 1, 0, $4, $5)
+        VALUES ($1, $2, $3, 'quantity', 1, 0, $4)
         RETURNING inventory_item_id
         "#,
     )
     .bind(Uuid::new_v4())
     .bind(asset_id)
     .bind(laboratory_id)
-    .bind(unit_id)
     .bind(location_id)
     .fetch_one(&app.db_pool)
     .await

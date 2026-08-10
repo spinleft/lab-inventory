@@ -1,4 +1,5 @@
-use super::model::{LaboratoryResponse, fetch_laboratory};
+use super::model::LaboratoryResponse;
+use super::queries::fetch_laboratory;
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::UserId;
 use crate::utils::error_chain_fmt;

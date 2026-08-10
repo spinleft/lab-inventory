@@ -27,5 +27,16 @@ export default defineConfig({
     environment: "jsdom",
     exclude: ["tests/e2e/**", "node_modules/**", "dist/**"],
     setupFiles: "./src/shared/test/setup.ts",
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        "src/**/*.test.{ts,tsx}",
+        "src/shared/test/**",
+        "src/main.tsx",
+        "src/vite-env.d.ts",
+      ],
+      reporter: ["text-summary", "json-summary"],
+    },
   },
 });

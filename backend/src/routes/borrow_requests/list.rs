@@ -1,11 +1,12 @@
-use super::model::{
-    BorrowRequestError, BorrowRequestResponse, actor_for_user, borrow_request_inventory_select,
-    validate_borrow_request_status, validate_resolver_actor,
+use super::model::BorrowRequestResponse;
+use super::queries::fetch_borrow_requests;
+use super::service::{
+    BorrowRequestError, actor_for_user, validate_borrow_request_status, validate_resolver_actor,
 };
 use crate::domain::{LaboratoryId, UserId};
 use actix_web::{HttpResponse, web};
 use serde::Deserialize;
-use sqlx::{PgPool, Postgres, QueryBuilder};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -31,25 +32,11 @@ pub async fn list_borrow_requests(
     validate_resolver_actor(&actor, laboratory_id)?;
     let status = validate_borrow_request_status(query.status.clone())?;
 
-    let mut builder = QueryBuilder::<Postgres>::new(borrow_request_inventory_select());
-    builder.push(
-        " INNER JOIN federation_borrow_requests AS requests ON requests.inventory_item_id = asset_inventory_items.inventory_item_id WHERE requests.local_laboratory_id = ",
-    );
-    builder.push_bind(*laboratory_id);
-    if let Some(status) = status {
-        builder.push(" AND requests.status = ");
-        builder.push_bind(status);
-    }
-    builder.push(" ORDER BY requests.created_at DESC, requests.borrow_request_id DESC");
-
-    let rows = builder
-        .build_query_as::<super::model::BorrowRequestRow>()
-        .fetch_all(pool.get_ref())
-        .await
-        .map_err(|e| BorrowRequestError::UnexpectedError(e.into()))?;
+    let requests = fetch_borrow_requests(&pool, laboratory_id, status).await?;
 
     Ok(HttpResponse::Ok().json(
-        rows.into_iter()
+        requests
+            .into_iter()
             .map(BorrowRequestResponse::from)
             .collect::<Vec<_>>(),
     ))

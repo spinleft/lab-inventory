@@ -321,7 +321,7 @@ function serializedInventoryItem(): InventoryFixture {
     asset: {
       asset_id: serializedAssetId,
       category_id: categoryId,
-      default_unit_id: unitId,
+      inventory_unit_id: unitId,
       manufacturer: "Olympus",
       model: "BX53",
       name: "显微镜 A",
@@ -337,7 +337,6 @@ function serializedInventoryItem(): InventoryFixture {
     public_notes: null,
     quantity_allocated: 0,
     quantity_on_hand: 1,
-    quantity_unit_id: unitId,
     serial_number: "SN-001",
     status: "available",
     tracking_mode: "serialized",
@@ -350,7 +349,7 @@ function quantityInventoryItem(id = quantityItemId): InventoryFixture {
     asset: {
       asset_id: quantityAssetId,
       category_id: categoryId,
-      default_unit_id: unitId,
+      inventory_unit_id: unitId,
       manufacturer: null,
       model: "R-1",
       name: "试剂",
@@ -366,7 +365,6 @@ function quantityInventoryItem(id = quantityItemId): InventoryFixture {
     public_notes: null,
     quantity_allocated: 2,
     quantity_on_hand: 10,
-    quantity_unit_id: unitId,
     serial_number: null,
     status: "reserved",
     tracking_mode: "quantity",
@@ -379,7 +377,7 @@ function assetDetail(assetId: string, name = "显微镜 A", trackingMode = "seri
     asset_id: assetId,
     category_id: categoryId,
     created_at: "2026-06-24T08:30:00Z",
-    default_unit_id: unitId,
+    inventory_unit_id: unitId,
     internal_notes: null,
     inventory_items:
       trackingMode === "serialized" ? [serializedInventoryItem()] : [quantityInventoryItem()],

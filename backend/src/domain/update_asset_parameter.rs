@@ -12,22 +12,6 @@ pub struct UpdateAssetParameterOption {
     pub sort_order: i32,
 }
 
-impl UpdateAssetParameterOption {
-    pub fn new(
-        option_id: Option<Uuid>,
-        code: AssetParameterCode,
-        label: AssetParameterOptionLabel,
-        sort_order: i32,
-    ) -> Self {
-        Self {
-            option_id,
-            code,
-            label,
-            sort_order,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct UpdateAssetParameter {
     pub code: Option<AssetParameterCode>,
@@ -37,26 +21,4 @@ pub struct UpdateAssetParameter {
     pub default_unit_id: NullableUpdate<Uuid>,
     pub description: NullableUpdate<String>,
     pub options: Option<Vec<UpdateAssetParameterOption>>,
-}
-
-impl UpdateAssetParameter {
-    pub fn new(
-        code: Option<AssetParameterCode>,
-        name: Option<AssetParameterName>,
-        data_type: Option<AssetParameterDataType>,
-        unit_dimension: NullableUpdate<UnitDimension>,
-        default_unit_id: NullableUpdate<Uuid>,
-        description: NullableUpdate<String>,
-        options: Option<Vec<UpdateAssetParameterOption>>,
-    ) -> Self {
-        Self {
-            code,
-            name,
-            data_type,
-            unit_dimension,
-            default_unit_id,
-            description,
-            options,
-        }
-    }
 }

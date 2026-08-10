@@ -1,7 +1,6 @@
-﻿use super::model::{
-    InventoryItemDatabaseError, InventoryItemResponse, apply_inventory_item_patch,
-    fetch_inventory_item_for_update, update_inventory_item_rollback_details,
-};
+﻿use super::model::{InventoryItemResponse, update_inventory_item_rollback_details};
+use super::queries::{InventoryItemDatabaseError, fetch_inventory_item_for_update};
+use super::service::apply_inventory_item_patch;
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{InventoryItemId, UpdateInventoryItem, UserId};
@@ -21,7 +20,6 @@ pub struct JsonData {
     batch_number: Option<Option<String>>,
     quantity_on_hand: Option<f64>,
     quantity_allocated: Option<f64>,
-    quantity_unit_id: Option<Uuid>,
     #[serde(default, deserialize_with = "deserialize_nullable")]
     location_id: Option<Option<Uuid>>,
     status: Option<String>,
@@ -40,7 +38,6 @@ impl TryFrom<JsonData> for UpdateInventoryItem {
             value.batch_number,
             value.quantity_on_hand,
             value.quantity_allocated,
-            value.quantity_unit_id.map(Uuid::into),
             value
                 .location_id
                 .map(|location_id| location_id.map(Uuid::into)),

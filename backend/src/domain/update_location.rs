@@ -8,22 +8,6 @@ pub struct UpdateLocation {
     pub description: NullableUpdate<String>,
 }
 
-impl UpdateLocation {
-    pub fn new(
-        parent_location_id: NullableUpdate<LocationId>,
-        name: Option<LocationName>,
-        code: Option<LocationCode>,
-        description: NullableUpdate<String>,
-    ) -> Self {
-        Self {
-            parent_location_id,
-            name,
-            code,
-            description,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::UpdateLocation;
@@ -36,12 +20,12 @@ mod tests {
         let name = LocationName::parse("Room A".into()).unwrap();
         let code = LocationCode::parse("room_a".into()).unwrap();
 
-        let update = UpdateLocation::new(
-            NullableUpdate::Set(parent_location_id),
-            Some(name),
-            Some(code),
-            NullableUpdate::Clear,
-        );
+        let update = UpdateLocation {
+            parent_location_id: NullableUpdate::Set(parent_location_id),
+            name: Some(name),
+            code: Some(code),
+            description: NullableUpdate::Clear,
+        };
 
         assert!(matches!(
             update.parent_location_id,

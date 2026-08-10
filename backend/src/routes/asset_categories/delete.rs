@@ -1,20 +1,24 @@
-use super::model::{
-    delete_asset_category_rollback_details, fetch_asset_category_for_update,
+use super::model::delete_asset_category_rollback_details;
+use super::queries::{
+    AssetCategoryDatabaseError, fetch_asset_category_for_update,
     fetch_asset_category_parameter_assignments_for_categories_for_update,
     fetch_asset_category_tree_for_update,
 };
+use super::service::delete_asset_category_subtree;
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{AssetCategoryId, LaboratoryId, UserId};
+use crate::domain::{AssetCategoryId, UserId};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum DeleteAssetCategoryError {
+    #[error("{0}")]
+    ValidationError(String),
     #[error("{0}")]
     Forbidden(String),
     #[error("{0}")]
@@ -34,10 +38,21 @@ impl std::fmt::Debug for DeleteAssetCategoryError {
 impl ResponseError for DeleteAssetCategoryError {
     fn status_code(&self) -> StatusCode {
         match self {
+            DeleteAssetCategoryError::ValidationError(_) => StatusCode::BAD_REQUEST,
             DeleteAssetCategoryError::Forbidden(_) => StatusCode::FORBIDDEN,
             DeleteAssetCategoryError::NotFound(_) => StatusCode::NOT_FOUND,
             DeleteAssetCategoryError::ConflictError(_) => StatusCode::CONFLICT,
             DeleteAssetCategoryError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<AssetCategoryDatabaseError> for DeleteAssetCategoryError {
+    fn from(error: AssetCategoryDatabaseError) -> Self {
+        match error {
+            AssetCategoryDatabaseError::Validation(message) => Self::ValidationError(message),
+            AssetCategoryDatabaseError::Conflict(message) => Self::ConflictError(message),
+            AssetCategoryDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
         }
     }
 }
@@ -92,13 +107,7 @@ pub async fn delete_asset_category(
             &category_ids,
         )
         .await?;
-    let cleared_asset_ids = clear_asset_category_references(
-        &mut transaction,
-        existing.laboratory_id.into(),
-        &existing.path,
-    )
-    .await?;
-    delete_asset_category_tree(
+    let cleared_asset_ids = delete_asset_category_subtree(
         &mut transaction,
         existing.laboratory_id.into(),
         &existing.path,
@@ -124,95 +133,4 @@ pub async fn delete_asset_category(
         .context("Failed to commit SQL transaction to delete an asset category.")?;
 
     Ok(HttpResponse::NoContent().finish())
-}
-
-#[tracing::instrument(
-    name = "Clearing deleted asset category references from assets",
-    skip(transaction, root_path),
-    fields(laboratory_id=%laboratory_id)
-)]
-async fn clear_asset_category_references(
-    transaction: &mut Transaction<'_, Postgres>,
-    laboratory_id: LaboratoryId,
-    root_path: &str,
-) -> Result<Vec<Uuid>, DeleteAssetCategoryError> {
-    let asset_ids: Vec<Uuid> = sqlx::query_scalar(
-        r#"
-        SELECT asset_id
-        FROM assets
-        WHERE laboratory_id = $1
-          AND category_id IN (
-              SELECT category_id
-              FROM asset_categories
-              WHERE laboratory_id = $1
-                AND path <@ $2::text::ltree
-          )
-        ORDER BY asset_id
-        "#,
-    )
-    .bind(*laboratory_id)
-    .bind(root_path)
-    .fetch_all(transaction.as_mut())
-    .await
-    .map_err(|e| DeleteAssetCategoryError::UnexpectedError(e.into()))?;
-
-    sqlx::query(
-        r#"
-        UPDATE assets
-        SET category_id = NULL,
-            updated_at = now()
-        WHERE laboratory_id = $1
-          AND category_id IN (
-              SELECT category_id
-              FROM asset_categories
-              WHERE laboratory_id = $1
-                AND path <@ $2::text::ltree
-          )
-        "#,
-    )
-    .bind(*laboratory_id)
-    .bind(root_path)
-    .execute(transaction.as_mut())
-    .await
-    .map_err(|e| DeleteAssetCategoryError::UnexpectedError(e.into()))?;
-
-    Ok(asset_ids)
-}
-
-#[tracing::instrument(
-    name = "Deleting asset category tree from the database",
-    skip(transaction, root_path),
-    fields(laboratory_id=%laboratory_id)
-)]
-async fn delete_asset_category_tree(
-    transaction: &mut Transaction<'_, Postgres>,
-    laboratory_id: LaboratoryId,
-    root_path: &str,
-) -> Result<(), DeleteAssetCategoryError> {
-    sqlx::query(
-        r#"
-        DELETE FROM asset_categories
-        WHERE laboratory_id = $1
-          AND path <@ $2::text::ltree
-        "#,
-    )
-    .bind(*laboratory_id)
-    .bind(root_path)
-    .execute(transaction.as_mut())
-    .await
-    .map_err(map_database_error)?;
-
-    Ok(())
-}
-
-fn map_database_error(error: sqlx::Error) -> DeleteAssetCategoryError {
-    if let sqlx::Error::Database(database_error) = &error {
-        if database_error.code().as_deref() == Some("23503") {
-            return DeleteAssetCategoryError::ConflictError(
-                "Asset category is referenced by other records".into(),
-            );
-        }
-    }
-
-    DeleteAssetCategoryError::UnexpectedError(error.into())
 }

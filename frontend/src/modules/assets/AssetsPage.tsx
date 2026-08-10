@@ -135,7 +135,7 @@ type AssetEditorMode = Asset | "new" | null;
 
 type AssetForm = {
   category_id: string;
-  default_unit_id: string;
+  inventory_unit_id: string;
   internal_notes: string;
   manufacturer: string;
   model: string;
@@ -1420,7 +1420,7 @@ export function AssetEditor({
 
     setValues({
       category_id: asset.category_id ?? "",
-      default_unit_id: asset.default_unit_id,
+      inventory_unit_id: asset.inventory_unit_id,
       internal_notes: asset.internal_notes ?? "",
       manufacturer: asset.manufacturer ?? "",
       model: asset.model ?? "",
@@ -1509,7 +1509,7 @@ export function AssetEditor({
       toast.error({ title: "请填写资产名称" });
       return;
     }
-    if (!values.default_unit_id) {
+    if (!values.inventory_unit_id) {
       toast.error({ title: "请先选择默认单位" });
       return;
     }
@@ -1535,7 +1535,7 @@ export function AssetEditor({
     const payload: AssetPayload = {
       attachments: isNew && attachmentClaims.claims.length > 0 ? attachmentClaims.claims : undefined,
       category_id: values.category_id || null,
-      default_unit_id: values.default_unit_id,
+      inventory_unit_id: values.inventory_unit_id,
       internal_notes: optionalText(values.internal_notes),
       manufacturer: optionalText(values.manufacturer),
       model: optionalText(values.model),
@@ -1551,7 +1551,7 @@ export function AssetEditor({
           laboratoryId,
           payload: {
             ...payload,
-            default_unit_id: values.default_unit_id,
+            inventory_unit_id: values.inventory_unit_id,
             name,
             tracking_mode: values.tracking_mode,
           },
@@ -1656,8 +1656,8 @@ export function AssetEditor({
                 label: `${unit.name} (${unit.symbol})`,
                 value: unit.unit_id,
               }))}
-              value={values.default_unit_id}
-              onValueChange={(value) => updateField("default_unit_id", value)}
+              value={values.inventory_unit_id}
+              onValueChange={(value) => updateField("inventory_unit_id", value)}
             />
           </FormField>
         </div>
@@ -2101,7 +2101,7 @@ function sortValue(
 }
 
 function formatInventory(asset: Asset, unitsById: Map<string, Unit>) {
-  const unit = unitsById.get(asset.default_unit_id);
+  const unit = unitsById.get(asset.inventory_unit_id);
   const quantity = formatNumber(asset.inventory_summary.quantity_on_hand);
   const allocated = formatNumber(asset.inventory_summary.quantity_allocated);
   const unitSymbol = unit ? ` ${unit.symbol}` : "";
@@ -2366,7 +2366,7 @@ function inputFromParameterValue(value: AssetParameterValue): ParameterInput {
 function emptyAssetForm(units: Unit[] = []): AssetForm {
   return {
     category_id: "",
-    default_unit_id: units[0]?.unit_id ?? "",
+    inventory_unit_id: units[0]?.unit_id ?? "",
     internal_notes: "",
     manufacturer: "",
     model: "",

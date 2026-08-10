@@ -1,4 +1,5 @@
 use super::model::AuditLog;
+use super::queries::{audit_log_count_select, audit_log_select};
 use crate::access_control::get_actor;
 use crate::domain::UserId;
 use crate::routes::{PaginatedResponse, Pagination, PaginationError};
@@ -100,13 +101,7 @@ async fn fetch_audit_log_count(
     pool: &PgPool,
     query: &AuditLogListQuery,
 ) -> Result<i64, ListAuditLogsError> {
-    let mut builder = QueryBuilder::<Postgres>::new(
-        r#"
-        SELECT COUNT(*)
-        FROM audit_logs
-        LEFT JOIN users AS actor_user ON actor_user.user_id = audit_logs.actor_user_id
-        "#,
-    );
+    let mut builder = QueryBuilder::<Postgres>::new(audit_log_count_select());
     push_audit_log_filters(&mut builder, query);
     builder
         .build_query_scalar()
@@ -115,21 +110,6 @@ async fn fetch_audit_log_count(
         .map_err(|e| ListAuditLogsError::UnexpectedError(e.into()))
 }
 
-fn audit_log_select() -> &'static str {
-    r#"
-    SELECT
-        audit_logs.audit_log_id,
-        audit_logs.actor_user_id,
-        actor_user.username AS actor_username,
-        audit_logs.action,
-        audit_logs.resource_type,
-        audit_logs.resource_id,
-        audit_logs.details,
-        audit_logs.created_at
-    FROM audit_logs
-    LEFT JOIN users AS actor_user ON actor_user.user_id = audit_logs.actor_user_id
-    "#
-}
 
 fn push_audit_log_filters(builder: &mut QueryBuilder<'_, Postgres>, query: &AuditLogListQuery) {
     builder.push(" WHERE TRUE");

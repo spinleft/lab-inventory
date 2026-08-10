@@ -1,4 +1,5 @@
-use super::model::{UserResponse, fetch_user};
+use super::model::UserResponse;
+use super::queries::fetch_user;
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::UserId;
 use crate::utils::error_chain_fmt;

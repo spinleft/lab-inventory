@@ -195,7 +195,7 @@ function inventoryItem(overrides: Partial<Record<string, unknown>> = {}) {
     asset: {
       asset_id: assetId,
       category_id: categoryId,
-      default_unit_id: unitId,
+      inventory_unit_id: unitId,
       manufacturer: null,
       model: "BX53",
       name: "Borrowable Reagent",
@@ -211,7 +211,6 @@ function inventoryItem(overrides: Partial<Record<string, unknown>> = {}) {
     public_notes: null,
     quantity_allocated: 0,
     quantity_on_hand: 1,
-    quantity_unit_id: unitId,
     serial_number: "SN-BORROW",
     status: "available",
     tracking_mode: "quantity",
@@ -225,7 +224,7 @@ function assetDetail() {
     asset_id: assetId,
     category_id: categoryId,
     created_at: "2026-06-24T08:30:00Z",
-    default_unit_id: unitId,
+    inventory_unit_id: unitId,
     internal_notes: null,
     inventory_items: [inventoryItem()],
     inventory_summary: {

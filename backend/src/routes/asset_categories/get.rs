@@ -1,6 +1,5 @@
-use super::model::{
-    AssetCategoryResponse, fetch_asset_category, fetch_asset_category_parameter_assignments,
-};
+use super::model::AssetCategoryResponse;
+use super::queries::{fetch_asset_category, fetch_asset_category_parameter_assignments};
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::{AssetCategoryId, UserId};
 use crate::utils::error_chain_fmt;

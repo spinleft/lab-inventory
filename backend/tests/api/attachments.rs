@@ -18,7 +18,7 @@ async fn upload_and_claim_attachments_when_creating_asset_and_inventory_item() {
             &serde_json::json!({
                 "tracking_mode": "quantity",
                 "name": "Attachment Asset",
-                "default_unit_id": unit_id,
+                "inventory_unit_id": unit_id,
                 "attachments": [
                     {
                         "upload_id": upload_id(&asset_upload),
@@ -110,7 +110,7 @@ async fn manage_download_delete_and_filter_attachments_by_laboratory_permissions
             &serde_json::json!({
                 "tracking_mode": "quantity",
                 "name": "Shared Attachment Asset",
-                "default_unit_id": unit_id
+                "inventory_unit_id": unit_id
             }),
         )
         .await;
@@ -223,7 +223,7 @@ async fn delete_unconsumed_file_uploads_only_for_upload_owner() {
             &serde_json::json!({
                 "tracking_mode": "quantity",
                 "name": "Deleted Upload Asset",
-                "default_unit_id": unit_id,
+                "inventory_unit_id": unit_id,
                 "attachments": [
                     {
                         "upload_id": deleted_upload_id,
@@ -252,7 +252,7 @@ async fn delete_unconsumed_file_uploads_only_for_upload_owner() {
             &serde_json::json!({
                 "tracking_mode": "quantity",
                 "name": "Consumed Upload Asset",
-                "default_unit_id": unit_id,
+                "inventory_unit_id": unit_id,
                 "attachments": [
                     {
                         "upload_id": owned_by_super_admin_id,

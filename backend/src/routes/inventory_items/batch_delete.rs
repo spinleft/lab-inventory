@@ -1,9 +1,10 @@
 ﻿use super::delete::delete_storage_objects;
-use super::model::{
+use super::model::delete_inventory_item_rollback_details;
+use super::queries::{
     InventoryItemDatabaseError, delete_inventory_item_attachments,
-    delete_inventory_item_from_database, delete_inventory_item_rollback_details,
-    fetch_inventory_items_for_update, validate_requested_ids,
+    delete_inventory_item_from_database, fetch_inventory_items_for_update,
 };
+use super::service::validate_requested_ids;
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{InventoryItemIds, UserId};

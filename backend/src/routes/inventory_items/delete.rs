@@ -1,7 +1,7 @@
-﻿use super::model::{
-    DeletedAttachmentRow, InventoryItemDatabaseError, delete_inventory_item_attachments,
-    delete_inventory_item_from_database, delete_inventory_item_rollback_details,
-    fetch_inventory_item_for_update,
+﻿use super::model::{DeletedAttachmentRow, delete_inventory_item_rollback_details};
+use super::queries::{
+    InventoryItemDatabaseError, delete_inventory_item_attachments,
+    delete_inventory_item_from_database, fetch_inventory_item_for_update,
 };
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};

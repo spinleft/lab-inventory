@@ -1,4 +1,5 @@
-use super::model::{delete_unit_rollback_details, fetch_unit_for_update};
+use super::model::delete_unit_rollback_details;
+use super::queries::{UnitDatabaseError, delete_unit_from_database, fetch_unit_for_update};
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::UserId;
@@ -6,11 +7,13 @@ use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum DeleteUnitError {
+    #[error("{0}")]
+    ValidationError(String),
     #[error("{0}")]
     Forbidden(String),
     #[error("{0}")]
@@ -30,10 +33,21 @@ impl std::fmt::Debug for DeleteUnitError {
 impl ResponseError for DeleteUnitError {
     fn status_code(&self) -> StatusCode {
         match self {
+            DeleteUnitError::ValidationError(_) => StatusCode::BAD_REQUEST,
             DeleteUnitError::Forbidden(_) => StatusCode::FORBIDDEN,
             DeleteUnitError::NotFound(_) => StatusCode::NOT_FOUND,
             DeleteUnitError::ConflictError(_) => StatusCode::CONFLICT,
             DeleteUnitError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<UnitDatabaseError> for DeleteUnitError {
+    fn from(error: UnitDatabaseError) -> Self {
+        match error {
+            UnitDatabaseError::Validation(message) => Self::ValidationError(message),
+            UnitDatabaseError::Conflict(message) => Self::ConflictError(message),
+            UnitDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
         }
     }
 }
@@ -83,27 +97,4 @@ pub async fn delete_unit(
         .context("Failed to commit SQL transaction to delete a unit.")?;
 
     Ok(HttpResponse::NoContent().finish())
-}
-
-#[tracing::instrument(name = "Deleting unit from the database", skip(transaction), fields(unit_id=%unit_id))]
-async fn delete_unit_from_database(
-    transaction: &mut Transaction<'_, Postgres>,
-    unit_id: Uuid,
-) -> Result<(), DeleteUnitError> {
-    sqlx::query!("DELETE FROM units WHERE unit_id = $1", unit_id)
-        .execute(transaction.as_mut())
-        .await
-        .map_err(map_database_error)?;
-
-    Ok(())
-}
-
-fn map_database_error(error: sqlx::Error) -> DeleteUnitError {
-    if let sqlx::Error::Database(database_error) = &error {
-        if database_error.code().as_deref() == Some("23503") {
-            return DeleteUnitError::ConflictError("Unit is referenced by other records".into());
-        }
-    }
-
-    DeleteUnitError::UnexpectedError(error.into())
 }

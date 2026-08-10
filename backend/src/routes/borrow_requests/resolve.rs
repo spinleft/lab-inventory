@@ -1,6 +1,9 @@
-use super::model::{
-    BorrowRequestError, BorrowRequestResponse, BorrowRequestStatus, actor_for_user,
-    fetch_borrow_request_for_update, fetch_user_snapshot, record_borrow_request_audit,
+use super::model::{BorrowRequestResponse, BorrowRequestStatus};
+use super::queries::{
+    fetch_borrow_request_for_update, mark_inventory_item_borrowed, update_borrow_request_decision,
+};
+use super::service::{
+    BorrowRequestError, actor_for_user, fetch_user_snapshot, record_borrow_request_audit,
     validate_resolver_actor,
 };
 use crate::audit::{AuditAction, AuditResource, record_audit};
@@ -78,18 +81,7 @@ pub async fn resolve_borrow_request(
         fetch_user_snapshot(&mut transaction, actor.user_id).await?;
 
     if decision == BorrowRequestStatus::Approved {
-        sqlx::query(
-            r#"
-            UPDATE asset_inventory_items
-            SET status = 'borrowed',
-                updated_at = now()
-            WHERE inventory_item_id = $1
-            "#,
-        )
-        .bind(item.inventory_item_id)
-        .execute(transaction.as_mut())
-        .await
-        .map_err(|e| BorrowRequestError::UnexpectedError(e.into()))?;
+        mark_inventory_item_borrowed(&mut transaction, item.inventory_item_id).await?;
         record_audit(
             &mut transaction,
             &actor,
@@ -101,30 +93,17 @@ pub async fn resolve_borrow_request(
         .await?;
     }
 
-    sqlx::query(
-        r#"
-        UPDATE federation_borrow_requests
-        SET status = $3,
-            reviewed_by_user_id = $4,
-            reviewed_by_username = $5,
-            reviewed_by_user_type = $6,
-            reviewed_at = now(),
-            decision_note = $7,
-            updated_at = now()
-        WHERE borrow_request_id = $1
-          AND local_laboratory_id = $2
-        "#,
+    update_borrow_request_decision(
+        &mut transaction,
+        borrow_request_id,
+        laboratory_id,
+        decision.as_str(),
+        actor.user_id,
+        &reviewer_username,
+        &reviewer_user_type,
+        decision_note.as_deref(),
     )
-    .bind(borrow_request_id)
-    .bind(*laboratory_id)
-    .bind(decision.as_str())
-    .bind(*actor.user_id)
-    .bind(reviewer_username)
-    .bind(reviewer_user_type)
-    .bind(decision_note)
-    .execute(transaction.as_mut())
-    .await
-    .map_err(|e| BorrowRequestError::UnexpectedError(e.into()))?;
+    .await?;
 
     let updated =
         fetch_borrow_request_for_update(&mut transaction, *laboratory_id, borrow_request_id)

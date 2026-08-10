@@ -1,5 +1,6 @@
-use super::model::{
-    LaboratoryResponse, LaboratoryRow, fetch_laboratory, update_laboratory_rollback_details,
+use super::model::{LaboratoryResponse, update_laboratory_rollback_details};
+use super::queries::{
+    LaboratoryDatabaseError, fetch_laboratory, update_laboratory_in_database,
 };
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
@@ -9,7 +10,7 @@ use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use serde::{Deserialize, Deserializer};
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -59,6 +60,15 @@ impl ResponseError for UpdateLaboratoryError {
             UpdateLaboratoryError::NotFound(_) => StatusCode::NOT_FOUND,
             UpdateLaboratoryError::ConflictError(_) => StatusCode::CONFLICT,
             UpdateLaboratoryError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<LaboratoryDatabaseError> for UpdateLaboratoryError {
+    fn from(error: LaboratoryDatabaseError) -> Self {
+        match error {
+            LaboratoryDatabaseError::Conflict(message) => Self::ConflictError(message),
+            LaboratoryDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
         }
     }
 }
@@ -145,65 +155,4 @@ pub async fn update_laboratory(
         .context("Failed to commit SQL transaction to update a laboratory.")?;
 
     Ok(HttpResponse::Ok().json(LaboratoryResponse::from(laboratory)))
-}
-
-#[tracing::instrument(
-    name = "Updating laboratory in the database",
-    skip(transaction, name, address, description, contact),
-    fields(laboratory_id=%laboratory_id)
-)]
-async fn update_laboratory_in_database(
-    transaction: &mut Transaction<'_, Postgres>,
-    laboratory_id: Uuid,
-    name: Option<&str>,
-    address: Option<&str>,
-    should_update_description: bool,
-    description: Option<&str>,
-    should_update_contact: bool,
-    contact: Option<&str>,
-) -> Result<LaboratoryRow, UpdateLaboratoryError> {
-    sqlx::query_as!(
-        LaboratoryRow,
-        r#"
-        UPDATE laboratories
-        SET
-            name = COALESCE($2, name),
-            address = COALESCE($3, address),
-            description = CASE WHEN $4 THEN $5 ELSE description END,
-            contact = CASE WHEN $6 THEN $7 ELSE contact END,
-            updated_at = now()
-        WHERE laboratory_id = $1
-        RETURNING laboratory_id, name, address, description, contact, created_at, updated_at
-        "#,
-        laboratory_id,
-        name,
-        address,
-        should_update_description,
-        description,
-        should_update_contact,
-        contact,
-    )
-    .fetch_one(transaction.as_mut())
-    .await
-    .map_err(map_database_error)
-}
-
-fn map_database_error(error: sqlx::Error) -> UpdateLaboratoryError {
-    if let sqlx::Error::Database(database_error) = &error {
-        match (
-            database_error.code().as_deref(),
-            database_error.constraint(),
-        ) {
-            (Some("23505"), Some("laboratories_name_key")) => {
-                return UpdateLaboratoryError::ConflictError(
-                    "Laboratory name already exists".into(),
-                );
-            }
-            (Some("23505"), _) => {
-                return UpdateLaboratoryError::ConflictError("Laboratory already exists".into());
-            }
-            _ => {}
-        }
-    }
-    UpdateLaboratoryError::UnexpectedError(error.into())
 }

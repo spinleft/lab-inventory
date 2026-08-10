@@ -1,4 +1,5 @@
-use super::model::{InventoryItemResponse, fetch_inventory_item};
+use super::model::InventoryItemResponse;
+use super::queries::fetch_inventory_item;
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::{InventoryItemId, UserId};
 use crate::utils::error_chain_fmt;

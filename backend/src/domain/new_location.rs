@@ -8,22 +8,6 @@ pub struct NewLocation {
     pub description: Option<String>,
 }
 
-impl NewLocation {
-    pub fn new(
-        parent_location_id: Option<LocationId>,
-        name: LocationName,
-        code: LocationCode,
-        description: Option<String>,
-    ) -> Self {
-        Self {
-            parent_location_id,
-            name,
-            code,
-            description,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::NewLocation;
@@ -36,12 +20,12 @@ mod tests {
         let name = LocationName::parse("Room A".into()).unwrap();
         let code = LocationCode::parse("room_a".into()).unwrap();
 
-        let location = NewLocation::new(
-            Some(parent_location_id),
+        let location = NewLocation {
+            parent_location_id: Some(parent_location_id),
             name,
             code,
-            Some("Main lab room".into()),
-        );
+            description: Some("Main lab room".into()),
+        };
 
         assert_eq!(location.parent_location_id, Some(parent_location_id));
         assert_eq!(location.name.as_ref(), "Room A");

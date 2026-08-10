@@ -6,6 +6,8 @@ mod get;
 mod list;
 mod merge;
 mod model;
+mod queries;
+mod service;
 mod split;
 mod update;
 
@@ -16,6 +18,7 @@ pub use delete::delete_inventory_item;
 pub use get::get_inventory_item;
 pub use list::list_inventory_items;
 pub use merge::merge_inventory_items;
-pub(crate) use model::{fetch_inventory_item_for_update, update_inventory_item_rollback_details};
+pub(crate) use model::update_inventory_item_rollback_details;
+pub(crate) use queries::fetch_inventory_item_for_update;
 pub use split::split_inventory_item;
 pub use update::update_inventory_item;

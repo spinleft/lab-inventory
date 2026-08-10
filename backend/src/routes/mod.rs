@@ -11,8 +11,7 @@ mod health_check;
 mod inventory_items;
 mod laboratories;
 mod locations;
-mod pagination;
-pub(crate) mod parameter_filters;
+pub(crate) mod shared;
 mod units;
 mod users;
 
@@ -29,6 +28,6 @@ pub use health_check::*;
 pub use inventory_items::*;
 pub use laboratories::*;
 pub use locations::*;
-pub(crate) use pagination::*;
+pub(crate) use shared::pagination::*;
 pub use units::*;
 pub use users::*;

@@ -297,8 +297,8 @@ async fn range_asset_parameters_allow_units_and_enforce_value_bounds() {
             data_type,
             value_range_start,
             value_range_end,
-            value_range_start_base,
-            value_range_end_base,
+            value_range_start_in_base,
+            value_range_end_in_base,
             unit_id
         )
         VALUES ($1, $2, $3, $4, 'range', 400, 700, 0.0000004, 0.0000007, $5)
@@ -513,7 +513,7 @@ async fn insert_test_asset(app: &TestApp, laboratory_id: Uuid, unit_id: Uuid) ->
             laboratory_id,
             tracking_mode,
             name,
-            default_unit_id
+            inventory_unit_id
         )
         VALUES ($1, $2, 'quantity', $3, $4)
         RETURNING asset_id

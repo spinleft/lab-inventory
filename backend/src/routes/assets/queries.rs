@@ -81,7 +81,7 @@ pub(super) fn asset_select() -> &'static str {
         assets.name,
         assets.model,
         assets.manufacturer,
-        assets.default_unit_id,
+        assets.inventory_unit_id,
         assets.public_notes,
         assets.internal_notes,
         assets.created_at,
@@ -124,7 +124,7 @@ pub(super) async fn fetch_asset(
             assets.name,
             assets.model,
             assets.manufacturer,
-            assets.default_unit_id,
+            assets.inventory_unit_id,
             assets.public_notes,
             assets.internal_notes,
             assets.created_at,
@@ -171,7 +171,7 @@ pub(super) async fn fetch_asset_for_update(
             assets.name,
             assets.model,
             assets.manufacturer,
-            assets.default_unit_id,
+            assets.inventory_unit_id,
             assets.public_notes,
             assets.internal_notes,
             assets.created_at,
@@ -223,7 +223,7 @@ pub(super) async fn insert_asset(
             name,
             model,
             manufacturer,
-            default_unit_id,
+            inventory_unit_id,
             public_notes,
             internal_notes
         )
@@ -236,7 +236,7 @@ pub(super) async fn insert_asset(
             name,
             model,
             manufacturer,
-            default_unit_id,
+            inventory_unit_id,
             public_notes,
             internal_notes,
             created_at,
@@ -252,7 +252,7 @@ pub(super) async fn insert_asset(
         new_asset.name.as_ref(),
         new_asset.model.as_deref(),
         new_asset.manufacturer.as_deref(),
-        Uuid::from(new_asset.default_unit_id),
+        Uuid::from(new_asset.inventory_unit_id),
         new_asset.public_notes.as_deref(),
         new_asset.internal_notes.as_deref(),
     )
@@ -275,7 +275,7 @@ pub(super) async fn update_asset_in_database(
     name: &str,
     model: Option<&str>,
     manufacturer: Option<&str>,
-    default_unit_id: Uuid,
+    inventory_unit_id: Uuid,
     public_notes: Option<&str>,
     internal_notes: Option<&str>,
 ) -> Result<(), AssetDatabaseError> {
@@ -288,7 +288,7 @@ pub(super) async fn update_asset_in_database(
             name = $4,
             model = $5,
             manufacturer = $6,
-            default_unit_id = $7,
+            inventory_unit_id = $7,
             public_notes = $8,
             internal_notes = $9,
             updated_at = now()
@@ -300,7 +300,7 @@ pub(super) async fn update_asset_in_database(
         name,
         model,
         manufacturer,
-        default_unit_id,
+        inventory_unit_id,
         public_notes,
         internal_notes,
     )
@@ -354,7 +354,6 @@ pub(super) async fn fetch_inventory_items_for_asset(
             batch_number,
             quantity_on_hand::double precision AS "quantity_on_hand!",
             quantity_allocated::double precision AS "quantity_allocated!",
-            quantity_unit_id,
             location_id,
             status,
             public_notes,
@@ -389,7 +388,6 @@ pub(super) async fn fetch_inventory_items_for_asset_for_update(
             batch_number,
             quantity_on_hand::double precision AS "quantity_on_hand!",
             quantity_allocated::double precision AS "quantity_allocated!",
-            quantity_unit_id,
             location_id,
             status,
             public_notes,
@@ -428,7 +426,6 @@ pub(super) async fn insert_inventory_item(
             batch_number,
             quantity_on_hand,
             quantity_allocated,
-            quantity_unit_id,
             location_id,
             status,
             public_notes,
@@ -438,7 +435,7 @@ pub(super) async fn insert_inventory_item(
             $1, $2, $3, $4, $5, $6,
             $7::double precision::numeric,
             $8::double precision::numeric,
-            $9, $10, $11, $12, $13
+            $9, $10, $11, $12
         )
         RETURNING
             inventory_item_id,
@@ -449,7 +446,6 @@ pub(super) async fn insert_inventory_item(
             batch_number,
             quantity_on_hand::double precision AS "quantity_on_hand!",
             quantity_allocated::double precision AS "quantity_allocated!",
-            quantity_unit_id,
             location_id,
             status,
             public_notes,
@@ -466,7 +462,6 @@ pub(super) async fn insert_inventory_item(
         item.batch_number.as_deref(),
         item.quantity_on_hand,
         item.quantity_allocated,
-        Uuid::from(item.quantity_unit_id),
         item.location_id.map(Uuid::from),
         item.status.as_str(),
         item.public_notes.as_deref(),
@@ -477,27 +472,25 @@ pub(super) async fn insert_inventory_item(
     .map_err(map_database_error)
 }
 
-pub(super) async fn update_inventory_item_quantities(
+/// Multiplies every stored quantity of an asset by `factor`, used when the
+/// asset's inventory unit changes and the recorded amounts have to keep meaning
+/// the same physical quantity.
+pub(super) async fn rescale_inventory_quantities(
     transaction: &mut Transaction<'_, Postgres>,
-    inventory_item_id: Uuid,
-    quantity_on_hand: f64,
-    quantity_allocated: f64,
-    quantity_unit_id: Uuid,
+    asset_id: Uuid,
+    factor: f64,
 ) -> Result<(), AssetDatabaseError> {
     sqlx::query!(
         r#"
         UPDATE asset_inventory_items
         SET
-            quantity_on_hand = $2::double precision::numeric,
-            quantity_allocated = $3::double precision::numeric,
-            quantity_unit_id = $4,
+            quantity_on_hand = quantity_on_hand * $2::double precision::numeric,
+            quantity_allocated = quantity_allocated * $2::double precision::numeric,
             updated_at = now()
-        WHERE inventory_item_id = $1
+        WHERE asset_id = $1
         "#,
-        inventory_item_id,
-        quantity_on_hand,
-        quantity_allocated,
-        quantity_unit_id,
+        asset_id,
+        factor,
     )
     .execute(transaction.as_mut())
     .await
@@ -529,11 +522,11 @@ pub(super) async fn fetch_parameter_values_for_asset(
             asset_parameter_types.default_unit_id,
             asset_parameter_values.value_text,
             asset_parameter_values.value_number,
-            asset_parameter_values.value_number_base,
+            asset_parameter_values.value_number_in_base,
             asset_parameter_values.value_range_start,
             asset_parameter_values.value_range_end,
-            asset_parameter_values.value_range_start_base,
-            asset_parameter_values.value_range_end_base,
+            asset_parameter_values.value_range_start_in_base,
+            asset_parameter_values.value_range_end_in_base,
             asset_parameter_values.unit_id,
             asset_parameter_values.value_boolean,
             asset_parameter_values.value_date,
@@ -580,11 +573,11 @@ pub(super) async fn fetch_parameter_values_for_assets(
             asset_parameter_types.default_unit_id,
             asset_parameter_values.value_text,
             asset_parameter_values.value_number,
-            asset_parameter_values.value_number_base,
+            asset_parameter_values.value_number_in_base,
             asset_parameter_values.value_range_start,
             asset_parameter_values.value_range_end,
-            asset_parameter_values.value_range_start_base,
-            asset_parameter_values.value_range_end_base,
+            asset_parameter_values.value_range_start_in_base,
+            asset_parameter_values.value_range_end_in_base,
             asset_parameter_values.unit_id,
             asset_parameter_values.value_boolean,
             asset_parameter_values.value_date,
@@ -640,11 +633,11 @@ pub(super) async fn fetch_parameter_values_for_asset_for_update(
             asset_parameter_types.default_unit_id,
             asset_parameter_values.value_text,
             asset_parameter_values.value_number,
-            asset_parameter_values.value_number_base,
+            asset_parameter_values.value_number_in_base,
             asset_parameter_values.value_range_start,
             asset_parameter_values.value_range_end,
-            asset_parameter_values.value_range_start_base,
-            asset_parameter_values.value_range_end_base,
+            asset_parameter_values.value_range_start_in_base,
+            asset_parameter_values.value_range_end_in_base,
             asset_parameter_values.unit_id,
             asset_parameter_values.value_boolean,
             asset_parameter_values.value_date,
@@ -720,11 +713,11 @@ pub(super) async fn upsert_asset_parameter_value(
             data_type,
             value_text,
             value_number,
-            value_number_base,
+            value_number_in_base,
             value_range_start,
             value_range_end,
-            value_range_start_base,
-            value_range_end_base,
+            value_range_start_in_base,
+            value_range_end_in_base,
             unit_id,
             value_boolean,
             value_date,
@@ -736,11 +729,11 @@ pub(super) async fn upsert_asset_parameter_value(
             data_type = EXCLUDED.data_type,
             value_text = EXCLUDED.value_text,
             value_number = EXCLUDED.value_number,
-            value_number_base = EXCLUDED.value_number_base,
+            value_number_in_base = EXCLUDED.value_number_in_base,
             value_range_start = EXCLUDED.value_range_start,
             value_range_end = EXCLUDED.value_range_end,
-            value_range_start_base = EXCLUDED.value_range_start_base,
-            value_range_end_base = EXCLUDED.value_range_end_base,
+            value_range_start_in_base = EXCLUDED.value_range_start_in_base,
+            value_range_end_in_base = EXCLUDED.value_range_end_in_base,
             unit_id = EXCLUDED.unit_id,
             value_boolean = EXCLUDED.value_boolean,
             value_date = EXCLUDED.value_date,
@@ -754,11 +747,11 @@ pub(super) async fn upsert_asset_parameter_value(
         &value.data_type,
         value.value_text.as_deref(),
         value.value_number,
-        value.value_number_base,
+        value.value_number_in_base,
         value.value_range_start,
         value.value_range_end,
-        value.value_range_start_base,
-        value.value_range_end_base,
+        value.value_range_start_in_base,
+        value.value_range_end_in_base,
         value.unit_id,
         value.value_boolean,
         value.value_date,

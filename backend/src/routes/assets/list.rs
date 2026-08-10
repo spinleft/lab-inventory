@@ -2,7 +2,7 @@ use super::model::{AssetResponse, AssetRow, parse_include};
 use super::queries::{asset_select, fetch_parameter_values_for_assets};
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::{AssetTrackingMode, InventoryStatus, LaboratoryId, UserId};
-use crate::routes::parameter_filters::{
+use crate::routes::shared::parameter_filters::{
     ParameterFilter, ParameterFilterError, parse_parameter_filters, push_parameter_filters,
 };
 use crate::routes::{PaginatedResponse, Pagination, PaginationError};

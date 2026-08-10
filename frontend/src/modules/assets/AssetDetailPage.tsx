@@ -127,7 +127,7 @@ export function AssetDetailPage() {
       header: "数量",
       key: "quantity",
       render: (item) => {
-        const unit = unitsById.get(item.quantity_unit_id);
+        const unit = unitsById.get(asset.inventory_unit_id);
         return `${formatNumber(item.quantity_on_hand)}${unit ? ` ${unit.symbol}` : ""}`;
       },
     },
@@ -135,7 +135,7 @@ export function AssetDetailPage() {
       header: "已分配",
       key: "allocated",
       render: (item) => {
-        const unit = unitsById.get(item.quantity_unit_id);
+        const unit = unitsById.get(asset.inventory_unit_id);
         return `${formatNumber(item.quantity_allocated)}${unit ? ` ${unit.symbol}` : ""}`;
       },
     },
@@ -223,7 +223,7 @@ export function AssetDetailPage() {
             <DetailItem label="型号" value={asset.model ?? "未填写"} />
             <DetailItem
               label="默认单位"
-              value={unitsById.get(asset.default_unit_id)?.name ?? "未知单位"}
+              value={unitsById.get(asset.inventory_unit_id)?.name ?? "未知单位"}
             />
             <DetailItem
               label="库存"

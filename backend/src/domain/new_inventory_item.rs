@@ -1,15 +1,16 @@
 use crate::domain::{
-    AssetTrackingMode, InventoryItemSerialNumber, InventoryStatus, LocationId, UnitId,
+    AssetTrackingMode, InventoryItemSerialNumber, InventoryStatus, LocationId,
 };
 use std::collections::HashSet;
 
+/// Quantities are always expressed in the owning asset's `inventory_unit_id`, so
+/// an inventory item never carries a unit of its own.
 #[derive(Clone, Debug)]
 pub struct NewInventoryItem {
     pub serial_number: Option<InventoryItemSerialNumber>,
     pub batch_number: Option<String>,
     pub quantity_on_hand: f64,
     pub quantity_allocated: f64,
-    pub quantity_unit_id: UnitId,
     pub location_id: Option<LocationId>,
     pub status: InventoryStatus,
     pub public_notes: Option<String>,
@@ -17,11 +18,9 @@ pub struct NewInventoryItem {
 }
 
 impl NewInventoryItem {
-    #[allow(clippy::too_many_arguments)]
     pub fn serialized(
         serial_number: InventoryItemSerialNumber,
         batch_number: Option<String>,
-        quantity_unit_id: UnitId,
         location_id: Option<LocationId>,
         status: InventoryStatus,
         public_notes: Option<String>,
@@ -32,7 +31,6 @@ impl NewInventoryItem {
             batch_number: normalize_optional_text(batch_number),
             quantity_on_hand: 1.0,
             quantity_allocated: 0.0,
-            quantity_unit_id,
             location_id,
             status,
             public_notes: normalize_optional_text(public_notes),
@@ -45,7 +43,6 @@ impl NewInventoryItem {
         batch_number: Option<String>,
         quantity_on_hand: f64,
         quantity_allocated: f64,
-        quantity_unit_id: UnitId,
         location_id: Option<LocationId>,
         status: InventoryStatus,
         public_notes: Option<String>,
@@ -57,7 +54,6 @@ impl NewInventoryItem {
             batch_number: normalize_optional_text(batch_number),
             quantity_on_hand,
             quantity_allocated,
-            quantity_unit_id,
             location_id,
             status,
             public_notes: normalize_optional_text(public_notes),
@@ -72,8 +68,6 @@ impl NewInventoryItem {
         batch_number: Option<String>,
         quantity_on_hand: Option<f64>,
         quantity_allocated: Option<f64>,
-        quantity_unit_id: Option<UnitId>,
-        default_unit_id: UnitId,
         location_id: Option<LocationId>,
         status: Option<String>,
         public_notes: Option<String>,
@@ -86,10 +80,7 @@ impl NewInventoryItem {
             .unwrap_or(InventoryStatus::Available);
         match tracking_mode {
             AssetTrackingMode::Serialized => {
-                if quantity_on_hand.is_some()
-                    || quantity_allocated.is_some()
-                    || quantity_unit_id.is_some()
-                {
+                if quantity_on_hand.is_some() || quantity_allocated.is_some() {
                     return Err("Serialized inventory items cannot specify quantity fields".into());
                 }
                 Ok(Self::serialized(
@@ -97,7 +88,6 @@ impl NewInventoryItem {
                         "Serialized inventory items require serial_number".to_string()
                     })?)?,
                     batch_number,
-                    default_unit_id,
                     location_id,
                     status,
                     public_notes,
@@ -110,16 +100,12 @@ impl NewInventoryItem {
                         "Quantity-tracked inventory items cannot specify serial_number".into(),
                     );
                 }
-                if quantity_unit_id.is_some_and(|unit_id| unit_id != default_unit_id) {
-                    return Err("Inventory item unit must match asset default unit".into());
-                }
                 Self::quantity(
                     batch_number,
                     quantity_on_hand.ok_or_else(|| {
                         "Quantity-tracked inventory items require quantity_on_hand".to_string()
                     })?,
                     quantity_allocated.unwrap_or(0.0),
-                    default_unit_id,
                     location_id,
                     status,
                     public_notes,
@@ -135,7 +121,6 @@ pub enum NewInventoryItems {
     Serialized {
         serial_source: InventoryItemSerialSource,
         batch_number: Option<String>,
-        quantity_unit_id: UnitId,
         location_id: Option<LocationId>,
         status: InventoryStatus,
         public_notes: Option<String>,
@@ -154,8 +139,6 @@ impl NewInventoryItems {
         batch_number: Option<String>,
         quantity_on_hand: Option<f64>,
         quantity_allocated: Option<f64>,
-        quantity_unit_id: Option<UnitId>,
-        default_unit_id: UnitId,
         location_id: Option<LocationId>,
         status: Option<String>,
         public_notes: Option<String>,
@@ -168,10 +151,7 @@ impl NewInventoryItems {
             .unwrap_or(InventoryStatus::Available);
         match tracking_mode {
             AssetTrackingMode::Serialized => {
-                if quantity_on_hand.is_some()
-                    || quantity_allocated.is_some()
-                    || quantity_unit_id.is_some()
-                {
+                if quantity_on_hand.is_some() || quantity_allocated.is_some() {
                     return Err("Serialized inventory items cannot specify quantity fields".into());
                 }
                 Ok(Self::Serialized {
@@ -181,7 +161,6 @@ impl NewInventoryItems {
                         count,
                     )?,
                     batch_number: normalize_optional_text(batch_number),
-                    quantity_unit_id: default_unit_id,
                     location_id,
                     status,
                     public_notes: normalize_optional_text(public_notes),
@@ -192,16 +171,12 @@ impl NewInventoryItems {
                 if serial_items.is_some() || serial_numbers.is_some() || count.is_some() {
                     return Err("Quantity-tracked inventory items cannot specify serial_items, serial_numbers, or count".into());
                 }
-                if quantity_unit_id.is_some_and(|unit_id| unit_id != default_unit_id) {
-                    return Err("Inventory item unit must match asset default unit".into());
-                }
                 Ok(Self::Quantity(NewInventoryItem::quantity(
                     batch_number,
                     quantity_on_hand.ok_or_else(|| {
                         "Quantity-tracked inventory items require quantity_on_hand".to_string()
                     })?,
                     quantity_allocated.unwrap_or(0.0),
-                    default_unit_id,
                     location_id,
                     status,
                     public_notes,
@@ -307,8 +282,7 @@ mod tests {
     use super::{
         InventoryItemSerialSource, NewInventoryItem, NewInventoryItems, validate_quantities,
     };
-    use crate::domain::{AssetTrackingMode, UnitId};
-    use uuid::Uuid;
+    use crate::domain::AssetTrackingMode;
 
     #[test]
     fn serial_sources_reject_empty_duplicate_and_oversized_inputs() {
@@ -342,7 +316,6 @@ mod tests {
 
     #[test]
     fn tracking_mode_rejects_incompatible_field_combinations() {
-        let unit_id = UnitId(Uuid::new_v4());
         assert!(
             NewInventoryItem::parse_for_tracking_mode(
                 AssetTrackingMode::Serialized,
@@ -350,8 +323,6 @@ mod tests {
                 None,
                 Some(1.0),
                 None,
-                None,
-                unit_id,
                 None,
                 None,
                 None,
@@ -368,8 +339,6 @@ mod tests {
                 None,
                 Some(1.0),
                 None,
-                None,
-                unit_id,
                 None,
                 None,
                 None,

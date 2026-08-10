@@ -7,32 +7,7 @@ pub struct NewAsset {
     pub name: AssetName,
     pub model: Option<String>,
     pub manufacturer: Option<String>,
-    pub default_unit_id: UnitId,
+    pub inventory_unit_id: UnitId,
     pub public_notes: Option<String>,
     pub internal_notes: Option<String>,
-}
-
-impl NewAsset {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        category_id: Option<AssetCategoryId>,
-        tracking_mode: AssetTrackingMode,
-        name: AssetName,
-        model: Option<String>,
-        manufacturer: Option<String>,
-        default_unit_id: UnitId,
-        public_notes: Option<String>,
-        internal_notes: Option<String>,
-    ) -> Self {
-        Self {
-            category_id,
-            tracking_mode,
-            name,
-            model,
-            manufacturer,
-            default_unit_id,
-            public_notes,
-            internal_notes,
-        }
-    }
 }

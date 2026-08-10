@@ -1,19 +1,22 @@
 use super::model::{
-    AssetCategoryParameterAssignmentInput, AssetCategoryResponse, AssetCategoryRow,
-    create_asset_category_rollback_details, fetch_asset_category_for_update,
-    fetch_asset_parameter_ids_for_laboratory, insert_asset_category_parameter_assignments,
-    map_database_conflict,
+    AssetCategoryParameterAssignmentInput, AssetCategoryResponse,
+    create_asset_category_rollback_details,
+};
+use super::queries::{AssetCategoryDatabaseError, insert_asset_category};
+use super::service::{
+    build_path_and_depth, insert_parameter_assignments, resolve_new_parent,
+    validate_parameter_assignments,
 };
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{AssetCategoryCode, AssetCategoryId, AssetCategoryName, NewAssetCategory};
+use crate::domain::{AssetCategoryCode, AssetCategoryName, NewAssetCategory};
 use crate::domain::{LaboratoryId, UserId};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use serde::Deserialize;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use std::collections::HashSet;
 use uuid::Uuid;
 
@@ -44,8 +47,35 @@ impl TryFrom<JsonData> for NewAssetCategory {
         let name = AssetCategoryName::parse(value.name)?;
         let code = AssetCategoryCode::parse(value.code)?;
 
-        Ok(Self::new(parent_category_id, name, code, value.description))
+        Ok(Self {
+            parent_category_id,
+            name,
+            code,
+            description: value.description,
+        })
     }
+}
+
+fn parse_parameter_assignments(
+    assignments: &[ParameterAssignmentJsonData],
+) -> Result<Vec<AssetCategoryParameterAssignmentInput>, String> {
+    let mut seen_parameter_ids = HashSet::new();
+    let mut parsed = Vec::with_capacity(assignments.len());
+
+    for assignment in assignments {
+        if !seen_parameter_ids.insert(assignment.parameter_type_id) {
+            return Err("Asset parameter assignments must be unique".into());
+        }
+
+        parsed.push(AssetCategoryParameterAssignmentInput {
+            parameter_type_id: assignment.parameter_type_id,
+            applies_to_descendants: assignment.applies_to_descendants.unwrap_or(true),
+            is_required: assignment.is_required.unwrap_or(true),
+            sort_order: assignment.sort_order.unwrap_or(0),
+        });
+    }
+
+    Ok(parsed)
 }
 
 #[derive(thiserror::Error)]
@@ -73,6 +103,16 @@ impl ResponseError for CreateAssetCategoryError {
             CreateAssetCategoryError::Forbidden(_) => StatusCode::FORBIDDEN,
             CreateAssetCategoryError::ConflictError(_) => StatusCode::CONFLICT,
             CreateAssetCategoryError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<AssetCategoryDatabaseError> for CreateAssetCategoryError {
+    fn from(error: AssetCategoryDatabaseError) -> Self {
+        match error {
+            AssetCategoryDatabaseError::Validation(message) => Self::ValidationError(message),
+            AssetCategoryDatabaseError::Conflict(message) => Self::ConflictError(message),
+            AssetCategoryDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
         }
     }
 }
@@ -113,15 +153,23 @@ pub async fn create_asset_category(
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    let parent = fetch_parent_category(&mut transaction, new_category.parent_category_id).await?;
-    validate_parent(&parent, laboratory_id)?;
-    validate_parameter_assignments(&mut transaction, laboratory_id, &parameter_assignments).await?;
-    let parent_category_id = new_category.parent_category_id;
+    let parent = resolve_new_parent(
+        &mut transaction,
+        laboratory_id,
+        new_category.parent_category_id,
+    )
+    .await?;
+    validate_parameter_assignments(
+        &mut transaction,
+        laboratory_id.into(),
+        &parameter_assignments,
+    )
+    .await?;
     let (path, depth) = build_path_and_depth(parent.as_ref(), new_category.code.as_ref());
     let category = insert_asset_category(
         &mut transaction,
         laboratory_id,
-        parent_category_id,
+        new_category.parent_category_id,
         new_category.name.as_ref(),
         new_category.code.as_ref(),
         &path,
@@ -129,7 +177,7 @@ pub async fn create_asset_category(
         new_category.description.as_deref(),
     )
     .await?;
-    let parameter_assignments = insert_asset_category_parameter_assignments(
+    let parameter_assignments = insert_parameter_assignments(
         &mut transaction,
         category.laboratory_id,
         category.category_id,
@@ -157,163 +205,4 @@ pub async fn create_asset_category(
             parameter_assignments,
         )),
     )
-}
-
-async fn fetch_parent_category(
-    transaction: &mut Transaction<'_, Postgres>,
-    parent_category_id: Option<AssetCategoryId>,
-) -> Result<Option<AssetCategoryRow>, CreateAssetCategoryError> {
-    let Some(parent_category_id) = parent_category_id else {
-        return Ok(None);
-    };
-
-    fetch_asset_category_for_update(transaction, parent_category_id)
-        .await?
-        .ok_or(CreateAssetCategoryError::ValidationError(
-            "Parent category not found".into(),
-        ))
-        .map(Some)
-}
-
-fn validate_parent(
-    parent: &Option<AssetCategoryRow>,
-    laboratory_id: LaboratoryId,
-) -> Result<(), CreateAssetCategoryError> {
-    if let Some(parent) = parent {
-        if parent.laboratory_id != Uuid::from(laboratory_id) {
-            return Err(CreateAssetCategoryError::ValidationError(
-                "Parent category does not belong to this laboratory".into(),
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn parse_parameter_assignments(
-    assignments: &[ParameterAssignmentJsonData],
-) -> Result<Vec<AssetCategoryParameterAssignmentInput>, String> {
-    let mut seen_parameter_ids = HashSet::new();
-    let mut parsed = Vec::with_capacity(assignments.len());
-
-    for assignment in assignments {
-        if !seen_parameter_ids.insert(assignment.parameter_type_id) {
-            return Err("Asset parameter assignments must be unique".into());
-        }
-
-        parsed.push(AssetCategoryParameterAssignmentInput {
-            parameter_type_id: assignment.parameter_type_id,
-            applies_to_descendants: assignment.applies_to_descendants.unwrap_or(true),
-            is_required: assignment.is_required.unwrap_or(true),
-            sort_order: assignment.sort_order.unwrap_or(0),
-        });
-    }
-
-    Ok(parsed)
-}
-
-async fn validate_parameter_assignments(
-    transaction: &mut Transaction<'_, Postgres>,
-    laboratory_id: LaboratoryId,
-    assignments: &[AssetCategoryParameterAssignmentInput],
-) -> Result<(), CreateAssetCategoryError> {
-    let parameter_type_ids: Vec<_> = assignments
-        .iter()
-        .map(|assignment| assignment.parameter_type_id)
-        .collect();
-    let valid_parameter_type_ids = fetch_asset_parameter_ids_for_laboratory(
-        transaction,
-        laboratory_id.into(),
-        &parameter_type_ids,
-    )
-    .await?;
-
-    if valid_parameter_type_ids.len() != parameter_type_ids.len() {
-        return Err(CreateAssetCategoryError::ValidationError(
-            "Asset parameter does not belong to this laboratory".into(),
-        ));
-    }
-
-    Ok(())
-}
-
-fn build_path_and_depth(parent: Option<&AssetCategoryRow>, code: &str) -> (String, i32) {
-    match parent {
-        Some(parent) => (format!("{}.{}", parent.path, code), parent.depth + 1),
-        None => (code.to_string(), 0),
-    }
-}
-
-#[tracing::instrument(
-    name = "Saving new asset category in the database",
-    skip(transaction, name, code, path, description),
-    fields(laboratory_id=%laboratory_id)
-)]
-async fn insert_asset_category(
-    transaction: &mut Transaction<'_, Postgres>,
-    laboratory_id: LaboratoryId,
-    parent_category_id: Option<AssetCategoryId>,
-    name: &str,
-    code: &str,
-    path: &str,
-    depth: i32,
-    description: Option<&str>,
-) -> Result<AssetCategoryRow, CreateAssetCategoryError> {
-    sqlx::query_as!(
-        AssetCategoryRow,
-        r#"
-        INSERT INTO asset_categories (
-            category_id,
-            laboratory_id,
-            parent_category_id,
-            name,
-            code,
-            path,
-            depth,
-            description
-        )
-        VALUES ($1, $2, $3, $4, $5, $6::text::ltree, $7, $8)
-        RETURNING
-            category_id,
-            laboratory_id,
-            parent_category_id,
-            name,
-            code,
-            path::text AS "path!",
-            depth,
-            description,
-            created_at,
-            updated_at
-        "#,
-        Uuid::new_v4(),
-        *laboratory_id,
-        parent_category_id.map(Uuid::from),
-        name,
-        code,
-        path,
-        depth,
-        description,
-    )
-    .fetch_one(transaction.as_mut())
-    .await
-    .map_err(map_database_error)
-}
-
-fn map_database_error(error: sqlx::Error) -> CreateAssetCategoryError {
-    if let Some(message) = map_database_conflict(
-        &error,
-        "Asset category name already exists under this parent",
-        "Asset category code already exists under this parent",
-        "Asset category path already exists",
-        "Asset category already exists",
-    ) {
-        return CreateAssetCategoryError::ConflictError(message);
-    }
-
-    if let sqlx::Error::Database(database_error) = &error {
-        if database_error.code().as_deref() == Some("23503") {
-            return CreateAssetCategoryError::ValidationError("Invalid laboratory".into());
-        }
-    }
-
-    CreateAssetCategoryError::UnexpectedError(error.into())
 }

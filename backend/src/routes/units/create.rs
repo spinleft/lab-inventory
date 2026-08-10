@@ -1,6 +1,5 @@
-use super::model::{
-    UnitDatabaseError, UnitResponse, UnitRow, create_unit_rollback_details, map_unit_database_error,
-};
+use super::model::{UnitResponse, create_unit_rollback_details};
+use super::queries::{UnitDatabaseError, insert_unit};
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{NewUnit, UnitCode, UnitDimension, UnitName, UnitSymbol, UserId};
@@ -9,7 +8,7 @@ use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use serde::Deserialize;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -67,6 +66,16 @@ impl ResponseError for CreateUnitError {
     }
 }
 
+impl From<UnitDatabaseError> for CreateUnitError {
+    fn from(error: UnitDatabaseError) -> Self {
+        match error {
+            UnitDatabaseError::Validation(message) => Self::ValidationError(message),
+            UnitDatabaseError::Conflict(message) => Self::ConflictError(message),
+            UnitDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
+        }
+    }
+}
+
 #[tracing::instrument(
     name = "Create a unit",
     skip(pool, payload),
@@ -98,7 +107,7 @@ pub async fn create_unit(
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    let unit = insert_new_unit(&mut transaction, *laboratory_id, new_unit).await?;
+    let unit = insert_unit(&mut transaction, *laboratory_id, &new_unit).await?;
     record_audit(
         &mut transaction,
         actor_user_id,
@@ -114,49 +123,4 @@ pub async fn create_unit(
         .context("Failed to commit SQL transaction to store a new unit.")?;
 
     Ok(HttpResponse::Created().json(UnitResponse::from(unit)))
-}
-
-#[tracing::instrument(name = "Saving new unit in the database", skip(transaction, new_unit))]
-async fn insert_new_unit(
-    transaction: &mut Transaction<'_, Postgres>,
-    laboratory_id: Uuid,
-    new_unit: NewUnit,
-) -> Result<UnitRow, CreateUnitError> {
-    let dimension = new_unit.dimension.to_string();
-    sqlx::query_as!(
-        UnitRow,
-        r#"
-        INSERT INTO units (unit_id, laboratory_id, code, name, symbol, dimension, scale_to_base, allow_decimal)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING unit_id, laboratory_id, code, name, symbol, dimension, scale_to_base, allow_decimal, created_at
-        "#,
-        Uuid::new_v4(),
-        laboratory_id,
-        new_unit.code.as_ref(),
-        new_unit.name.as_ref(),
-        new_unit.symbol.as_ref(),
-        &dimension,
-        new_unit.scale_to_base,
-        new_unit.allow_decimal,
-    )
-    .fetch_one(transaction.as_mut())
-    .await
-    .map_err(map_database_error)
-}
-
-fn map_database_error(error: sqlx::Error) -> CreateUnitError {
-    if let Some(mapped) = map_unit_database_error(
-        &error,
-        "Unit code already exists",
-        "Unit already exists",
-        "Invalid unit",
-        "Invalid unit dimension",
-    ) {
-        return match mapped {
-            UnitDatabaseError::Conflict(message) => CreateUnitError::ConflictError(message),
-            UnitDatabaseError::Validation(message) => CreateUnitError::ValidationError(message),
-        };
-    }
-
-    CreateUnitError::UnexpectedError(error.into())
 }

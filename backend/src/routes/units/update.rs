@@ -1,7 +1,5 @@
-use super::model::{
-    UnitDatabaseError, UnitResponse, UnitRow, fetch_unit_for_update, map_unit_database_error,
-    update_unit_rollback_details,
-};
+use super::model::{UnitResponse, update_unit_rollback_details};
+use super::queries::{UnitDatabaseError, fetch_unit_for_update, update_unit_in_database};
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{UnitCode, UnitDimension, UnitName, UnitSymbol, UpdateUnit, UserId};
@@ -10,7 +8,7 @@ use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use serde::Deserialize;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -71,6 +69,16 @@ impl ResponseError for UpdateUnitError {
             UpdateUnitError::NotFound(_) => StatusCode::NOT_FOUND,
             UpdateUnitError::ConflictError(_) => StatusCode::CONFLICT,
             UpdateUnitError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<UnitDatabaseError> for UpdateUnitError {
+    fn from(error: UnitDatabaseError) -> Self {
+        match error {
+            UnitDatabaseError::Validation(message) => Self::ValidationError(message),
+            UnitDatabaseError::Conflict(message) => Self::ConflictError(message),
+            UnitDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
         }
     }
 }
@@ -137,63 +145,4 @@ pub async fn update_unit(
         .context("Failed to commit SQL transaction to update a unit.")?;
 
     Ok(HttpResponse::Ok().json(UnitResponse::from(unit)))
-}
-
-#[tracing::instrument(
-    name = "Updating unit in the database",
-    skip(transaction, code, name, symbol, dimension),
-    fields(unit_id=%unit_id)
-)]
-async fn update_unit_in_database(
-    transaction: &mut Transaction<'_, Postgres>,
-    unit_id: Uuid,
-    code: Option<&str>,
-    name: Option<&str>,
-    symbol: Option<&str>,
-    dimension: Option<&str>,
-    scale_to_base: Option<f64>,
-    allow_decimal: Option<bool>,
-) -> Result<UnitRow, UpdateUnitError> {
-    sqlx::query_as!(
-        UnitRow,
-        r#"
-        UPDATE units
-        SET
-            code = COALESCE($2, code),
-            name = COALESCE($3, name),
-            symbol = COALESCE($4, symbol),
-            dimension = COALESCE($5, dimension),
-            scale_to_base = COALESCE($6, scale_to_base),
-            allow_decimal = COALESCE($7, allow_decimal)
-        WHERE unit_id = $1
-        RETURNING unit_id, laboratory_id, code, name, symbol, dimension, scale_to_base, allow_decimal, created_at
-        "#,
-        unit_id,
-        code,
-        name,
-        symbol,
-        dimension,
-        scale_to_base,
-        allow_decimal,
-    )
-    .fetch_one(transaction.as_mut())
-    .await
-    .map_err(map_database_error)
-}
-
-fn map_database_error(error: sqlx::Error) -> UpdateUnitError {
-    if let Some(mapped) = map_unit_database_error(
-        &error,
-        "Unit code already exists",
-        "Unit already exists",
-        "Invalid unit",
-        "Invalid unit dimension",
-    ) {
-        return match mapped {
-            UnitDatabaseError::Conflict(message) => UpdateUnitError::ConflictError(message),
-            UnitDatabaseError::Validation(message) => UpdateUnitError::ValidationError(message),
-        };
-    }
-
-    UpdateUnitError::UnexpectedError(error.into())
 }

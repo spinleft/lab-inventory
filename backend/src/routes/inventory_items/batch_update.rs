@@ -1,8 +1,6 @@
-﻿use super::model::{
-    InventoryItemDatabaseError, InventoryItemResponse, apply_inventory_item_patch,
-    fetch_inventory_items_for_update, update_inventory_item_rollback_details,
-    validate_requested_ids,
-};
+﻿use super::model::{InventoryItemResponse, update_inventory_item_rollback_details};
+use super::queries::{InventoryItemDatabaseError, fetch_inventory_items_for_update};
+use super::service::{apply_inventory_item_patch, validate_requested_ids};
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{InventoryItemIds, UpdateInventoryItem, UserId};
@@ -36,7 +34,6 @@ impl TryFrom<&JsonData> for UpdateInventoryItem {
         Self::parse(
             None,
             value.batch_number.clone(),
-            None,
             None,
             None,
             value

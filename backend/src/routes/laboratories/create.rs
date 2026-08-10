@@ -1,4 +1,5 @@
-use super::model::{LaboratoryResponse, LaboratoryRow, create_laboratory_rollback_details};
+use super::model::{LaboratoryResponse, create_laboratory_rollback_details};
+use super::queries::{LaboratoryDatabaseError, insert_laboratory};
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::UserId;
@@ -7,7 +8,7 @@ use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use serde::Deserialize;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -48,6 +49,15 @@ impl ResponseError for CreateLaboratoryError {
     }
 }
 
+impl From<LaboratoryDatabaseError> for CreateLaboratoryError {
+    fn from(error: LaboratoryDatabaseError) -> Self {
+        match error {
+            LaboratoryDatabaseError::Conflict(message) => Self::ConflictError(message),
+            LaboratoryDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
+        }
+    }
+}
+
 #[tracing::instrument(
     name = "Create a laboratory",
     skip(pool, payload),
@@ -80,7 +90,7 @@ pub async fn create_laboratory(
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    let laboratory = insert_new_laboratory(
+    let laboratory = insert_laboratory(
         &mut transaction,
         name,
         address,
@@ -104,53 +114,4 @@ pub async fn create_laboratory(
         .context("Failed to commit SQL transaction to store a new laboratory.")?;
 
     Ok(HttpResponse::Created().json(LaboratoryResponse::from(laboratory)))
-}
-
-#[tracing::instrument(
-    name = "Saving new laboratory in the database",
-    skip(transaction, name, address, description, contact)
-)]
-async fn insert_new_laboratory(
-    transaction: &mut Transaction<'_, Postgres>,
-    name: &str,
-    address: &str,
-    description: Option<&str>,
-    contact: Option<&str>,
-) -> Result<LaboratoryRow, CreateLaboratoryError> {
-    sqlx::query_as!(
-        LaboratoryRow,
-        r#"
-        INSERT INTO laboratories (laboratory_id, name, address, description, contact)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING laboratory_id, name, address, description, contact, created_at, updated_at
-        "#,
-        Uuid::new_v4(),
-        name,
-        address,
-        description,
-        contact,
-    )
-    .fetch_one(transaction.as_mut())
-    .await
-    .map_err(map_database_error)
-}
-
-fn map_database_error(error: sqlx::Error) -> CreateLaboratoryError {
-    if let sqlx::Error::Database(database_error) = &error {
-        match (
-            database_error.code().as_deref(),
-            database_error.constraint(),
-        ) {
-            (Some("23505"), Some("laboratories_name_key")) => {
-                return CreateLaboratoryError::ConflictError(
-                    "Laboratory name already exists".into(),
-                );
-            }
-            (Some("23505"), _) => {
-                return CreateLaboratoryError::ConflictError("Laboratory already exists".into());
-            }
-            _ => {}
-        }
-    }
-    CreateLaboratoryError::UnexpectedError(error.into())
 }

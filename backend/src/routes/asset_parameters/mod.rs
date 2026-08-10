@@ -3,6 +3,8 @@ mod delete;
 mod get;
 mod list;
 mod model;
+mod queries;
+mod service;
 mod update;
 
 pub use create::create_asset_parameter;

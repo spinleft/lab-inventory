@@ -1,4 +1,5 @@
-use super::model::{UserResponse, UserRow, create_user_rollback_details};
+use super::model::{UserResponse, create_user_rollback_details};
+use super::queries::{UserDatabaseError, insert_user};
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::authentication::hash_password;
@@ -8,14 +9,13 @@ use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
-use secrecy::ExposeSecret;
 use secrecy::Secret;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct JsonData {
+pub struct CreateUserJsonData {
     username: String,
     password: Secret<String>,
     user_type: String,
@@ -24,10 +24,10 @@ pub struct JsonData {
     phone_number: Option<String>,
 }
 
-impl TryFrom<JsonData> for NewUser {
+impl TryFrom<CreateUserJsonData> for NewUser {
     type Error = String;
 
-    fn try_from(value: JsonData) -> Result<Self, Self::Error> {
+    fn try_from(value: CreateUserJsonData) -> Result<Self, Self::Error> {
         let username = UserName::parse(value.username)?;
         let password = UserPassword::parse(value.password)?;
         let user_type = UserType::parse(&value.user_type)?;
@@ -48,7 +48,7 @@ impl TryFrom<JsonData> for NewUser {
 
 #[cfg(test)]
 mod tests {
-    use super::JsonData;
+    use super::CreateUserJsonData;
     use super::NewUser;
     use claims::{assert_err, assert_ok};
     use secrecy::Secret;
@@ -56,7 +56,7 @@ mod tests {
 
     #[test]
     fn valid_json_data_is_converted_to_new_user_successfully() {
-        let json_data = JsonData {
+        let json_data = CreateUserJsonData {
             username: "testuser".into(),
             password: Secret::new("P@ssw0rd".into()),
             user_type: "lab_admin".into(),
@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn invalid_json_data_is_rejected() {
         // Missing laboratory_id for a lab_admin
-        let json_data = JsonData {
+        let json_data = CreateUserJsonData {
             username: "testuser".into(),
             password: Secret::new("P@ssw0rd".into()),
             user_type: "lab_admin".into(),
@@ -113,6 +113,16 @@ impl ResponseError for CreateUserError {
     }
 }
 
+impl From<UserDatabaseError> for CreateUserError {
+    fn from(error: UserDatabaseError) -> Self {
+        match error {
+            UserDatabaseError::Validation(message) => Self::ValidationError(message),
+            UserDatabaseError::Conflict(message) => Self::ConflictError(message),
+            UserDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
+        }
+    }
+}
+
 #[tracing::instrument(
     name = "Creating a user",
     skip(pool, payload),
@@ -125,12 +135,12 @@ impl ResponseError for CreateUserError {
 pub async fn create_user(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    payload: web::Json<JsonData>,
+    payload: web::Json<CreateUserJsonData>,
 ) -> Result<HttpResponse, CreateUserError> {
     let new_user =
         NewUser::try_from(payload.into_inner()).map_err(CreateUserError::ValidationError)?;
     let new_user_role = UserRole {
-        user_type: new_user.user_type.clone(),
+        user_type: new_user.user_type,
         laboratory_id: new_user.laboratory_id,
     };
     if !validate_permission(
@@ -151,7 +161,7 @@ pub async fn create_user(
         .begin()
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
-    let created_user = insert_new_user(&mut transaction, new_user, password_hash).await?;
+    let created_user = insert_user(&mut transaction, new_user, password_hash).await?;
     record_audit(
         &mut transaction,
         actor_user_id,
@@ -166,99 +176,4 @@ pub async fn create_user(
         .await
         .context("Failed to commit SQL transaction to store a new user.")?;
     Ok(HttpResponse::Created().json(UserResponse::from(created_user)))
-}
-
-#[tracing::instrument(
-    name = "Saving new user in the database",
-    skip(new_user, password_hash, transaction)
-)]
-async fn insert_new_user(
-    transaction: &mut Transaction<'_, Postgres>,
-    new_user: NewUser,
-    password_hash: Secret<String>,
-) -> Result<UserRow, CreateUserError> {
-    let new_user_id = Uuid::new_v4();
-    let username = new_user.username.as_ref();
-    let user_type_name = new_user.user_type.to_string();
-    let laboratory_id = new_user.laboratory_id.map(Uuid::from);
-    let email = new_user.email.map(String::from);
-    let phone_number = new_user.phone_number.map(String::from);
-
-    sqlx::query_as!(
-        UserRow,
-        r#"
-        WITH inserted_user AS (
-            INSERT INTO users (user_id, username, password_hash, user_type_id, laboratory_id, email, phone_number)
-            SELECT $1, $2, $3, user_types.user_type_id, $4, $5, $6
-            FROM user_types
-            WHERE user_types.name = $7
-            RETURNING
-                users.user_id,
-                users.username,
-                users.email,
-                users.phone_number,
-                users.user_type_id,
-                users.laboratory_id,
-                users.created_at,
-                users.last_login_at
-        )
-        SELECT
-            inserted_user.user_id,
-            inserted_user.username,
-            inserted_user.email,
-            inserted_user.phone_number,
-            user_types.user_type_id AS "user_type_id?",
-            user_types.name AS "user_type_name?",
-            laboratories.laboratory_id AS "laboratory_id?",
-            laboratories.name AS "laboratory_name?",
-            inserted_user.created_at,
-            inserted_user.last_login_at
-        FROM inserted_user
-        INNER JOIN user_types USING (user_type_id)
-        LEFT JOIN laboratories USING (laboratory_id)
-        "#,
-        new_user_id,
-        username,
-        password_hash.expose_secret(),
-        laboratory_id,
-        email,
-        phone_number,
-        &user_type_name,
-    )
-    .fetch_one(transaction.as_mut())
-    .await
-    .map_err(map_database_error)
-}
-
-fn map_database_error(error: sqlx::Error) -> CreateUserError {
-    if let sqlx::Error::Database(database_error) = &error {
-        match (
-            database_error.code().as_deref(),
-            database_error.constraint(),
-        ) {
-            (Some("23505"), Some("users_username_key")) => {
-                return CreateUserError::ConflictError("Username already exists".into());
-            }
-            (Some("23505"), Some("users_email_key")) => {
-                return CreateUserError::ConflictError("Email already exists".into());
-            }
-            (Some("23505"), Some("users_phone_number_key")) => {
-                return CreateUserError::ConflictError("Phone number already exists".into());
-            }
-            (Some("23505"), _) => {
-                return CreateUserError::ConflictError("User already exists".into());
-            }
-            (Some("23503"), Some("users_laboratory_id_fkey")) => {
-                return CreateUserError::ValidationError("Invalid laboratory".into());
-            }
-            (Some("23503"), Some("users_user_type_id_fkey")) => {
-                return CreateUserError::ValidationError("Invalid user type".into());
-            }
-            (Some("23503"), _) => {
-                return CreateUserError::ValidationError("Invalid referenced record".into());
-            }
-            _ => {}
-        }
-    }
-    CreateUserError::UnexpectedError(error.into())
 }

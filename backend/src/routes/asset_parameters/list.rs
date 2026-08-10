@@ -1,4 +1,5 @@
-use super::model::{AssetParameterResponse, fetch_asset_parameter_options};
+use super::model::AssetParameterResponse;
+use super::queries::{fetch_asset_parameter_options, fetch_asset_parameters};
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::{LaboratoryId, UserId};
 use crate::utils::error_chain_fmt;
@@ -62,32 +63,4 @@ pub async fn list_asset_parameters(
     }
 
     Ok(HttpResponse::Ok().json(response))
-}
-
-async fn fetch_asset_parameters(
-    pool: &PgPool,
-    laboratory_id: LaboratoryId,
-) -> Result<Vec<super::model::AssetParameterRow>, ListAssetParametersError> {
-    sqlx::query_as::<_, super::model::AssetParameterRow>(
-        r#"
-        SELECT
-            parameter_type_id,
-            laboratory_id,
-            code,
-            name,
-            data_type::text AS data_type,
-            unit_dimension,
-            default_unit_id,
-            description,
-            created_at,
-            updated_at
-        FROM asset_parameter_types
-        WHERE laboratory_id = $1
-        ORDER BY code
-        "#,
-    )
-    .bind(*laboratory_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| ListAssetParametersError::UnexpectedError(e.into()))
 }

@@ -1,20 +1,26 @@
 use super::model::{
-    FederationError, GuestLinkResponse, GuestLinkRow, PairingCodeRow, TrustResponse, TrustRow,
-    fetch_laboratory_identity, fetch_local_node, guest_link_audit_details, trust_audit_details,
-    upsert_remote_node, upsert_trust,
+    FederationError, GuestLinkResponse, TrustResponse, guest_link_audit_details,
+    trust_audit_details,
+};
+use super::queries::{
+    fetch_guest_link, fetch_guest_links, fetch_laboratory_identity, fetch_local_node, fetch_trusts,
+    insert_pairing_code, revoke_trust_in_database, upsert_remote_node, upsert_trust,
 };
 use super::security::{
     ensure_enabled, generate_token, normalize_base_url, sha256_hex, validate_tls_pin_value,
     verify_tls_pin,
 };
-use crate::access_control::{Actor, get_actor};
+use super::service::{
+    federation_reader_for_laboratory, lab_admin_for_laboratory, merge_guest_link_user,
+    validate_target_guest,
+};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::configuration::FederationSettings;
-use crate::domain::{LaboratoryId, UserId, UserType};
+use crate::domain::UserId;
 use actix_web::{HttpRequest, HttpResponse, web};
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -81,27 +87,14 @@ pub async fn create_pairing_code(
     let code = generate_token(24);
     let code_hash = sha256_hex(code.as_bytes());
     let expires_at = Utc::now() + Duration::minutes(15);
-    let row = sqlx::query_as::<_, PairingCodeRow>(
-        r#"
-        INSERT INTO federation_pairing_codes (
-            pairing_code_id,
-            local_laboratory_id,
-            code_hash,
-            expires_at,
-            created_by_user_id
-        )
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING pairing_code_id, local_laboratory_id, expires_at
-        "#,
+    let row = insert_pairing_code(
+        &pool,
+        laboratory_id,
+        &code_hash,
+        expires_at,
+        *actor.user_id,
     )
-    .bind(Uuid::new_v4())
-    .bind(laboratory_id)
-    .bind(code_hash)
-    .bind(expires_at)
-    .bind(*actor.user_id)
-    .fetch_one(pool.get_ref())
-    .await
-    .map_err(|e| FederationError::UnexpectedError(e.into()))?;
+    .await?;
 
     Ok(HttpResponse::Created().json(PairingCodeResponse {
         pairing_code_id: row.pairing_code_id,
@@ -232,31 +225,9 @@ pub async fn list_trusts(
     ensure_enabled(&settings)?;
     let laboratory_id = laboratory_id.into_inner();
     federation_reader_for_laboratory(&pool, actor_user_id, laboratory_id).await?;
-    let rows = sqlx::query_as::<_, TrustWithRemoteRow>(
-        r#"
-        SELECT
-            trusts.trust_id,
-            trusts.local_laboratory_id,
-            trusts.remote_node_id,
-            trusts.remote_laboratory_id,
-            trusts.remote_laboratory_name,
-            trusts.status,
-            trusts.created_at,
-            trusts.updated_at,
-            trusts.revoked_at,
-            nodes.base_url AS remote_base_url
-        FROM federation_laboratory_trusts AS trusts
-        JOIN federation_remote_nodes AS nodes
-          ON nodes.remote_node_id = trusts.remote_node_id
-        WHERE trusts.local_laboratory_id = $1
-        ORDER BY trusts.created_at DESC, trusts.trust_id
-        "#,
-    )
-    .bind(laboratory_id)
-    .fetch_all(pool.get_ref())
-    .await
-    .map_err(|e| FederationError::UnexpectedError(e.into()))?;
-    Ok(HttpResponse::Ok().json(rows))
+    let trusts = fetch_trusts(&pool, laboratory_id).await?;
+
+    Ok(HttpResponse::Ok().json(trusts))
 }
 
 #[tracing::instrument(
@@ -279,23 +250,7 @@ pub async fn revoke_trust(
         .begin()
         .await
         .map_err(|e| FederationError::UnexpectedError(e.into()))?;
-    let trust = sqlx::query_as::<_, TrustRow>(
-        r#"
-        UPDATE federation_laboratory_trusts
-        SET status = 'revoked',
-            revoked_at = now(),
-            updated_at = now()
-        WHERE local_laboratory_id = $1
-          AND trust_id = $2
-        RETURNING trust_id, local_laboratory_id, remote_node_id, remote_laboratory_id, remote_laboratory_name, status, created_at, updated_at, revoked_at
-        "#,
-    )
-    .bind(laboratory_id)
-    .bind(trust_id)
-    .fetch_optional(transaction.as_mut())
-    .await
-    .map_err(|e| FederationError::UnexpectedError(e.into()))?
-    .ok_or_else(|| FederationError::NotFound("Federation trust not found".into()))?;
+    let trust = revoke_trust_in_database(&mut transaction, laboratory_id, trust_id).await?;
     record_audit(
         &mut transaction,
         &actor,
@@ -360,37 +315,13 @@ pub async fn merge_guest_link(
         .begin()
         .await
         .map_err(|e| FederationError::UnexpectedError(e.into()))?;
-    let old_guest_user_id: Uuid = sqlx::query_scalar(
-        r#"
-        SELECT local_guest_user_id
-        FROM federation_guest_links
-        WHERE local_laboratory_id = $1
-          AND link_id = $2
-        FOR UPDATE
-        "#,
+    merge_guest_link_user(
+        &mut transaction,
+        laboratory_id,
+        link_id,
+        target_guest_user_id,
     )
-    .bind(laboratory_id)
-    .bind(link_id)
-    .fetch_optional(transaction.as_mut())
-    .await
-    .map_err(|e| FederationError::UnexpectedError(e.into()))?
-    .ok_or_else(|| FederationError::NotFound("Federation guest link not found".into()))?;
-    sqlx::query(
-        r#"
-        UPDATE federation_guest_links
-        SET local_guest_user_id = $3,
-            last_seen_at = now()
-        WHERE local_laboratory_id = $1
-          AND link_id = $2
-        "#,
-    )
-    .bind(laboratory_id)
-    .bind(link_id)
-    .bind(target_guest_user_id)
-    .execute(transaction.as_mut())
-    .await
-    .map_err(|e| FederationError::UnexpectedError(e.into()))?;
-    delete_unused_shadow_guest(&mut transaction, old_guest_user_id).await?;
+    .await?;
     record_audit(
         &mut transaction,
         &actor,
@@ -410,181 +341,11 @@ pub async fn merge_guest_link(
     Ok(HttpResponse::Ok().json(GuestLinkResponse::from(link)))
 }
 
-#[derive(Serialize, sqlx::FromRow)]
-struct TrustWithRemoteRow {
-    trust_id: Uuid,
-    local_laboratory_id: Uuid,
-    remote_node_id: Uuid,
-    remote_base_url: String,
-    remote_laboratory_id: Uuid,
-    remote_laboratory_name: Option<String>,
-    status: String,
-    created_at: chrono::DateTime<Utc>,
-    updated_at: chrono::DateTime<Utc>,
-    revoked_at: Option<chrono::DateTime<Utc>>,
-}
-
-async fn lab_admin_for_laboratory(
-    pool: &PgPool,
-    actor_user_id: UserId,
-    laboratory_id: Uuid,
-) -> Result<Actor, FederationError> {
-    let actor = get_actor(pool, actor_user_id)
-        .await
-        .map_err(FederationError::UnexpectedError)?
-        .ok_or_else(|| FederationError::Forbidden("Actor not found in the database".into()))?;
-    let laboratory_id = LaboratoryId::parse(laboratory_id)
-        .map_err(|e| FederationError::UnexpectedError(anyhow::anyhow!("{e}")))?;
-    if actor.is_lab_admin() && actor.laboratory_id == Some(laboratory_id) {
-        Ok(actor)
-    } else {
-        Err(FederationError::Forbidden(
-            "Only this laboratory's administrator can manage federation".into(),
-        ))
-    }
-}
-
-async fn federation_reader_for_laboratory(
-    pool: &PgPool,
-    actor_user_id: UserId,
-    laboratory_id: Uuid,
-) -> Result<Actor, FederationError> {
-    let actor = get_actor(pool, actor_user_id)
-        .await
-        .map_err(FederationError::UnexpectedError)?
-        .ok_or_else(|| FederationError::Forbidden("Actor not found in the database".into()))?;
-    let laboratory_id = LaboratoryId::parse(laboratory_id)
-        .map_err(|e| FederationError::UnexpectedError(anyhow::anyhow!("{e}")))?;
-    if (actor.is_lab_admin() || actor.is_regular_user())
-        && actor.laboratory_id == Some(laboratory_id)
-    {
-        Ok(actor)
-    } else {
-        Err(FederationError::Forbidden(
-            "Only this laboratory's administrators and users can view federation".into(),
-        ))
-    }
-}
-
-async fn validate_target_guest(
-    pool: &PgPool,
-    laboratory_id: Uuid,
-    target_guest_user_id: Uuid,
-) -> Result<(), FederationError> {
-    let row: Option<(String, Option<Uuid>)> = sqlx::query_as(
-        r#"
-        SELECT user_types.name, users.laboratory_id
-        FROM users
-        JOIN user_types USING (user_type_id)
-        WHERE users.user_id = $1
-        "#,
-    )
-    .bind(target_guest_user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| FederationError::UnexpectedError(e.into()))?;
-    let Some((user_type, user_laboratory_id)) = row else {
-        return Err(FederationError::ValidationError(
-            "Target guest user not found".into(),
-        ));
-    };
-    if UserType::parse(&user_type).map_err(FederationError::ValidationError)? != UserType::Guest
-        || user_laboratory_id != Some(laboratory_id)
-    {
-        return Err(FederationError::ValidationError(
-            "Target user must be a guest in this laboratory".into(),
-        ));
-    }
-    Ok(())
-}
-
-async fn fetch_guest_links(
-    pool: &PgPool,
-    laboratory_id: Uuid,
-) -> Result<Vec<GuestLinkRow>, FederationError> {
-    sqlx::query_as::<_, GuestLinkRow>(&guest_link_select(
-        "WHERE links.local_laboratory_id = $1 ORDER BY links.last_seen_at DESC, links.link_id",
-    ))
-    .bind(laboratory_id)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| FederationError::UnexpectedError(e.into()))
-}
-
-async fn fetch_guest_link(
-    pool: &PgPool,
-    laboratory_id: Uuid,
-    link_id: Uuid,
-) -> Result<GuestLinkRow, FederationError> {
-    sqlx::query_as::<_, GuestLinkRow>(&guest_link_select(
-        "WHERE links.local_laboratory_id = $1 AND links.link_id = $2",
-    ))
-    .bind(laboratory_id)
-    .bind(link_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| FederationError::UnexpectedError(e.into()))?
-    .ok_or_else(|| FederationError::NotFound("Federation guest link not found".into()))
-}
-
-fn guest_link_select(suffix: &str) -> String {
-    format!(
-        r#"
-        SELECT
-            links.link_id,
-            links.local_laboratory_id,
-            links.remote_node_id,
-            links.remote_laboratory_id,
-            links.remote_user_id,
-            links.remote_username,
-            links.remote_user_type,
-            links.local_guest_user_id,
-            links.first_seen_at,
-            links.last_seen_at,
-            users.username AS local_guest_username,
-            nodes.base_url AS remote_base_url
-        FROM federation_guest_links AS links
-        JOIN users ON users.user_id = links.local_guest_user_id
-        JOIN federation_remote_nodes AS nodes ON nodes.remote_node_id = links.remote_node_id
-        {suffix}
-        "#
-    )
-}
-
-async fn delete_unused_shadow_guest(
-    transaction: &mut Transaction<'_, Postgres>,
-    old_guest_user_id: Uuid,
-) -> Result<(), FederationError> {
-    let still_used: bool = sqlx::query_scalar(
-        r#"
-        SELECT EXISTS (
-            SELECT 1
-            FROM federation_guest_links
-            WHERE local_guest_user_id = $1
-        )
-        "#,
-    )
-    .bind(old_guest_user_id)
-    .fetch_one(transaction.as_mut())
-    .await
-    .map_err(|e| FederationError::UnexpectedError(e.into()))?;
-    if still_used {
-        return Ok(());
-    }
-    sqlx::query(
-        r#"
-        DELETE FROM users
-        WHERE user_id = $1
-          AND is_federation_shadow = true
-        "#,
-    )
-    .bind(old_guest_user_id)
-    .execute(transaction.as_mut())
-    .await
-    .map_err(|e| FederationError::UnexpectedError(e.into()))?;
-    Ok(())
-}
-
+/// The address the remote node should call back on.
+///
+/// A configured public base URL is used as-is, except in local development where
+/// it points at loopback and only the address the request actually arrived on
+/// can be reached from outside.
 fn requester_base_url(req: &HttpRequest, settings: &FederationSettings) -> String {
     let connection = req.connection_info();
     let request_base_url = format!("{}://{}", connection.scheme(), connection.host());

@@ -206,17 +206,20 @@ async fn quantity_inventory_items_can_be_created_queried_updated_and_batch_updat
         serde_json::json!({
             "batch_number": "B-001",
             "quantity_on_hand": 10,
-            "quantity_unit_id": unit_id,
             "location_id": location_id,
             "status": "available",
             "public_notes": "rack note"
         }),
     )
     .await;
-    assert_eq!(first_item["quantity_unit_id"], unit_id.to_string());
+    assert_eq!(
+        first_item["asset"]["inventory_unit_id"],
+        unit_id.to_string()
+    );
     let first_item_id = inventory_item_id(&first_item);
 
-    let mismatched_unit = app
+    // The unit comes from the asset, so an item-level unit is unknown input.
+    let item_level_unit = app
         .post_inventory_items(
             asset_id,
             &serde_json::json!({
@@ -226,7 +229,7 @@ async fn quantity_inventory_items_can_be_created_queried_updated_and_batch_updat
             }),
         )
         .await;
-    assert_eq!(mismatched_unit.status().as_u16(), 400);
+    assert_eq!(item_level_unit.status().as_u16(), 400);
 
     let response = app
         .get_inventory_items_with_query(
@@ -270,8 +273,7 @@ async fn quantity_inventory_items_can_be_created_queried_updated_and_batch_updat
         asset_id,
         serde_json::json!({
             "batch_number": "B-003",
-            "quantity_on_hand": 5,
-            "quantity_unit_id": unit_id
+            "quantity_on_hand": 5
         }),
     )
     .await;
@@ -321,7 +323,6 @@ async fn quantity_inventory_items_can_be_split_into_new_or_existing_aggregates()
         serde_json::json!({
             "batch_number": "SPLIT",
             "quantity_on_hand": 10,
-            "quantity_unit_id": unit_id,
             "location_id": source_location_id
         }),
     )
@@ -381,26 +382,10 @@ async fn quantity_inventory_items_merge_strictly_and_reject_mismatched_aggregate
         .unwrap();
 
     let asset_id = create_asset(&app, laboratory_id, unit_id, "quantity", "Merge Reagent").await;
-    let target_id = insert_quantity_item(
-        &app,
-        laboratory_id,
-        asset_id,
-        unit_id,
-        Some("MERGE"),
-        2.0,
-        1.0,
-    )
-    .await;
-    let source_id = insert_quantity_item(
-        &app,
-        laboratory_id,
-        asset_id,
-        unit_id,
-        Some("MERGE"),
-        3.0,
-        1.0,
-    )
-    .await;
+    let target_id =
+        insert_quantity_item(&app, laboratory_id, asset_id, Some("MERGE"), 2.0, 1.0).await;
+    let source_id =
+        insert_quantity_item(&app, laboratory_id, asset_id, Some("MERGE"), 3.0, 1.0).await;
 
     let response = app
         .merge_inventory_items(&serde_json::json!({
@@ -422,16 +407,8 @@ async fn quantity_inventory_items_merge_strictly_and_reject_mismatched_aggregate
     .unwrap();
     assert_eq!(source_count, 0);
 
-    let mismatched_source_id = insert_quantity_item(
-        &app,
-        laboratory_id,
-        asset_id,
-        unit_id,
-        Some("OTHER"),
-        1.0,
-        0.0,
-    )
-    .await;
+    let mismatched_source_id =
+        insert_quantity_item(&app, laboratory_id, asset_id, Some("OTHER"), 1.0, 0.0).await;
     let response = app
         .merge_inventory_items(&serde_json::json!({
             "target_inventory_item_id": target_id,
@@ -591,7 +568,7 @@ async fn create_asset(
             &serde_json::json!({
                 "tracking_mode": tracking_mode,
                 "name": name,
-                "default_unit_id": unit_id
+                "inventory_unit_id": unit_id
             }),
         )
         .await;
@@ -630,7 +607,6 @@ async fn insert_quantity_item(
     app: &TestApp,
     laboratory_id: Uuid,
     asset_id: Uuid,
-    unit_id: Uuid,
     batch_number: Option<&str>,
     quantity_on_hand: f64,
     quantity_allocated: f64,
@@ -645,10 +621,9 @@ async fn insert_quantity_item(
             batch_number,
             quantity_on_hand,
             quantity_allocated,
-            quantity_unit_id,
             status
         )
-        VALUES ($1, $2, $3, 'quantity', $4, $5, $6, $7, 'available')
+        VALUES ($1, $2, $3, 'quantity', $4, $5, $6, 'available')
         RETURNING inventory_item_id
         "#,
     )
@@ -658,7 +633,6 @@ async fn insert_quantity_item(
     .bind(batch_number)
     .bind(quantity_on_hand)
     .bind(quantity_allocated)
-    .bind(unit_id)
     .fetch_one(&app.db_pool)
     .await
     .unwrap()

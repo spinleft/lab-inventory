@@ -11,7 +11,16 @@ async fn list_and_get_units_are_laboratory_scoped() {
     assert_eq!(response.status().as_u16(), 401);
 
     app.test_user.login(&app).await;
-    let own_unit = create_unit(&app, own_laboratory_id, "Own Meter", "om", "length", 1.0, true).await;
+    let own_unit = create_unit(
+        &app,
+        own_laboratory_id,
+        "Own Meter",
+        "om",
+        "length",
+        1.0,
+        true,
+    )
+    .await;
     let own_unit_id = unit_id(&own_unit);
     let other_unit = create_unit(
         &app,
@@ -104,8 +113,7 @@ async fn create_unit_allows_laboratory_writers_and_records_audit() {
     assert_eq!(body["scale_to_base"].as_f64().unwrap(), 0.0254);
     assert_eq!(body["allow_decimal"], true);
 
-    let audit_details =
-        latest_audit_details(&app, app.test_user.user_id, unit_id, "create").await;
+    let audit_details = latest_audit_details(&app, app.test_user.user_id, unit_id, "create").await;
     assert_eq!(audit_details["rollback"]["operation"], "delete");
     assert_eq!(audit_details["rollback"]["resource_type"], "unit");
     assert_eq!(
@@ -250,7 +258,16 @@ async fn update_unit_applies_partial_changes_and_records_audit() {
     let app = spawn_app().await;
     app.test_user.login(&app).await;
     let laboratory_id = app.create_laboratory("Unit Update Lab").await;
-    let unit = create_unit(&app, laboratory_id, "Update Unit", "uu", "length", 0.01, true).await;
+    let unit = create_unit(
+        &app,
+        laboratory_id,
+        "Update Unit",
+        "uu",
+        "length",
+        0.01,
+        true,
+    )
+    .await;
     let unit_id = unit_id(&unit);
     let new_code = unique_unit_code();
 
@@ -277,8 +294,7 @@ async fn update_unit_applies_partial_changes_and_records_audit() {
     assert_eq!(body["scale_to_base"].as_f64().unwrap(), 0.001);
     assert_eq!(body["allow_decimal"], false);
 
-    let audit_details =
-        latest_audit_details(&app, app.test_user.user_id, unit_id, "update").await;
+    let audit_details = latest_audit_details(&app, app.test_user.user_id, unit_id, "update").await;
     assert_eq!(audit_details["rollback"]["operation"], "update");
     assert_eq!(audit_details["rollback"]["values"]["code"], unit["code"]);
     assert_eq!(audit_details["rollback"]["values"]["name"], "Update Unit");
@@ -291,7 +307,16 @@ async fn update_unit_rejects_invalid_duplicate_and_unauthorized_requests() {
     let app = spawn_app().await;
     app.test_user.login(&app).await;
     let laboratory_id = app.create_laboratory("Unit Patch Lab").await;
-    let unit = create_unit(&app, laboratory_id, "Patch Unit", "pu", "length", 0.01, true).await;
+    let unit = create_unit(
+        &app,
+        laboratory_id,
+        "Patch Unit",
+        "pu",
+        "length",
+        0.01,
+        true,
+    )
+    .await;
     let unit_id = unit_id(&unit);
     let sibling = create_unit(
         &app,
@@ -343,8 +368,16 @@ async fn delete_unit_removes_unreferenced_units_and_records_audit() {
     let app = spawn_app().await;
     app.test_user.login(&app).await;
     let laboratory_id = app.create_laboratory("Unit Delete Lab").await;
-    let unreferenced =
-        create_unit(&app, laboratory_id, "Delete Unit", "du", "length", 0.01, true).await;
+    let unreferenced = create_unit(
+        &app,
+        laboratory_id,
+        "Delete Unit",
+        "du",
+        "length",
+        0.01,
+        true,
+    )
+    .await;
     let unreferenced_unit_id = unit_id(&unreferenced);
 
     let response = app.delete_unit(unreferenced_unit_id).await;
@@ -357,13 +390,8 @@ async fn delete_unit_removes_unreferenced_units_and_records_audit() {
         .unwrap();
     assert_eq!(unit_count, 0);
 
-    let audit_details = latest_audit_details(
-        &app,
-        app.test_user.user_id,
-        unreferenced_unit_id,
-        "delete",
-    )
-    .await;
+    let audit_details =
+        latest_audit_details(&app, app.test_user.user_id, unreferenced_unit_id, "delete").await;
     assert_eq!(audit_details["rollback"]["operation"], "create");
     assert_eq!(
         audit_details["rollback"]["values"]["unit_id"],
@@ -400,7 +428,9 @@ async fn delete_unit_rejects_guests_and_members_of_other_laboratories() {
     let app = spawn_app().await;
     app.test_user.login(&app).await;
     let laboratory_id = app.create_laboratory("Unit Delete Forbidden Lab").await;
-    let other_laboratory_id = app.create_laboratory("Unit Delete Forbidden Other Lab").await;
+    let other_laboratory_id = app
+        .create_laboratory("Unit Delete Forbidden Other Lab")
+        .await;
     let unit = create_unit(
         &app,
         laboratory_id,
@@ -477,7 +507,7 @@ async fn insert_test_asset(app: &TestApp, laboratory_id: Uuid, unit_id: Uuid) ->
             laboratory_id,
             tracking_mode,
             name,
-            default_unit_id
+            inventory_unit_id
         )
         VALUES ($1, $2, 'quantity', $3, $4)
         RETURNING asset_id

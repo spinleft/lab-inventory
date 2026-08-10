@@ -1,4 +1,5 @@
-use super::model::{UnitResponse, UnitRow};
+use super::model::UnitResponse;
+use super::queries::fetch_units;
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::domain::{LaboratoryId, UserId};
 use crate::utils::error_chain_fmt;
@@ -57,23 +58,4 @@ pub async fn list_units(
         .collect();
 
     Ok(HttpResponse::Ok().json(units))
-}
-
-async fn fetch_units(
-    pool: &PgPool,
-    laboratory_id: LaboratoryId,
-) -> Result<Vec<UnitRow>, ListUnitsError> {
-    sqlx::query_as!(
-        UnitRow,
-        r#"
-        SELECT unit_id, laboratory_id, code, name, symbol, dimension, scale_to_base, allow_decimal, created_at
-        FROM units
-        WHERE laboratory_id = $1
-        ORDER BY dimension, code
-        "#,
-        Uuid::from(laboratory_id),
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| ListUnitsError::UnexpectedError(e.into()))
 }

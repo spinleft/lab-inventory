@@ -1,6 +1,7 @@
-use super::model::{
-    delete_asset_parameter_rollback_details, fetch_asset_parameter_for_update,
-    fetch_asset_parameter_options_for_update,
+use super::model::delete_asset_parameter_rollback_details;
+use super::queries::{
+    AssetParameterDatabaseError, delete_asset_parameter_from_database,
+    fetch_asset_parameter_for_update, fetch_asset_parameter_options_for_update,
 };
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
@@ -9,11 +10,13 @@ use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum DeleteAssetParameterError {
+    #[error("{0}")]
+    ValidationError(String),
     #[error("{0}")]
     Forbidden(String),
     #[error("{0}")]
@@ -33,10 +36,21 @@ impl std::fmt::Debug for DeleteAssetParameterError {
 impl ResponseError for DeleteAssetParameterError {
     fn status_code(&self) -> StatusCode {
         match self {
+            DeleteAssetParameterError::ValidationError(_) => StatusCode::BAD_REQUEST,
             DeleteAssetParameterError::Forbidden(_) => StatusCode::FORBIDDEN,
             DeleteAssetParameterError::NotFound(_) => StatusCode::NOT_FOUND,
             DeleteAssetParameterError::ConflictError(_) => StatusCode::CONFLICT,
             DeleteAssetParameterError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl From<AssetParameterDatabaseError> for DeleteAssetParameterError {
+    fn from(error: AssetParameterDatabaseError) -> Self {
+        match error {
+            AssetParameterDatabaseError::Validation(message) => Self::ValidationError(message),
+            AssetParameterDatabaseError::Conflict(message) => Self::ConflictError(message),
+            AssetParameterDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
         }
     }
 }
@@ -94,34 +108,4 @@ pub async fn delete_asset_parameter(
         .context("Failed to commit SQL transaction to delete an asset parameter.")?;
 
     Ok(HttpResponse::NoContent().finish())
-}
-
-#[tracing::instrument(
-    name = "Deleting asset parameter from the database",
-    skip(transaction),
-    fields(parameter_id=%parameter_id)
-)]
-async fn delete_asset_parameter_from_database(
-    transaction: &mut Transaction<'_, Postgres>,
-    parameter_id: Uuid,
-) -> Result<(), DeleteAssetParameterError> {
-    sqlx::query("DELETE FROM asset_parameter_types WHERE parameter_type_id = $1")
-        .bind(parameter_id)
-        .execute(transaction.as_mut())
-        .await
-        .map_err(map_database_error)?;
-
-    Ok(())
-}
-
-fn map_database_error(error: sqlx::Error) -> DeleteAssetParameterError {
-    if let sqlx::Error::Database(database_error) = &error {
-        if database_error.code().as_deref() == Some("23503") {
-            return DeleteAssetParameterError::ConflictError(
-                "Asset parameter is referenced by other records".into(),
-            );
-        }
-    }
-
-    DeleteAssetParameterError::UnexpectedError(error.into())
 }

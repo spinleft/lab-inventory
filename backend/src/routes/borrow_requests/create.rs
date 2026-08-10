@@ -1,7 +1,8 @@
-use super::model::{
-    BorrowRequestError, BorrowRequestResponse, actor_for_user, fetch_borrow_request_for_update,
-    fetch_guest_link_id, fetch_user_snapshot, record_borrow_request_audit,
-    validate_inventory_item_read_permission, validate_request_actor,
+use super::model::BorrowRequestResponse;
+use super::queries::{fetch_borrow_request_for_update, insert_borrow_request};
+use super::service::{
+    BorrowRequestError, actor_for_user, fetch_user_snapshot, record_borrow_request_audit,
+    resolve_guest_link_id, validate_inventory_item_read_permission, validate_request_actor,
 };
 use crate::audit::AuditAction;
 use crate::domain::UserId;
@@ -51,38 +52,23 @@ pub async fn create_borrow_request(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    let guest_link_id = fetch_guest_link_id(&mut transaction, actor.user_id, laboratory_id).await?;
+    let guest_link_id = resolve_guest_link_id(&mut transaction, actor.user_id, laboratory_id).await?;
     let (requester_username, requester_user_type) =
         fetch_user_snapshot(&mut transaction, actor.user_id).await?;
     let borrow_request_id = Uuid::new_v4();
 
-    sqlx::query(
-        r#"
-        INSERT INTO federation_borrow_requests (
-            borrow_request_id,
-            local_laboratory_id,
-            inventory_item_id,
-            requester_user_id,
-            requester_username,
-            requester_user_type,
-            requester_guest_link_id,
-            request_note,
-            status
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')
-        "#,
+    insert_borrow_request(
+        &mut transaction,
+        borrow_request_id,
+        laboratory_id,
+        item.inventory_item_id,
+        actor.user_id,
+        &requester_username,
+        &requester_user_type,
+        guest_link_id,
+        request_note.as_deref(),
     )
-    .bind(borrow_request_id)
-    .bind(*laboratory_id)
-    .bind(item.inventory_item_id)
-    .bind(*actor.user_id)
-    .bind(requester_username)
-    .bind(requester_user_type)
-    .bind(guest_link_id)
-    .bind(request_note)
-    .execute(transaction.as_mut())
-    .await
-    .map_err(|e| BorrowRequestError::UnexpectedError(e.into()))?;
+    .await?;
 
     let row = fetch_borrow_request_for_update(&mut transaction, *laboratory_id, borrow_request_id)
         .await?

@@ -1,4 +1,7 @@
-use super::model::{delete_attachment_rollback_details, fetch_attachment_for_update};
+use super::model::delete_attachment_rollback_details;
+use super::queries::{
+    AttachmentDatabaseError, delete_attachment_from_database, fetch_attachment_for_update,
+};
 use crate::access_control::{Action, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{AttachmentId, FileStorageKey, UserId};
@@ -18,8 +21,20 @@ pub enum DeleteAttachmentError {
     Forbidden(String),
     #[error("{0}")]
     NotFound(String),
+    #[error("{0}")]
+    ConflictError(String),
     #[error(transparent)]
     UnexpectedError(#[from] anyhow::Error),
+}
+
+impl From<AttachmentDatabaseError> for DeleteAttachmentError {
+    fn from(error: AttachmentDatabaseError) -> Self {
+        match error {
+            AttachmentDatabaseError::Validation(message) => Self::ValidationError(message),
+            AttachmentDatabaseError::Conflict(message) => Self::ConflictError(message),
+            AttachmentDatabaseError::Unexpected(error) => Self::UnexpectedError(error),
+        }
+    }
 }
 
 impl std::fmt::Debug for DeleteAttachmentError {
@@ -34,6 +49,7 @@ impl ResponseError for DeleteAttachmentError {
             DeleteAttachmentError::ValidationError(_) => StatusCode::BAD_REQUEST,
             DeleteAttachmentError::Forbidden(_) => StatusCode::FORBIDDEN,
             DeleteAttachmentError::NotFound(_) => StatusCode::NOT_FOUND,
+            DeleteAttachmentError::ConflictError(_) => StatusCode::CONFLICT,
             DeleteAttachmentError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -90,28 +106,4 @@ pub async fn delete_attachment(
     storage.delete(&storage_key).await?;
 
     Ok(HttpResponse::NoContent().finish())
-}
-
-#[tracing::instrument(name = "Deleting attachment from the database", skip(transaction), fields(attachment_id=%attachment_id))]
-async fn delete_attachment_from_database(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    attachment_id: AttachmentId,
-) -> Result<(), DeleteAttachmentError> {
-    sqlx::query!(
-        r#"
-            WITH deleted_assignment AS (
-                DELETE FROM asset_attachment_assignments
-                WHERE attachment_id = $1
-                RETURNING file_id
-            )
-            DELETE FROM files
-            WHERE file_id IN (SELECT file_id FROM deleted_assignment)
-        "#,
-        Uuid::from(attachment_id)
-    )
-    .execute(transaction.as_mut())
-    .await
-    .map_err(|e| DeleteAttachmentError::UnexpectedError(e.into()))?;
-
-    Ok(())
 }

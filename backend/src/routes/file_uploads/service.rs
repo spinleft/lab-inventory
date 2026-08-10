@@ -1,5 +1,14 @@
+//! Business flows that chain several statements together.
+//!
+//! Anything here orchestrates `queries.rs` and enforces rules that span more
+//! than one row or table. Single-statement work belongs in `queries.rs`; HTTP
+//! concerns belong in the handler modules.
+//!
+//! [`consume_file_upload`] is the flow other route modules reach for: every
+//! attachment starts life as an upload that is spent here, so its error type
+//! lives with it rather than in a handler module.
 use super::model::ConsumedFileUpload;
-use super::model::FileUploadRow;
+use super::queries::{fetch_file_upload_for_update, mark_file_upload_consumed};
 use crate::domain::FileUploadId;
 use crate::utils::error_chain_fmt;
 use actix_web::ResponseError;
@@ -36,6 +45,11 @@ impl ResponseError for ConsumeFileUploadError {
     }
 }
 
+/// Spends an upload, returning the stored file it points at.
+///
+/// The upload row stays behind marked as consumed rather than being deleted, so
+/// a retry of the same request is rejected instead of silently uploading the
+/// file twice.
 pub async fn consume_file_upload(
     transaction: &mut Transaction<'_, Postgres>,
     upload_id: FileUploadId,
@@ -56,46 +70,7 @@ pub async fn consume_file_upload(
             "File upload has expired".into(),
         ));
     }
-    sqlx::query(
-        r#"
-        UPDATE file_uploads
-        SET consumed_at = now()
-        WHERE upload_id = $1
-        "#,
-    )
-    .bind(upload.upload_id)
-    .execute(transaction.as_mut())
-    .await
-    .map_err(|e| ConsumeFileUploadError::UnexpectedError(e.into()))?;
+    mark_file_upload_consumed(transaction, upload.upload_id).await?;
 
     Ok(upload.into())
-}
-
-async fn fetch_file_upload_for_update(
-    transaction: &mut Transaction<'_, Postgres>,
-    upload_id: FileUploadId,
-) -> Result<Option<FileUploadRow>, ConsumeFileUploadError> {
-    sqlx::query_as::<_, FileUploadRow>(
-        r#"
-        SELECT
-            upload_id,
-            laboratory_id,
-            storage_backend,
-            storage_key,
-            original_file_name,
-            mime_type,
-            file_size_bytes,
-            sha256_hex,
-            uploaded_by_user_id,
-            expires_at,
-            consumed_at
-        FROM file_uploads
-        WHERE upload_id = $1
-        FOR UPDATE
-        "#,
-    )
-    .bind(*upload_id)
-    .fetch_optional(transaction.as_mut())
-    .await
-    .map_err(|e| ConsumeFileUploadError::UnexpectedError(e.into()))
 }
