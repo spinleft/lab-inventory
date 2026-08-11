@@ -11,6 +11,7 @@ import { type Laboratory, useLaboratories } from "../modules/admin/api";
 import {
   canManageLaboratoryAssets,
   canSelectAssetQueryLaboratory,
+  isSystemAdmin,
 } from "../modules/auth/permissions";
 import {
   type FederationTrust,
@@ -56,15 +57,34 @@ export function LaboratorySelectionProvider({ children }: PropsWithChildren) {
   const { currentUser } = useAuth();
   const ownLaboratoryId = currentUser.laboratory?.laboratory_id ?? "";
   const canSelectLaboratory = canSelectAssetQueryLaboratory(currentUser);
+  const canSelectLocalLaboratory = isSystemAdmin(currentUser);
   const canUseFederation =
     (currentUser.user_type.name === "lab_admin" || currentUser.user_type.name === "user") &&
     Boolean(ownLaboratoryId);
-  const laboratoriesQuery = useLaboratories({ enabled: canSelectLaboratory });
+  const laboratoriesQuery = useLaboratories({ enabled: canSelectLocalLaboratory });
   const federationTrustsQuery = useFederationTrusts({
     enabled: canUseFederation,
     laboratoryId: ownLaboratoryId,
   });
-  const laboratories = laboratoriesQuery.data ?? EMPTY_LABORATORIES;
+  const laboratories = useMemo<Laboratory[]>(() => {
+    if (canSelectLocalLaboratory) {
+      return laboratoriesQuery.data ?? EMPTY_LABORATORIES;
+    }
+    if (!currentUser.laboratory) {
+      return EMPTY_LABORATORIES;
+    }
+    return [
+      {
+        address: "",
+        contact: null,
+        created_at: "",
+        description: null,
+        laboratory_id: currentUser.laboratory.laboratory_id,
+        name: currentUser.laboratory.name,
+        updated_at: "",
+      },
+    ];
+  }, [canSelectLocalLaboratory, currentUser.laboratory, laboratoriesQuery.data]);
   const federationTrusts = useMemo(
     () => (federationTrustsQuery.data ?? EMPTY_TRUSTS).filter((trust) => trust.status === "active"),
     [federationTrustsQuery.data],
@@ -134,7 +154,10 @@ export function LaboratorySelectionProvider({ children }: PropsWithChildren) {
     }
 
     if (laboratories.length === 0) {
-      if (laboratoriesQuery.isLoading || laboratoriesQuery.isFetching) {
+      if (
+        canSelectLocalLaboratory &&
+        (laboratoriesQuery.isLoading || laboratoriesQuery.isFetching)
+      ) {
         return;
       }
       if (selectedScopeValueState) {
@@ -170,6 +193,7 @@ export function LaboratorySelectionProvider({ children }: PropsWithChildren) {
     setSelectedLaboratoryId(fallbackLaboratoryId);
   }, [
     canSelectLaboratory,
+    canSelectLocalLaboratory,
     canUseFederation,
     federationTrustsQuery.isFetching,
     federationTrustsQuery.isLoading,

@@ -1,14 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
+import { useAuth } from "../../app/auth-context";
 import { useBackendConfig } from "../../shared/api/backendConfig";
 import { createApiClient } from "../../shared/api/httpClient";
 import { type AttachmentClaim } from "../attachments/api";
+import { isSystemAdmin } from "../auth/permissions";
 import {
   type LaboratoryDataScope,
   inventoryItemDetailPath,
   laboratoryCollectionPath,
   laboratoryDetailScopeCacheKey,
   laboratoryScopeCacheKey,
+  localLaboratoryPath,
   localLaboratoryScope,
 } from "../federation/scope";
 import {
@@ -131,6 +134,7 @@ export function useInventoryItems({
   scope?: LaboratoryDataScope;
 }) {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
   const dataScope = scope ?? localLaboratoryScope(laboratoryId);
 
   return useQuery({
@@ -139,7 +143,10 @@ export function useInventoryItems({
     queryFn: async () => {
       const client = createApiClient(apiBaseUrl);
       return inventoryItemsResponseSchema.parse(
-        await client.get(laboratoryCollectionPath(dataScope, "inventory-items"), query),
+        await client.get(
+          laboratoryCollectionPath(dataScope, "inventory-items", isSystemAdmin(currentUser)),
+          query,
+        ),
       );
     },
   });
@@ -155,6 +162,7 @@ export function useInventoryItem({
   scope?: LaboratoryDataScope;
 }) {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
   const scopeKey = laboratoryDetailScopeCacheKey(scope);
 
   return useQuery({
@@ -163,7 +171,9 @@ export function useInventoryItem({
     queryFn: async () => {
       const client = createApiClient(apiBaseUrl);
       return inventoryItemSchema.parse(
-        await client.get(inventoryItemDetailPath(scope, inventoryItemId)),
+        await client.get(
+          inventoryItemDetailPath(scope, inventoryItemId, isSystemAdmin(currentUser)),
+        ),
       );
     },
   });
@@ -171,20 +181,32 @@ export function useInventoryItem({
 
 export function useCreateInventoryItems() {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async ({
       assetId,
+      laboratoryId,
       payload,
     }: {
       assetId: string;
+      laboratoryId: string;
       payload: CreateInventoryItemsPayload;
     }) => {
       const client = createApiClient(apiBaseUrl);
       return z
         .array(inventoryItemSchema)
-        .parse(await client.post(`/assets/${assetId}/inventory-items`, payload));
+        .parse(
+          await client.post(
+            localLaboratoryPath(
+              laboratoryId,
+              `assets/${assetId}/inventory-items`,
+              isSystemAdmin(currentUser),
+            ),
+            payload,
+          ),
+        );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.root(apiBaseUrl) });
@@ -195,19 +217,29 @@ export function useCreateInventoryItems() {
 
 export function useUpdateInventoryItem() {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async ({
       inventoryItemId,
+      laboratoryId,
       payload,
     }: {
       inventoryItemId: string;
+      laboratoryId: string;
       payload: UpdateInventoryItemPayload;
     }) => {
       const client = createApiClient(apiBaseUrl);
       return inventoryItemSchema.parse(
-        await client.patch(`/inventory-items/${inventoryItemId}`, payload),
+        await client.patch(
+          localLaboratoryPath(
+            laboratoryId,
+            `inventory-items/${inventoryItemId}`,
+            isSystemAdmin(currentUser),
+          ),
+          payload,
+        ),
       );
     },
     onSuccess: (item) => {
@@ -222,12 +254,19 @@ export function useUpdateInventoryItem() {
 
 export function useDeleteInventoryItem() {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (inventoryItemId: string) => {
+    mutationFn: async ({ inventoryItemId, laboratoryId }: { inventoryItemId: string; laboratoryId: string }) => {
       const client = createApiClient(apiBaseUrl);
-      await client.delete(`/inventory-items/${inventoryItemId}`);
+      await client.delete(
+        localLaboratoryPath(
+          laboratoryId,
+          `inventory-items/${inventoryItemId}`,
+          isSystemAdmin(currentUser),
+        ),
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: inventoryQueryKeys.root(apiBaseUrl) });

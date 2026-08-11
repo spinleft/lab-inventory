@@ -10,9 +10,7 @@ use super::queries::{
     fetch_unit_dimension_for_update, insert_asset_parameter_option,
     insert_new_asset_parameter_option, update_asset_parameter_option,
 };
-use crate::domain::{
-    AssetParameterDataType, NewAssetParameterOption, UpdateAssetParameterOption,
-};
+use crate::domain::{AssetParameterDataType, NewAssetParameterOption, UpdateAssetParameterOption};
 use sqlx::{Postgres, Transaction};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;

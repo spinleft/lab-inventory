@@ -279,11 +279,14 @@ async fn quantity_inventory_items_can_be_created_queried_updated_and_batch_updat
     .await;
     let second_item_id = inventory_item_id(&second_item);
     let response = app
-        .patch_inventory_items_batch(&serde_json::json!({
-            "inventory_item_ids": [first_item_id, second_item_id],
-            "status": "retired",
-            "public_notes": null
-        }))
+        .patch_inventory_items_batch(
+            laboratory_id,
+            &serde_json::json!({
+                "inventory_item_ids": [first_item_id, second_item_id],
+                "status": "retired",
+                "public_notes": null
+            }),
+        )
         .await;
     assert_eq!(response.status().as_u16(), 200);
     let batch: serde_json::Value = response.json().await.unwrap();
@@ -388,10 +391,13 @@ async fn quantity_inventory_items_merge_strictly_and_reject_mismatched_aggregate
         insert_quantity_item(&app, laboratory_id, asset_id, Some("MERGE"), 3.0, 1.0).await;
 
     let response = app
-        .merge_inventory_items(&serde_json::json!({
-            "target_inventory_item_id": target_id,
-            "source_inventory_item_ids": [source_id]
-        }))
+        .merge_inventory_items(
+            laboratory_id,
+            &serde_json::json!({
+                "target_inventory_item_id": target_id,
+                "source_inventory_item_ids": [source_id]
+            }),
+        )
         .await;
     assert_eq!(response.status().as_u16(), 200);
     let merged: serde_json::Value = response.json().await.unwrap();
@@ -410,10 +416,13 @@ async fn quantity_inventory_items_merge_strictly_and_reject_mismatched_aggregate
     let mismatched_source_id =
         insert_quantity_item(&app, laboratory_id, asset_id, Some("OTHER"), 1.0, 0.0).await;
     let response = app
-        .merge_inventory_items(&serde_json::json!({
-            "target_inventory_item_id": target_id,
-            "source_inventory_item_ids": [mismatched_source_id]
-        }))
+        .merge_inventory_items(
+            laboratory_id,
+            &serde_json::json!({
+                "target_inventory_item_id": target_id,
+                "source_inventory_item_ids": [mismatched_source_id]
+            }),
+        )
         .await;
     assert_eq!(response.status().as_u16(), 400);
 }
@@ -467,9 +476,12 @@ async fn inventory_item_delete_rejects_allocated_items_and_batch_delete_removes_
     )
     .await;
     let response = app
-        .batch_delete_inventory_items(&serde_json::json!({
-            "inventory_item_ids": [inventory_item_id(&first), inventory_item_id(&second)]
-        }))
+        .batch_delete_inventory_items(
+            laboratory_id,
+            &serde_json::json!({
+                "inventory_item_ids": [inventory_item_id(&first), inventory_item_id(&second)]
+            }),
+        )
         .await;
     assert_eq!(response.status().as_u16(), 204);
 }
@@ -529,14 +541,11 @@ async fn inventory_item_permissions_follow_laboratory_scope() {
     let body: serde_json::Value = response.json().await.unwrap();
     assert_eq!(
         body["items"][0]["inventory_item_id"],
-        other_item_id.to_string()
+        own_item_id.to_string()
     );
-    assert!(body["items"][0]["internal_notes"].is_null());
 
     let response = app.get_inventory_item(other_item_id).await;
-    assert_eq!(response.status().as_u16(), 200);
-    let body: serde_json::Value = response.json().await.unwrap();
-    assert!(body["internal_notes"].is_null());
+    assert_eq!(response.status().as_u16(), 404);
 
     let response = app
         .post_inventory_items(
@@ -544,7 +553,7 @@ async fn inventory_item_permissions_follow_laboratory_scope() {
             &serde_json::json!({ "batch_number": "DENY", "quantity_on_hand": 1 }),
         )
         .await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 404);
 
     let guest = TestUser::generate_with_user_type("guest", Some(own_laboratory_id));
     app.store_user(&guest).await;
@@ -552,7 +561,62 @@ async fn inventory_item_permissions_follow_laboratory_scope() {
     let response = app
         .patch_inventory_item(own_item_id, &serde_json::json!({ "status": "retired" }))
         .await;
+    assert_eq!(response.status().as_u16(), 404);
+}
+
+#[tokio::test]
+async fn local_and_admin_routes_enforce_the_laboratory_in_the_route_scope() {
+    let app = spawn_app().await;
+    let first_laboratory_id = app.create_laboratory("First Scoped Lab").await;
+    let second_laboratory_id = app.create_laboratory("Second Scoped Lab").await;
+    let unit_id = app.unit_id("pcs").await;
+    app.test_user.login(&app).await;
+
+    let second_asset_id = create_asset(
+        &app,
+        second_laboratory_id,
+        unit_id,
+        "quantity",
+        "Second Lab Asset",
+    )
+    .await;
+    let second_item = create_quantity_item(
+        &app,
+        second_asset_id,
+        serde_json::json!({ "batch_number": "SECOND", "quantity_on_hand": 1 }),
+    )
+    .await;
+    let second_item_id = inventory_item_id(&second_item);
+
+    let response = app
+        .get_api_path(&format!(
+            "/admin/laboratories/{first_laboratory_id}/inventory-items/{second_item_id}"
+        ))
+        .await;
+    assert_eq!(response.status().as_u16(), 404);
+
+    let first_user = TestUser::generate_with_user_type("user", Some(first_laboratory_id));
+    app.store_user(&first_user).await;
+    first_user.login(&app).await;
+    let response = app
+        .get_api_path(&format!("/local/inventory-items/{second_item_id}"))
+        .await;
+    assert_eq!(response.status().as_u16(), 404);
+
+    let response = app
+        .get_api_path(&format!(
+            "/admin/laboratories/{second_laboratory_id}/inventory-items/{second_item_id}"
+        ))
+        .await;
     assert_eq!(response.status().as_u16(), 403);
+
+    app.test_user.login(&app).await;
+    let response = app
+        .get_api_path(&format!(
+            "/admin/laboratories/{second_laboratory_id}/inventory-items/{second_item_id}"
+        ))
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
 }
 
 async fn create_asset(

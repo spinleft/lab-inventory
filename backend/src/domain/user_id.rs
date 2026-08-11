@@ -2,11 +2,12 @@ use crate::utils::json_unauthorized;
 use actix_web::dev::Payload;
 use actix_web::error::InternalError;
 use actix_web::{FromRequest, HttpMessage, HttpRequest};
+use serde::{Deserialize, Serialize};
 use std::future::{Ready, ready};
 use std::ops::Deref;
 use uuid::Uuid;
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UserId(pub Uuid);
 
 impl From<UserId> for Uuid {

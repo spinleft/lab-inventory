@@ -1,6 +1,7 @@
 use super::queries::fetch_attachment_file;
-use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::{AttachmentId, FileStorageKey, UserId};
+use crate::access_control::AttachmentPathId;
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
+use crate::domain::{AttachmentId, FileStorageKey};
 use crate::file_storage::FileStorage;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
@@ -8,7 +9,6 @@ use actix_web::http::header;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::anyhow;
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum DownloadAttachmentError {
@@ -42,18 +42,19 @@ impl ResponseError for DownloadAttachmentError {
 #[tracing::instrument(
     name = "Download attachment",
     skip(pool, storage),
-    fields(actor_user_id=%actor_user_id, attachment_id=%attachment_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, attachment_id=%attachment_id)
 )]
 pub async fn download_attachment(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
     storage: web::Data<FileStorage>,
-    attachment_id: web::Path<Uuid>,
+    attachment_id: AttachmentPathId,
 ) -> Result<HttpResponse, DownloadAttachmentError> {
+    let actor = laboratory_context.authorization_actor();
     let attachment_id: AttachmentId = attachment_id.into_inner().into();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::AttachmentAssignment,
         Action::Read(attachment_id.into()),
     )
@@ -87,7 +88,6 @@ pub async fn download_attachment(
         ))
         .body(bytes))
 }
-
 
 fn content_disposition_filename(file_name: &str) -> String {
     file_name

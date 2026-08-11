@@ -3,10 +3,10 @@ use super::queries::{
     revoke_expired_registration_code, revoke_laboratory_registration_code,
 };
 use super::register::GuestRegistrationError;
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::authentication::GuestRegistrationHasher;
-use crate::domain::{GuestRegistrationCode, UserId};
+use crate::domain::GuestRegistrationCode;
 use actix_web::{HttpResponse, web};
 use anyhow::{Context, anyhow};
 use chrono::{Duration, Utc};
@@ -30,18 +30,18 @@ struct RegistrationCodeResponse {
 #[tracing::instrument(
     name = "Creating a guest registration code",
     skip(pool, hasher),
-    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, laboratory_id=%laboratory_context)
 )]
 pub async fn create_guest_registration_code(
-    actor_user_id: UserId,
     pool: web::Data<PgPool>,
     hasher: web::Data<GuestRegistrationHasher>,
-    laboratory_id: web::Path<Uuid>,
+    laboratory_context: LaboratoryContext,
 ) -> Result<HttpResponse, GuestRegistrationError> {
-    let laboratory_id = laboratory_id.into_inner();
+    let actor = laboratory_context.actor();
+    let laboratory_id = Uuid::from(laboratory_context.laboratory_id());
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        actor,
         ResourceType::GuestRegistrationCode,
         Action::Create(laboratory_id),
     )
@@ -73,7 +73,7 @@ pub async fn create_guest_registration_code(
             &mut transaction,
             laboratory_id,
             &code_hmac,
-            *actor_user_id,
+            *actor.user_id,
             expires_at,
         )
         .await?
@@ -91,7 +91,7 @@ pub async fn create_guest_registration_code(
     if let Some(replaced) = replaced {
         record_audit(
             &mut transaction,
-            actor_user_id,
+            actor,
             AuditAction::Update,
             AuditResource::GuestRegistrationCode,
             Some(replaced.registration_code_id),
@@ -101,7 +101,7 @@ pub async fn create_guest_registration_code(
     }
     record_audit(
         &mut transaction,
-        actor_user_id,
+        actor,
         AuditAction::Create,
         AuditResource::GuestRegistrationCode,
         Some(row.registration_code_id),

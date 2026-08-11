@@ -1,14 +1,17 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { z } from "zod";
+import { useAuth } from "../../app/auth-context";
 import { useBackendConfig } from "../../shared/api/backendConfig";
 import { createApiClient } from "../../shared/api/httpClient";
 import { type AttachmentClaim } from "../attachments/api";
+import { isSystemAdmin } from "../auth/permissions";
 import {
   type LaboratoryDataScope,
   assetDetailPath,
   laboratoryCollectionPath,
   laboratoryDetailScopeCacheKey,
   laboratoryScopeCacheKey,
+  localLaboratoryPath,
   localLaboratoryScope,
 } from "../federation/scope";
 
@@ -197,6 +200,7 @@ export function useAssets({
   scope?: LaboratoryDataScope;
 }) {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
   const dataScope = scope ?? localLaboratoryScope(laboratoryId);
 
   return useQuery({
@@ -205,7 +209,10 @@ export function useAssets({
     queryFn: async () => {
       const client = createApiClient(apiBaseUrl);
       return assetsResponseSchema.parse(
-        await client.get(laboratoryCollectionPath(dataScope, "assets"), query),
+        await client.get(
+          laboratoryCollectionPath(dataScope, "assets", isSystemAdmin(currentUser)),
+          query,
+        ),
       );
     },
   });
@@ -223,6 +230,7 @@ export function useAsset({
   scope?: LaboratoryDataScope;
 }) {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
   const scopeKey = laboratoryDetailScopeCacheKey(scope);
 
   return useQuery({
@@ -232,7 +240,7 @@ export function useAsset({
       const client = createApiClient(apiBaseUrl);
       return assetSchema.parse(
         await client.get(
-          assetDetailPath(scope, assetId),
+          assetDetailPath(scope, assetId, isSystemAdmin(currentUser)),
           includeParameters ? { include: "parameters" } : undefined,
         ),
       );
@@ -242,6 +250,7 @@ export function useAsset({
 
 export function useCreateAsset() {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
 
   return useMutation({
     mutationFn: async ({
@@ -253,29 +262,43 @@ export function useCreateAsset() {
         AssetPayload;
     }) => {
       const client = createApiClient(apiBaseUrl);
-      return assetSchema.parse(await client.post(`/laboratories/${laboratoryId}/assets`, payload));
+      return assetSchema.parse(
+        await client.post(
+          localLaboratoryPath(laboratoryId, "assets", isSystemAdmin(currentUser)),
+          payload,
+        ),
+      );
     },
   });
 }
 
 export function useUpdateAsset() {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
 
   return useMutation({
-    mutationFn: async ({ assetId, payload }: { assetId: string; payload: AssetPayload }) => {
+    mutationFn: async ({ assetId, laboratoryId, payload }: { assetId: string; laboratoryId: string; payload: AssetPayload }) => {
       const client = createApiClient(apiBaseUrl);
-      return assetSchema.parse(await client.patch(`/assets/${assetId}`, payload));
+      return assetSchema.parse(
+        await client.patch(
+          localLaboratoryPath(laboratoryId, `assets/${assetId}`, isSystemAdmin(currentUser)),
+          payload,
+        ),
+      );
     },
   });
 }
 
 export function useDeleteAsset() {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
 
   return useMutation({
-    mutationFn: async (assetId: string) => {
+    mutationFn: async ({ assetId, laboratoryId }: { assetId: string; laboratoryId: string }) => {
       const client = createApiClient(apiBaseUrl);
-      await client.delete(`/assets/${assetId}`);
+      await client.delete(
+        localLaboratoryPath(laboratoryId, `assets/${assetId}`, isSystemAdmin(currentUser)),
+      );
     },
   });
 }

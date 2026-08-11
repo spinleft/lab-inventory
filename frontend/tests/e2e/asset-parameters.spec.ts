@@ -63,7 +63,7 @@ test("manage asset parameters grouped by unit dimension", async ({ page }) => {
   await page.route("**/api/v1/auth/me", async (route) => {
     await route.fulfill({ json: currentUser });
   });
-  await page.route("**/api/v1/laboratories", async (route) => {
+  await page.route("**/api/v1/admin/laboratories", async (route) => {
     await route.fulfill({
       json: [
         {
@@ -78,7 +78,7 @@ test("manage asset parameters grouped by unit dimension", async ({ page }) => {
       ],
     });
   });
-  await page.route("**/api/v1/units", async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/units`, async (route) => {
     await route.fulfill({
       json: [
         {
@@ -104,7 +104,7 @@ test("manage asset parameters grouped by unit dimension", async ({ page }) => {
       ],
     });
   });
-  await page.route(`**/api/v1/laboratories/${laboratoryId}/asset-parameters`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/asset-parameters`, async (route) => {
     if (route.request().method() === "POST") {
       postedParameter = route.request().postDataJSON() as Record<string, unknown>;
       parameters = [

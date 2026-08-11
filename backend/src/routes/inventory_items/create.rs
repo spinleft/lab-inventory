@@ -7,7 +7,8 @@ use super::queries::{
     validate_location,
 };
 use super::service::{insert_inventory_item, next_serial_numbers};
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::AssetPathId;
+use crate::access_control::{Action, Actor, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{
     AssetId, AssetTrackingMode, FileUploadId, InventoryItemSerialNumber, InventoryItemSerialSource,
@@ -227,14 +228,16 @@ impl From<AssignAttachmentError> for CreateInventoryItemsError {
 #[tracing::instrument(
     name = "Create inventory items",
     skip(pool, payload),
-    fields(actor_user_id=%actor_user_id, asset_id=%asset_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, asset_id=%asset_id)
 )]
 pub async fn create_inventory_items(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    asset_id: web::Path<Uuid>,
+    asset_id: AssetPathId,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, CreateInventoryItemsError> {
+    let scope_laboratory_id = laboratory_context.laboratory_id();
+    let actor = laboratory_context.authorization_actor();
     let asset_id: AssetId = asset_id.into_inner().into();
     let laboratory_id: LaboratoryId = fetch_asset_laboratory_id(&pool, asset_id.into())
         .await?
@@ -242,9 +245,14 @@ pub async fn create_inventory_items(
             "Asset not found".into(),
         ))?
         .into();
+    if laboratory_id != scope_laboratory_id {
+        return Err(CreateInventoryItemsError::NotFound(
+            "Asset not found".into(),
+        ));
+    }
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::InventoryItem,
         Action::Create(laboratory_id.into()),
     )
@@ -256,7 +264,7 @@ pub async fn create_inventory_items(
     }
 
     let mut payload = payload.into_inner();
-    validate_upload_permissions(&pool, &actor_user_id, &payload).await?;
+    validate_upload_permissions(&pool, laboratory_context.actor(), &payload).await?;
     let attachments = payload.take_attachments()?;
     ensure_unique_uploads(attachments.attachments())
         .map_err(CreateInventoryItemsError::ValidationError)?;
@@ -272,8 +280,8 @@ pub async fn create_inventory_items(
         ))?;
     let tracking_mode = AssetTrackingMode::parse(&asset.tracking_mode)
         .map_err(CreateInventoryItemsError::ValidationError)?;
-    let creation =
-        parse_creation(payload, tracking_mode).map_err(CreateInventoryItemsError::ValidationError)?;
+    let creation = parse_creation(payload, tracking_mode)
+        .map_err(CreateInventoryItemsError::ValidationError)?;
     if let Some(location_id) = creation.location_id() {
         validate_location(
             &mut transaction,
@@ -312,7 +320,7 @@ pub async fn create_inventory_items(
     attachments
         .assign(
             &mut transaction,
-            actor_user_id,
+            laboratory_context.actor().user_id,
             &created,
             asset.laboratory_id.into(),
         )
@@ -320,7 +328,7 @@ pub async fn create_inventory_items(
 
     record_audit(
         &mut transaction,
-        actor_user_id,
+        laboratory_context.actor(),
         AuditAction::Create,
         AuditResource::InventoryItem,
         Some(created[0].inventory_item_id),
@@ -390,13 +398,13 @@ fn parse_creation(
 /// upload, so every referenced upload is authorised individually.
 async fn validate_upload_permissions(
     pool: &PgPool,
-    actor_user_id: &UserId,
+    actor: &Actor,
     payload: &JsonData,
 ) -> Result<(), CreateInventoryItemsError> {
     for upload_id in payload.upload_ids() {
         if !validate_permission(
             pool,
-            actor_user_id,
+            actor,
             ResourceType::FileUpload,
             Action::Assign(upload_id.into()),
         )

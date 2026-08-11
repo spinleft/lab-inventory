@@ -2,16 +2,16 @@ use super::model::delete_attachment_rollback_details;
 use super::queries::{
     AttachmentDatabaseError, delete_attachment_from_database, fetch_attachment_for_update,
 };
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::AttachmentPathId;
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{AttachmentId, FileStorageKey, UserId};
+use crate::domain::{AttachmentId, FileStorageKey};
 use crate::file_storage::FileStorage;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::{Context, anyhow};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum DeleteAttachmentError {
@@ -58,14 +58,15 @@ impl ResponseError for DeleteAttachmentError {
 #[tracing::instrument(
     name = "Delete attachment",
     skip(pool, storage),
-    fields(actor_user_id=%actor_user_id, attachment_id=%attachment_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, attachment_id=%attachment_id)
 )]
 pub async fn delete_attachment(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
     storage: web::Data<FileStorage>,
-    attachment_id: web::Path<Uuid>,
+    attachment_id: AttachmentPathId,
 ) -> Result<HttpResponse, DeleteAttachmentError> {
+    let actor = laboratory_context.authorization_actor();
     let attachment_id: AttachmentId = attachment_id.into_inner().into();
     let mut transaction = pool
         .begin()
@@ -76,7 +77,7 @@ pub async fn delete_attachment(
         .ok_or_else(|| DeleteAttachmentError::NotFound("Attachment not found".into()))?;
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::AttachmentAssignment,
         Action::Delete(attachment_id.into()),
     )
@@ -92,7 +93,7 @@ pub async fn delete_attachment(
     delete_attachment_from_database(&mut transaction, attachment_id).await?;
     record_audit(
         &mut transaction,
-        actor_user_id,
+        laboratory_context.actor(),
         AuditAction::Delete,
         AuditResource::Attachment,
         Some(existing.attachment_id),

@@ -2,10 +2,14 @@ use crate::domain::{
     AssetId, AssetParameterId, InventoryItemId, LaboratoryId, LocationId, UnitId, UserId, UserRole,
     UserType,
 };
+use actix_web::dev::Payload;
+use actix_web::error::InternalError;
+use actix_web::{FromRequest, HttpMessage, HttpRequest, HttpResponse};
 use anyhow::Context;
-use anyhow::Ok;
 use anyhow::anyhow;
 use sqlx::PgPool;
+use std::future::{Ready, ready};
+use std::ops::Deref;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, sqlx::FromRow)]
@@ -14,6 +18,163 @@ pub struct Actor {
     pub user_type: UserType,
     pub laboratory_id: Option<LaboratoryId>,
 }
+
+impl FromRequest for Actor {
+    type Error = actix_web::Error;
+    type Future = Ready<Result<Self, Self::Error>>;
+
+    fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
+        match req.extensions().get::<Actor>() {
+            Some(actor) => ready(Ok(actor.clone())),
+            None => ready(Err(InternalError::from_response(
+                anyhow!("Actor was not found in request extensions"),
+                HttpResponse::Unauthorized()
+                    .json(serde_json::json!({ "error": "Authentication required" })),
+            )
+            .into())),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct LaboratoryContext {
+    actor: Actor,
+    laboratory_id: LaboratoryId,
+}
+
+impl LaboratoryContext {
+    pub fn actor(&self) -> &Actor {
+        &self.actor
+    }
+
+    pub fn authorization_actor(&self) -> Actor {
+        if self.actor.is_system_admin() {
+            Actor {
+                user_id: self.actor.user_id,
+                user_type: UserType::LabAdmin,
+                laboratory_id: Some(self.laboratory_id),
+            }
+        } else {
+            self.actor.clone()
+        }
+    }
+
+    pub fn laboratory_id(&self) -> LaboratoryId {
+        self.laboratory_id
+    }
+}
+
+impl Deref for LaboratoryContext {
+    type Target = LaboratoryId;
+
+    fn deref(&self) -> &Self::Target {
+        &self.laboratory_id
+    }
+}
+
+impl std::fmt::Display for LaboratoryContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.laboratory_id.fmt(f)
+    }
+}
+
+impl FromRequest for LaboratoryContext {
+    type Error = actix_web::Error;
+    type Future = Ready<Result<Self, Self::Error>>;
+
+    fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
+        let Some(actor) = req.extensions().get::<Actor>().cloned() else {
+            return ready(Err(InternalError::from_response(
+                anyhow!("Actor was not found in request extensions"),
+                HttpResponse::Unauthorized()
+                    .json(serde_json::json!({ "error": "Authentication required" })),
+            )
+            .into()));
+        };
+
+        if let Some(raw_laboratory_id) = req.match_info().get("laboratory_id") {
+            if !actor.is_system_admin() {
+                return ready(Err(actix_web::error::ErrorForbidden(
+                    "System administrator permissions are required",
+                )));
+            }
+            let laboratory_id = match Uuid::parse_str(raw_laboratory_id) {
+                Ok(laboratory_id) => laboratory_id.into(),
+                Err(error) => return ready(Err(actix_web::error::ErrorBadRequest(error))),
+            };
+            return ready(Ok(Self {
+                actor,
+                laboratory_id,
+            }));
+        }
+
+        match actor.laboratory_id {
+            Some(laboratory_id) if !actor.is_system_admin() => ready(Ok(Self {
+                actor,
+                laboratory_id,
+            })),
+            _ => ready(Err(actix_web::error::ErrorForbidden(
+                "A laboratory-scoped user is required",
+            ))),
+        }
+    }
+}
+
+macro_rules! route_uuid {
+    ($name:ident, $parameter:literal) => {
+        #[derive(Clone, Copy, Debug)]
+        pub struct $name(Uuid);
+
+        impl $name {
+            pub fn into_inner(self) -> Uuid {
+                self.0
+            }
+        }
+
+        impl Deref for $name {
+            type Target = Uuid;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                self.0.fmt(f)
+            }
+        }
+
+        impl FromRequest for $name {
+            type Error = actix_web::Error;
+            type Future = Ready<Result<Self, Self::Error>>;
+
+            fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
+                let Some(value) = req.match_info().get($parameter) else {
+                    return ready(Err(actix_web::error::ErrorBadRequest(concat!(
+                        "Missing route parameter: ",
+                        $parameter
+                    ))));
+                };
+                ready(
+                    Uuid::parse_str(value)
+                        .map(Self)
+                        .map_err(actix_web::error::ErrorBadRequest),
+                )
+            }
+        }
+    };
+}
+
+route_uuid!(AssetPathId, "asset_id");
+route_uuid!(AssetCategoryPathId, "category_id");
+route_uuid!(AssetParameterPathId, "parameter_id");
+route_uuid!(AttachmentPathId, "attachment_id");
+route_uuid!(BorrowRequestPathId, "borrow_request_id");
+route_uuid!(FileUploadPathId, "upload_id");
+route_uuid!(InventoryItemPathId, "inventory_item_id");
+route_uuid!(LocationPathId, "location_id");
+route_uuid!(UnitPathId, "unit_id");
 
 pub enum ResourceType {
     Laboratory,
@@ -519,13 +680,14 @@ impl Actor {
     ) -> Result<bool, anyhow::Error> {
         #[derive(sqlx::FromRow)]
         struct FileUploadRow {
+            laboratory_id: LaboratoryId,
             uploaded_by_user_id: UserId,
         }
 
         let file_upload = sqlx::query_as!(
             FileUploadRow,
             r#"
-            SELECT uploaded_by_user_id
+            SELECT laboratory_id, uploaded_by_user_id
             FROM file_uploads
             WHERE upload_id = $1
             "#,
@@ -536,9 +698,9 @@ impl Actor {
         .context("Failed to fetch file upload")?;
 
         match file_upload {
-            Some(file_upload) => {
-                Ok(self.is_system_admin() || self.user_id == file_upload.uploaded_by_user_id)
-            }
+            Some(file_upload) => Ok((self.is_system_admin()
+                || self.laboratory_id == Some(file_upload.laboratory_id))
+                && (self.is_system_admin() || self.user_id == file_upload.uploaded_by_user_id)),
             None => Ok(true),
         }
     }
@@ -557,13 +719,14 @@ impl Actor {
     ) -> Result<bool, anyhow::Error> {
         #[derive(sqlx::FromRow)]
         struct FileUploadRow {
+            laboratory_id: LaboratoryId,
             uploaded_by_user_id: UserId,
         }
 
         let file_upload = sqlx::query_as!(
             FileUploadRow,
             r#"
-            SELECT uploaded_by_user_id
+            SELECT laboratory_id, uploaded_by_user_id
             FROM file_uploads
             WHERE upload_id = $1
               AND consumed_at IS NULL
@@ -576,9 +739,9 @@ impl Actor {
         .context("Failed to fetch file upload")?;
 
         match file_upload {
-            Some(file_upload) => {
-                Ok(self.is_system_admin() || self.user_id == file_upload.uploaded_by_user_id)
-            }
+            Some(file_upload) => Ok((self.is_system_admin()
+                || self.laboratory_id == Some(file_upload.laboratory_id))
+                && (self.is_system_admin() || self.user_id == file_upload.uploaded_by_user_id)),
             None => Ok(true),
         }
     }
@@ -641,12 +804,9 @@ impl Actor {
         .context("Failed to fetch attachment assignment")?;
 
         if let Some(assignment) = assignment {
-            if assignment.is_public {
-                return Ok(true);
-            } else {
-                Ok(self.is_system_admin()
-                    || (self.laboratory_id == Some(assignment.laboratory_id) && !self.is_guest()))
-            }
+            Ok(self.is_system_admin()
+                || (self.laboratory_id == Some(assignment.laboratory_id)
+                    && (assignment.is_public || !self.is_guest())))
         } else {
             // A missing attachment is a 404 for actors who can see every
             // laboratory, and stays a 403 for everyone else so that they cannot
@@ -661,7 +821,6 @@ impl Actor {
 
     pub fn can_query_laboratory_resource(&self, laboratory_id: &LaboratoryId) -> bool {
         self.can_read_laboratory_resource(laboratory_id)
-            || (!self.is_guest() && self.laboratory_id.is_some())
     }
 
     pub fn can_browse_laboratories(&self) -> bool {
@@ -707,189 +866,180 @@ pub async fn get_actor(pool: &PgPool, user_id: UserId) -> Result<Option<Actor>, 
 
 pub async fn validate_permission(
     pool: &PgPool,
-    actor_user_id: &UserId,
+    actor: &Actor,
     resource_type: ResourceType,
     action: Action<'_>,
 ) -> Result<bool, anyhow::Error> {
-    if let Some(actor) = get_actor(pool, *actor_user_id).await? {
-        match resource_type {
-            ResourceType::Laboratory => match action {
-                Action::Create(_) => Ok(actor.is_system_admin()),
-                Action::Delete(_) => Ok(actor.is_system_admin()),
-                // A laboratory is administered, not browsed: only admins reach it,
-                // and a laboratory-scoped admin is confined to its own.
-                Action::Read(laboratory_id) => Ok(actor.is_system_admin()
-                    || (actor.is_lab_admin()
-                        && actor.laboratory_id.map(Uuid::from) == Some(laboratory_id))),
-                Action::Browse(_) => Ok(actor.can_browse_laboratories()),
-                Action::Update(laboratory_id) => Ok(actor.is_system_admin()
-                    || (actor.is_lab_admin()
-                        && actor.laboratory_id.map(Uuid::from) == Some(laboratory_id))),
-                _ => Ok(false),
-            },
-            ResourceType::User => match action {
-                Action::CreateUser(user_role) => Ok(actor.can_manage_user(user_role)),
-                Action::DeleteUser(user_role) => Ok(actor.can_manage_user(user_role)),
-                Action::Read(user_id) => Ok(actor.can_view_user(&pool, user_id.into()).await?),
-                Action::UpdateUser(target_user_role, update_user_role) => Ok(actor
-                    .can_manage_user(target_user_role)
-                    && actor.can_manage_user(update_user_role)),
-                _ => Ok(false),
-            },
-            ResourceType::GuestRegistrationCode => match action {
-                Action::Create(laboratory_id) => {
-                    Ok(actor.can_create_guest_registration_code(laboratory_id.into()))
-                }
-                _ => Ok(false),
-            },
-            ResourceType::Unit => match action {
-                Action::Create(laboratory_id) => {
-                    Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
-                }
-                Action::Delete(unit_id) => Ok(actor.can_manage_unit(&pool, unit_id.into()).await?),
-                Action::Read(unit_id) => Ok(actor.can_view_unit(&pool, unit_id.into()).await?),
-                Action::Browse(laboratory_id) => {
-                    Ok(actor.can_browse_laboratory_resource(laboratory_id.into()))
-                }
-                Action::Update(unit_id) => Ok(actor.can_manage_unit(&pool, unit_id.into()).await?),
-                _ => Ok(false),
-            },
-            ResourceType::Location => match action {
-                Action::Create(laboratory_id) => {
-                    Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
-                }
-                Action::Delete(location_id) => {
-                    Ok(actor.can_manage_location(&pool, location_id.into()).await?)
-                }
-                Action::Read(location_id) => {
-                    Ok(actor.can_view_location(&pool, location_id.into()).await?)
-                }
-                Action::Browse(laboratory_id) => {
-                    Ok(actor.can_query_laboratory_resource(&laboratory_id.into()))
-                }
-                Action::Update(location_id) => {
-                    Ok(actor.can_manage_location(&pool, location_id.into()).await?)
-                }
-                _ => Ok(false),
-            },
-            ResourceType::Asset => match action {
-                Action::Create(laboratory_id) => {
-                    Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
-                }
-                Action::Delete(asset_id) => {
-                    Ok(actor.can_manage_asset(&pool, asset_id.into()).await?)
-                }
-                Action::Read(asset_id) => Ok(actor.can_view_asset(&pool, asset_id.into()).await?),
-                Action::Browse(laboratory_id) => {
-                    Ok(actor.can_query_laboratory_resource(&laboratory_id.into()))
-                }
-                Action::BrowseInternal(laboratory_id) => {
-                    Ok(actor.can_read_laboratory_resource(&laboratory_id.into()))
-                }
-                Action::Update(asset_id) => {
-                    Ok(actor.can_manage_asset(&pool, asset_id.into()).await?)
-                }
-                _ => Ok(false),
-            },
-            ResourceType::InventoryItem => match action {
-                Action::Create(laboratory_id) => {
-                    Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
-                }
-                Action::Delete(inventory_item_id) => Ok(actor
-                    .can_manage_inventory_item(&pool, inventory_item_id.into())
-                    .await?),
-                Action::Read(inventory_item_id) => Ok(actor
-                    .can_view_inventory_item(&pool, inventory_item_id.into())
-                    .await?),
-                Action::Browse(laboratory_id) => {
-                    Ok(actor.can_query_laboratory_resource(&laboratory_id.into()))
-                }
-                Action::BrowseInternal(laboratory_id) => {
-                    Ok(actor.can_read_laboratory_resource(&laboratory_id.into()))
-                }
-                Action::Update(inventory_item_id) => Ok(actor
-                    .can_manage_inventory_item(&pool, inventory_item_id.into())
-                    .await?),
-                _ => Ok(false),
-            },
-            ResourceType::AssetCategory => match action {
-                Action::Create(laboratory_id) => {
-                    Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
-                }
-                Action::Delete(asset_category_id) => Ok(actor
-                    .can_manage_asset_category(&pool, asset_category_id.into())
-                    .await?),
-                Action::Read(asset_category_id) => Ok(actor
-                    .can_view_asset_category(&pool, asset_category_id.into())
-                    .await?),
-                Action::Browse(laboratory_id) => {
-                    Ok(actor.can_query_laboratory_resource(&laboratory_id.into()))
-                }
-                Action::Update(asset_category_id) => Ok(actor
-                    .can_manage_asset_category(&pool, asset_category_id.into())
-                    .await?),
-                _ => Ok(false),
-            },
-            ResourceType::AssetParameter => match action {
-                Action::Create(laboratory_id) => {
-                    Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
-                }
-                Action::Delete(asset_parameter_id) => Ok(actor
-                    .can_manage_asset_parameter(&pool, asset_parameter_id.into())
-                    .await?),
-                Action::Read(asset_parameter_id) => Ok(actor
-                    .can_view_asset_parameter(&pool, asset_parameter_id.into())
-                    .await?),
-                Action::Browse(laboratory_id) => {
-                    Ok(actor.can_query_laboratory_resource(&laboratory_id.into()))
-                }
-                Action::Update(asset_parameter_id) => Ok(actor
-                    .can_manage_asset_parameter(&pool, asset_parameter_id.into())
-                    .await?),
-                _ => Ok(false),
-            },
-            ResourceType::FileUpload => match action {
-                Action::Create(laboratory_id) => {
-                    Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
-                }
-                Action::Delete(upload_id) => Ok(actor
-                    .can_manage_file_upload(&pool, upload_id.into())
-                    .await?),
-                Action::Read(_) => Ok(true),
-                Action::Browse(laboratory_id) => {
-                    Ok(actor.can_browse_laboratory_resource(laboratory_id.into()))
-                }
-                Action::Assign(upload_id) => Ok(actor
-                    .can_assign_file_upload(&pool, upload_id.into())
-                    .await?),
-                _ => Ok(false),
-            },
-            ResourceType::AttachmentAssignment => match action {
-                Action::Create(laboratory_id) => {
-                    Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
-                }
-                Action::Delete(attachment_id) => Ok(actor
-                    .can_manage_attachment_assignment(&pool, attachment_id.into())
-                    .await?),
-                Action::Read(attachment_id) => Ok(actor
-                    .can_view_attachment_assignment(&pool, attachment_id)
-                    .await?),
-                // Attachments follow their asset: readable across laboratories,
-                // with the internal ones filtered out by `BrowseInternal`.
-                Action::Browse(laboratory_id) => {
-                    Ok(actor.can_query_laboratory_resource(&laboratory_id.into()))
-                }
-                Action::BrowseInternal(laboratory_id) => {
-                    Ok(actor.can_browse_laboratory_internal_resource(laboratory_id.into()))
-                }
-                Action::Update(attachment_id) => Ok(actor
-                    .can_manage_attachment_assignment(&pool, attachment_id.into())
-                    .await?),
-                _ => Ok(false),
-            },
-        }
-    } else {
-        Ok(false)
+    match resource_type {
+        ResourceType::Laboratory => match action {
+            Action::Create(_) => Ok(actor.is_system_admin()),
+            Action::Delete(_) => Ok(actor.is_system_admin()),
+            // A laboratory is administered, not browsed: only admins reach it,
+            // and a laboratory-scoped admin is confined to its own.
+            Action::Read(laboratory_id) => Ok(actor.is_system_admin()
+                || (actor.is_lab_admin()
+                    && actor.laboratory_id.map(Uuid::from) == Some(laboratory_id))),
+            Action::Browse(_) => Ok(actor.can_browse_laboratories()),
+            Action::Update(laboratory_id) => Ok(actor.is_system_admin()
+                || (actor.is_lab_admin()
+                    && actor.laboratory_id.map(Uuid::from) == Some(laboratory_id))),
+            _ => Ok(false),
+        },
+        ResourceType::User => match action {
+            Action::CreateUser(user_role) => Ok(actor.can_manage_user(user_role)),
+            Action::DeleteUser(user_role) => Ok(actor.can_manage_user(user_role)),
+            Action::Read(user_id) => Ok(actor.can_view_user(pool, user_id.into()).await?),
+            Action::UpdateUser(target_user_role, update_user_role) => Ok(actor
+                .can_manage_user(target_user_role)
+                && actor.can_manage_user(update_user_role)),
+            _ => Ok(false),
+        },
+        ResourceType::GuestRegistrationCode => match action {
+            Action::Create(laboratory_id) => {
+                Ok(actor.can_create_guest_registration_code(laboratory_id.into()))
+            }
+            _ => Ok(false),
+        },
+        ResourceType::Unit => match action {
+            Action::Create(laboratory_id) => {
+                Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
+            }
+            Action::Delete(unit_id) => Ok(actor.can_manage_unit(pool, unit_id.into()).await?),
+            Action::Read(unit_id) => Ok(actor.can_view_unit(pool, unit_id.into()).await?),
+            Action::Browse(laboratory_id) => {
+                Ok(actor.can_browse_laboratory_resource(laboratory_id.into()))
+            }
+            Action::Update(unit_id) => Ok(actor.can_manage_unit(pool, unit_id.into()).await?),
+            _ => Ok(false),
+        },
+        ResourceType::Location => match action {
+            Action::Create(laboratory_id) => {
+                Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
+            }
+            Action::Delete(location_id) => {
+                Ok(actor.can_manage_location(pool, location_id.into()).await?)
+            }
+            Action::Read(location_id) => {
+                Ok(actor.can_view_location(pool, location_id.into()).await?)
+            }
+            Action::Browse(laboratory_id) => {
+                Ok(actor.can_query_laboratory_resource(&laboratory_id.into()))
+            }
+            Action::Update(location_id) => {
+                Ok(actor.can_manage_location(pool, location_id.into()).await?)
+            }
+            _ => Ok(false),
+        },
+        ResourceType::Asset => match action {
+            Action::Create(laboratory_id) => {
+                Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
+            }
+            Action::Delete(asset_id) => Ok(actor.can_manage_asset(pool, asset_id.into()).await?),
+            Action::Read(asset_id) => Ok(actor.can_view_asset(pool, asset_id.into()).await?),
+            Action::Browse(laboratory_id) => {
+                Ok(actor.can_query_laboratory_resource(&laboratory_id.into()))
+            }
+            Action::BrowseInternal(laboratory_id) => {
+                Ok(actor.can_read_laboratory_resource(&laboratory_id.into()))
+            }
+            Action::Update(asset_id) => Ok(actor.can_manage_asset(pool, asset_id.into()).await?),
+            _ => Ok(false),
+        },
+        ResourceType::InventoryItem => match action {
+            Action::Create(laboratory_id) => {
+                Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
+            }
+            Action::Delete(inventory_item_id) => Ok(actor
+                .can_manage_inventory_item(pool, inventory_item_id.into())
+                .await?),
+            Action::Read(inventory_item_id) => Ok(actor
+                .can_view_inventory_item(pool, inventory_item_id.into())
+                .await?),
+            Action::Browse(laboratory_id) => {
+                Ok(actor.can_query_laboratory_resource(&laboratory_id.into()))
+            }
+            Action::BrowseInternal(laboratory_id) => {
+                Ok(actor.can_read_laboratory_resource(&laboratory_id.into()))
+            }
+            Action::Update(inventory_item_id) => Ok(actor
+                .can_manage_inventory_item(pool, inventory_item_id.into())
+                .await?),
+            _ => Ok(false),
+        },
+        ResourceType::AssetCategory => match action {
+            Action::Create(laboratory_id) => {
+                Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
+            }
+            Action::Delete(asset_category_id) => Ok(actor
+                .can_manage_asset_category(pool, asset_category_id.into())
+                .await?),
+            Action::Read(asset_category_id) => Ok(actor
+                .can_view_asset_category(pool, asset_category_id.into())
+                .await?),
+            Action::Browse(laboratory_id) => {
+                Ok(actor.can_query_laboratory_resource(&laboratory_id.into()))
+            }
+            Action::Update(asset_category_id) => Ok(actor
+                .can_manage_asset_category(pool, asset_category_id.into())
+                .await?),
+            _ => Ok(false),
+        },
+        ResourceType::AssetParameter => match action {
+            Action::Create(laboratory_id) => {
+                Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
+            }
+            Action::Delete(asset_parameter_id) => Ok(actor
+                .can_manage_asset_parameter(pool, asset_parameter_id.into())
+                .await?),
+            Action::Read(asset_parameter_id) => Ok(actor
+                .can_view_asset_parameter(pool, asset_parameter_id.into())
+                .await?),
+            Action::Browse(laboratory_id) => {
+                Ok(actor.can_query_laboratory_resource(&laboratory_id.into()))
+            }
+            Action::Update(asset_parameter_id) => Ok(actor
+                .can_manage_asset_parameter(pool, asset_parameter_id.into())
+                .await?),
+            _ => Ok(false),
+        },
+        ResourceType::FileUpload => match action {
+            Action::Create(laboratory_id) => {
+                Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
+            }
+            Action::Delete(upload_id) => {
+                Ok(actor.can_manage_file_upload(pool, upload_id).await?)
+            }
+            Action::Read(_) => Ok(true),
+            Action::Browse(laboratory_id) => {
+                Ok(actor.can_browse_laboratory_resource(laboratory_id.into()))
+            }
+            Action::Assign(upload_id) => {
+                Ok(actor.can_assign_file_upload(pool, upload_id).await?)
+            }
+            _ => Ok(false),
+        },
+        ResourceType::AttachmentAssignment => match action {
+            Action::Create(laboratory_id) => {
+                Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
+            }
+            Action::Delete(attachment_id) => Ok(actor
+                .can_manage_attachment_assignment(pool, attachment_id)
+                .await?),
+            Action::Read(attachment_id) => Ok(actor
+                .can_view_attachment_assignment(pool, attachment_id)
+                .await?),
+            // Attachments follow the laboratory scope of their owning resource.
+            Action::Browse(laboratory_id) => {
+                Ok(actor.can_query_laboratory_resource(&laboratory_id.into()))
+            }
+            Action::BrowseInternal(laboratory_id) => {
+                Ok(actor.can_browse_laboratory_internal_resource(laboratory_id.into()))
+            }
+            Action::Update(attachment_id) => Ok(actor
+                .can_manage_attachment_assignment(pool, attachment_id)
+                .await?),
+            _ => Ok(false),
+        },
     }
 }
 

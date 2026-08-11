@@ -1,7 +1,6 @@
 use super::model::UserResponse;
 use super::queries::fetch_users;
-use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::UserId;
+use crate::access_control::{Action, Actor, ResourceType, validate_permission};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
@@ -33,16 +32,16 @@ impl ResponseError for ListUsersError {
     }
 }
 
-#[tracing::instrument(name = "List users", skip(pool), fields(actor_user_id=%actor_user_id))]
+#[tracing::instrument(name = "List users", skip(pool), fields(actor_user_id=%actor.user_id))]
 pub async fn list_users(
-    actor_user_id: UserId,
+    actor: Actor,
     pool: web::Data<PgPool>,
 ) -> Result<HttpResponse, ListUsersError> {
     let mut users = Vec::new();
     for user in fetch_users(&pool).await? {
         if validate_permission(
             &pool,
-            &actor_user_id,
+            &actor,
             ResourceType::User,
             Action::Read(user.user_id),
         )

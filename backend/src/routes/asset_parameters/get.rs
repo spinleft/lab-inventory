@@ -1,12 +1,12 @@
 use super::model::AssetParameterResponse;
 use super::queries::{fetch_asset_parameter, fetch_asset_parameter_options};
-use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::{AssetParameterId, UserId};
+use crate::access_control::AssetParameterPathId;
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
+use crate::domain::AssetParameterId;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum GetAssetParameterError {
@@ -37,24 +37,25 @@ impl ResponseError for GetAssetParameterError {
 #[tracing::instrument(
     name = "Get an asset parameter",
     skip(pool),
-    fields(actor_user_id=%actor_user_id, parameter_id=%parameter_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, parameter_id=%parameter_id)
 )]
 pub async fn get_asset_parameter(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    parameter_id: web::Path<Uuid>,
+    parameter_id: AssetParameterPathId,
 ) -> Result<HttpResponse, GetAssetParameterError> {
+    let actor = laboratory_context.authorization_actor();
     let parameter_id: AssetParameterId = parameter_id.into_inner().into();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::AssetParameter,
         Action::Read(parameter_id.into()),
     )
     .await?
     {
         return Err(GetAssetParameterError::Forbidden(
-            "You don't have permission to view this asset parameter.".into(),
+            "You are not allowed to get this asset parameter.".into(),
         ));
     }
 

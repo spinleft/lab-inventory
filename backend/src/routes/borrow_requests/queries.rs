@@ -227,47 +227,6 @@ pub(super) async fn fetch_guest_link_id(
     .context("Failed to fetch federation guest link")
 }
 
-/// A guest link stands in for a user borrowing from a laboratory that is not
-/// their own. `remote_node_id` stays null and `source` is `local` because both
-/// sides of this link live on the same server.
-pub(super) async fn insert_local_guest_link(
-    transaction: &mut Transaction<'_, Postgres>,
-    link_id: Uuid,
-    laboratory_id: LaboratoryId,
-    home_laboratory_id: Uuid,
-    user_id: UserId,
-    username: &str,
-    user_type: &str,
-) -> Result<(), anyhow::Error> {
-    sqlx::query!(
-        r#"
-        INSERT INTO federation_guest_links (
-            link_id,
-            local_laboratory_id,
-            remote_node_id,
-            remote_laboratory_id,
-            remote_user_id,
-            remote_username,
-            remote_user_type,
-            local_guest_user_id,
-            source
-        )
-        VALUES ($1, $2, NULL, $3, $4, $5, $6, $4, 'local')
-        "#,
-        link_id,
-        *laboratory_id,
-        home_laboratory_id,
-        *user_id,
-        username,
-        user_type,
-    )
-    .execute(transaction.as_mut())
-    .await
-    .context("Failed to store a local federation guest link")?;
-
-    Ok(())
-}
-
 pub(super) async fn fetch_borrow_actor(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: UserId,
@@ -275,7 +234,7 @@ pub(super) async fn fetch_borrow_actor(
     sqlx::query_as!(
         BorrowActorRow,
         r#"
-        SELECT users.username, user_types.name AS user_type_name, users.laboratory_id
+        SELECT users.username, user_types.name AS user_type_name
         FROM users
         JOIN user_types USING (user_type_id)
         WHERE users.user_id = $1

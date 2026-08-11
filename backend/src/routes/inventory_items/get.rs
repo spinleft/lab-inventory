@@ -1,12 +1,12 @@
 use super::model::InventoryItemResponse;
 use super::queries::fetch_inventory_item;
-use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::{InventoryItemId, UserId};
+use crate::access_control::InventoryItemPathId;
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
+use crate::domain::InventoryItemId;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum GetInventoryItemError {
@@ -37,24 +37,25 @@ impl ResponseError for GetInventoryItemError {
 #[tracing::instrument(
     name = "Get an inventory item",
     skip(pool),
-    fields(actor_user_id=%actor_user_id, inventory_item_id=%inventory_item_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, inventory_item_id=%inventory_item_id)
 )]
 pub async fn get_inventory_item(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    inventory_item_id: web::Path<Uuid>,
+    inventory_item_id: InventoryItemPathId,
 ) -> Result<HttpResponse, GetInventoryItemError> {
+    let actor = laboratory_context.authorization_actor();
     let inventory_item_id: InventoryItemId = inventory_item_id.into_inner().into();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::InventoryItem,
         Action::Read(inventory_item_id.into()),
     )
     .await?
     {
         return Err(GetInventoryItemError::Forbidden(
-            "You don't have permission to view this inventory item.".into(),
+            "You are not allowed to get this inventory item.".into(),
         ));
     }
 
@@ -65,7 +66,7 @@ pub async fn get_inventory_item(
         ))?;
     let include_internal_notes = validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::InventoryItem,
         Action::BrowseInternal(item.laboratory_id),
     )

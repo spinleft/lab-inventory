@@ -2,18 +2,16 @@ use super::model::{AttachmentResponse, update_attachment_rollback_details};
 use super::queries::{
     AttachmentDatabaseError, fetch_attachment_for_update, update_attachment_in_database,
 };
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::AttachmentPathId;
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{
-    AttachmentDisplayName, AttachmentId, NullableUpdate, UpdateAttachment, UserId,
-};
+use crate::domain::{AttachmentDisplayName, AttachmentId, NullableUpdate, UpdateAttachment};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use serde::{Deserialize, Deserializer};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -98,14 +96,15 @@ impl ResponseError for UpdateAttachmentError {
 #[tracing::instrument(
     name = "Update attachment metadata",
     skip(pool, payload),
-    fields(actor_user_id=%actor_user_id, attachment_id=%attachment_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, attachment_id=%attachment_id)
 )]
 pub async fn update_attachment(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    attachment_id: web::Path<Uuid>,
+    attachment_id: AttachmentPathId,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, UpdateAttachmentError> {
+    let actor = laboratory_context.authorization_actor();
     let attachment_id: AttachmentId = attachment_id.into_inner().into();
     let update_attachment = UpdateAttachment::try_from(payload.into_inner())
         .map_err(UpdateAttachmentError::ValidationError)?;
@@ -118,7 +117,7 @@ pub async fn update_attachment(
         .ok_or_else(|| UpdateAttachmentError::NotFound("Attachment not found".into()))?;
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::AttachmentAssignment,
         Action::Update(attachment_id.into()),
     )
@@ -151,7 +150,7 @@ pub async fn update_attachment(
 
     record_audit(
         &mut transaction,
-        actor_user_id,
+        laboratory_context.actor(),
         AuditAction::Update,
         AuditResource::Attachment,
         Some(updated.attachment_id),

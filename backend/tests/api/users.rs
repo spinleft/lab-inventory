@@ -109,7 +109,7 @@ async fn list_users_filters_results_for_lab_admins() {
     app.store_user(&other_user).await;
     lab_admin.login(&app).await;
 
-    let response = app.get_api_path("/users").await;
+    let response = app.get_api_path("/local/users").await;
     assert_eq!(response.status().as_u16(), 200);
     let users: serde_json::Value = response.json().await.unwrap();
     let users = users.as_array().unwrap();
@@ -149,21 +149,21 @@ async fn get_user_enforces_view_permissions() {
     lab_admin.login(&app).await;
 
     let response = app
-        .get_api_path(&format!("/users/{}", own_user.user_id))
+        .get_api_path(&format!("/local/users/{}", own_user.user_id))
         .await;
     assert_eq!(response.status().as_u16(), 200);
     let body: serde_json::Value = response.json().await.unwrap();
     assert_eq!(body["user_id"], own_user.user_id.to_string());
 
     let response = app
-        .get_api_path(&format!("/users/{}", other_user.user_id))
+        .get_api_path(&format!("/local/users/{}", other_user.user_id))
         .await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 404);
 
     let response = app
-        .get_api_path(&format!("/users/{}", app.test_user.user_id))
+        .get_api_path(&format!("/local/users/{}", app.test_user.user_id))
         .await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 404);
 }
 
 #[tokio::test]

@@ -1,8 +1,8 @@
 use super::model::{InventoryItemResponse, InventoryItemRow};
 use super::queries::inventory_item_select;
 use super::service::validate_status;
-use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::{AssetTrackingMode, LaboratoryId, UserId};
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
+use crate::domain::{AssetTrackingMode, LaboratoryId};
 use crate::routes::shared::parameter_filters::{
     ParameterFilter, ParameterFilterError, parse_parameter_filters, push_parameter_filters,
 };
@@ -67,18 +67,18 @@ impl From<PaginationError> for ListInventoryItemsError {
 #[tracing::instrument(
     name = "List inventory items",
     skip(pool, query),
-    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, laboratory_id=%laboratory_context)
 )]
 pub async fn list_inventory_items(
-    actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    laboratory_id: web::Path<Uuid>,
+    laboratory_context: LaboratoryContext,
     query: web::Query<ListInventoryItemsQuery>,
 ) -> Result<HttpResponse, ListInventoryItemsError> {
-    let laboratory_id: LaboratoryId = laboratory_id.into_inner().into();
+    let actor = laboratory_context.actor();
+    let laboratory_id = laboratory_context.laboratory_id();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        actor,
         ResourceType::InventoryItem,
         Action::Browse(laboratory_id.into()),
     )
@@ -90,7 +90,7 @@ pub async fn list_inventory_items(
     }
     let include_internal_notes = validate_permission(
         &pool,
-        &actor_user_id,
+        actor,
         ResourceType::InventoryItem,
         Action::BrowseInternal(laboratory_id.into()),
     )

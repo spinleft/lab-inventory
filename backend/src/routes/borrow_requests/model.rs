@@ -55,12 +55,11 @@ pub(super) struct BorrowRequestRow {
 }
 
 /// Who a user is as far as borrowing is concerned: the name and role copied onto
-/// a request, plus the laboratory that decides whether they count as an outsider.
+/// a request.
 #[derive(sqlx::FromRow)]
 pub(super) struct BorrowActorRow {
     pub(super) username: String,
     pub(super) user_type_name: String,
-    pub(super) laboratory_id: Option<Uuid>,
 }
 
 #[derive(Serialize)]

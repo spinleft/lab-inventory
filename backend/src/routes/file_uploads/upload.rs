@@ -1,6 +1,6 @@
 use super::queries::{FileUploadDatabaseError, insert_file_upload};
-use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::{FileName, LaboratoryId, UserId};
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
+use crate::domain::FileName;
 use crate::file_storage::FileStorage;
 use crate::utils::error_chain_fmt;
 use actix_multipart::Multipart;
@@ -9,7 +9,6 @@ use actix_web::{HttpResponse, ResponseError, web};
 use chrono::{Duration, Utc};
 use futures_util::StreamExt;
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum UploadFileError {
@@ -48,19 +47,19 @@ impl From<FileUploadDatabaseError> for UploadFileError {
 #[tracing::instrument(
     name = "Upload file",
     skip(pool, storage, payload),
-    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, laboratory_id=%laboratory_context)
 )]
 pub async fn upload_file(
-    actor_user_id: UserId,
     pool: web::Data<PgPool>,
     storage: web::Data<FileStorage>,
-    laboratory_id: web::Path<Uuid>,
+    laboratory_context: LaboratoryContext,
     payload: Multipart,
 ) -> Result<HttpResponse, UploadFileError> {
-    let laboratory_id: LaboratoryId = laboratory_id.into_inner().into();
+    let actor = laboratory_context.actor();
+    let laboratory_id = laboratory_context.laboratory_id();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        actor,
         ResourceType::FileUpload,
         Action::Create(laboratory_id.into()),
     )
@@ -82,7 +81,7 @@ pub async fn upload_file(
     match insert_file_upload(
         &pool,
         laboratory_id,
-        actor_user_id,
+        actor.user_id,
         upload.original_file_name.as_ref(),
         upload.mime_type.as_deref(),
         &stored,

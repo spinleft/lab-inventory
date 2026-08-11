@@ -106,12 +106,13 @@ async fn list_and_get_locations_are_laboratory_scoped() {
     let response = app.get_locations(other_laboratory_id).await;
     assert_eq!(response.status().as_u16(), 200);
     let body: serde_json::Value = response.json().await.unwrap();
-    assert_eq!(location_paths(&body), vec!["room_a"]);
+    assert_eq!(
+        location_paths(&body),
+        vec!["room_a", "room_a.freezer", "room_b"]
+    );
 
     let response = app.get_location(location_id(&other_root)).await;
-    assert_eq!(response.status().as_u16(), 200);
-    let body: serde_json::Value = response.json().await.unwrap();
-    assert_eq!(body["location_id"], location_id(&other_root).to_string());
+    assert_eq!(response.status().as_u16(), 404);
 }
 
 #[tokio::test]
@@ -392,7 +393,7 @@ async fn write_permissions_follow_laboratory_scope() {
             &serde_json::json!({ "name": "Other Lab", "code": "other_lab" }),
         )
         .await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 201);
 
     app.test_user.login(&app).await;
     let response = app

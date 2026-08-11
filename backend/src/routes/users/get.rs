@@ -1,7 +1,6 @@
 use super::model::UserResponse;
 use super::queries::fetch_user;
-use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::UserId;
+use crate::access_control::{Action, Actor, ResourceType, validate_permission};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
@@ -14,6 +13,8 @@ pub enum GetUserError {
     ValidationError(String),
     #[error("{0}")]
     Forbidden(String),
+    #[error("{0}")]
+    NotFound(String),
     #[error(transparent)]
     UnexpectedError(#[from] anyhow::Error),
 }
@@ -29,6 +30,7 @@ impl ResponseError for GetUserError {
         match self {
             GetUserError::ValidationError(_) => StatusCode::BAD_REQUEST,
             GetUserError::Forbidden(_) => StatusCode::FORBIDDEN,
+            GetUserError::NotFound(_) => StatusCode::NOT_FOUND,
             GetUserError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -37,17 +39,21 @@ impl ResponseError for GetUserError {
 #[tracing::instrument(
     name = "Get a user",
     skip(pool),
-    fields(actor_user_id=%actor_user_id, target_user_id=%target_user_id)
+    fields(actor_user_id=%actor.user_id, target_user_id=%target_user_id)
 )]
 pub async fn get_user(
     pool: web::Data<PgPool>,
-    actor_user_id: UserId,
+    actor: Actor,
     target_user_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, GetUserError> {
     let target_user = fetch_user(&pool, *target_user_id).await?;
+    if !actor.is_system_admin() && actor.laboratory_id.map(Uuid::from) != target_user.laboratory_id
+    {
+        return Err(GetUserError::NotFound("User not found".into()));
+    }
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::User,
         Action::Read(*target_user_id),
     )

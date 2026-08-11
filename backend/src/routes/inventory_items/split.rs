@@ -1,4 +1,4 @@
-﻿use super::model::{InventoryItemResponse, split_inventory_item_rollback_details};
+use super::model::{InventoryItemResponse, split_inventory_item_rollback_details};
 use super::queries::{
     InventoryItemDatabaseError, fetch_inventory_item_for_update,
     find_quantity_aggregate_for_update, validate_location,
@@ -6,9 +6,10 @@ use super::queries::{
 use super::service::{
     add_quantities_to_item, insert_inventory_item, set_quantity_on_hand, validate_quantity_item,
 };
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::InventoryItemPathId;
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{InventoryItemId, SplitInventoryItem as SplitInventoryItemCommand, UserId};
+use crate::domain::{InventoryItemId, SplitInventoryItem as SplitInventoryItemCommand};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
@@ -107,25 +108,26 @@ impl From<InventoryItemDatabaseError> for SplitInventoryItemError {
 #[tracing::instrument(
     name = "Split an inventory item",
     skip(pool, payload),
-    fields(actor_user_id=%actor_user_id, inventory_item_id=%inventory_item_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, inventory_item_id=%inventory_item_id)
 )]
 pub async fn split_inventory_item(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    inventory_item_id: web::Path<Uuid>,
+    inventory_item_id: InventoryItemPathId,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, SplitInventoryItemError> {
+    let actor = laboratory_context.authorization_actor();
     let inventory_item_id: InventoryItemId = inventory_item_id.into_inner().into();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::InventoryItem,
         Action::Update(inventory_item_id.into()),
     )
     .await?
     {
         return Err(SplitInventoryItemError::Forbidden(
-            "You don't have permission to split this inventory item.".into(),
+            "You are not allowed to split this inventory item.".into(),
         ));
     }
 
@@ -224,7 +226,7 @@ pub async fn split_inventory_item(
 
     record_audit(
         &mut transaction,
-        actor_user_id,
+        laboratory_context.actor(),
         AuditAction::Adjust,
         AuditResource::InventoryItem,
         Some(source_after.inventory_item_id),

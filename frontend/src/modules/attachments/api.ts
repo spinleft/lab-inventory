@@ -1,7 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
+import { useAuth } from "../../app/auth-context";
 import { useBackendConfig } from "../../shared/api/backendConfig";
 import { createApiClient } from "../../shared/api/httpClient";
+import { isSystemAdmin } from "../auth/permissions";
+import { localLaboratoryPath } from "../federation/scope";
 
 export const attachmentVisibilitySchema = z.enum(["public", "internal"]);
 
@@ -68,18 +71,29 @@ export const attachmentQueryKeys = {
 export function useAssetAttachments({
   assetId,
   enabled = true,
+  laboratoryId,
 }: {
   assetId: string;
   enabled?: boolean;
+  laboratoryId: string;
 }) {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
 
   return useQuery({
     enabled: enabled && Boolean(assetId),
     queryKey: attachmentQueryKeys.asset(apiBaseUrl, assetId),
     queryFn: async () => {
       const client = createApiClient(apiBaseUrl);
-      return attachmentListSchema.parse(await client.get(`/assets/${assetId}/attachments`));
+      return attachmentListSchema.parse(
+        await client.get(
+          localLaboratoryPath(
+            laboratoryId,
+            `assets/${assetId}/attachments`,
+            isSystemAdmin(currentUser),
+          ),
+        ),
+      );
     },
   });
 }
@@ -87,11 +101,14 @@ export function useAssetAttachments({
 export function useInventoryItemAttachments({
   enabled = true,
   inventoryItemId,
+  laboratoryId,
 }: {
   enabled?: boolean;
   inventoryItemId: string;
+  laboratoryId: string;
 }) {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
 
   return useQuery({
     enabled: enabled && Boolean(inventoryItemId),
@@ -99,7 +116,13 @@ export function useInventoryItemAttachments({
     queryFn: async () => {
       const client = createApiClient(apiBaseUrl);
       return attachmentListSchema.parse(
-        await client.get(`/inventory-items/${inventoryItemId}/attachments`),
+        await client.get(
+          localLaboratoryPath(
+            laboratoryId,
+            `inventory-items/${inventoryItemId}/attachments`,
+            isSystemAdmin(currentUser),
+          ),
+        ),
       );
     },
   });
@@ -107,6 +130,7 @@ export function useInventoryItemAttachments({
 
 export function useUploadFile() {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
 
   return useMutation({
     mutationFn: async ({ file, laboratoryId }: { file: File; laboratoryId: string }) => {
@@ -114,31 +138,51 @@ export function useUploadFile() {
       const form = new FormData();
       form.append("file", file);
       return fileUploadSchema.parse(
-        await client.postFormData(`/laboratories/${laboratoryId}/file-uploads`, form),
+        await client.postFormData(
+          localLaboratoryPath(laboratoryId, "file-uploads", isSystemAdmin(currentUser)),
+          form,
+        ),
       );
     },
   });
 }
 
-export function useDeleteFileUpload() {
+export function useDeleteFileUpload(laboratoryId: string) {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
 
   return useMutation({
     mutationFn: async (uploadId: string) => {
       const client = createApiClient(apiBaseUrl);
-      await client.delete(`/file-uploads/${uploadId}`);
+      await client.delete(
+        localLaboratoryPath(
+          laboratoryId,
+          `file-uploads/${uploadId}`,
+          isSystemAdmin(currentUser),
+        ),
+      );
     },
   });
 }
 
-export function useCreateAssetAttachment() {
+export function useCreateAssetAttachment(laboratoryId: string) {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async ({ assetId, claim }: { assetId: string; claim: AttachmentClaim }) => {
       const client = createApiClient(apiBaseUrl);
-      return attachmentSchema.parse(await client.post(`/assets/${assetId}/attachments`, claim));
+      return attachmentSchema.parse(
+        await client.post(
+          localLaboratoryPath(
+            laboratoryId,
+            `assets/${assetId}/attachments`,
+            isSystemAdmin(currentUser),
+          ),
+          claim,
+        ),
+      );
     },
     onSuccess: (_attachment, variables) => {
       queryClient.invalidateQueries({
@@ -148,8 +192,9 @@ export function useCreateAssetAttachment() {
   });
 }
 
-export function useCreateInventoryItemAttachment() {
+export function useCreateInventoryItemAttachment(laboratoryId: string) {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -162,7 +207,14 @@ export function useCreateInventoryItemAttachment() {
     }) => {
       const client = createApiClient(apiBaseUrl);
       return attachmentSchema.parse(
-        await client.post(`/inventory-items/${inventoryItemId}/attachments`, claim),
+        await client.post(
+          localLaboratoryPath(
+            laboratoryId,
+            `inventory-items/${inventoryItemId}/attachments`,
+            isSystemAdmin(currentUser),
+          ),
+          claim,
+        ),
       );
     },
     onSuccess: (_attachment, variables) => {
@@ -173,14 +225,21 @@ export function useCreateInventoryItemAttachment() {
   });
 }
 
-export function useDeleteAttachment() {
+export function useDeleteAttachment(laboratoryId: string) {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (attachmentId: string) => {
       const client = createApiClient(apiBaseUrl);
-      await client.delete(`/attachments/${attachmentId}`);
+      await client.delete(
+        localLaboratoryPath(
+          laboratoryId,
+          `attachments/${attachmentId}`,
+          isSystemAdmin(currentUser),
+        ),
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: attachmentQueryKeys.root(apiBaseUrl) });
@@ -188,23 +247,37 @@ export function useDeleteAttachment() {
   });
 }
 
-export function useDownloadAttachment() {
+export function useDownloadAttachment(laboratoryId: string) {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
 
   return useMutation({
     mutationFn: async (attachmentId: string) => {
       const client = createApiClient(apiBaseUrl);
-      return client.downloadBlob(`/attachments/${attachmentId}/download`);
+      return client.downloadBlob(
+        localLaboratoryPath(
+          laboratoryId,
+          `attachments/${attachmentId}/download`,
+          isSystemAdmin(currentUser),
+        ),
+      );
     },
   });
 }
 
-export async function deleteFileUploads(apiBaseUrl: string, uploadIds: string[]) {
+export async function deleteFileUploads(
+  apiBaseUrl: string,
+  laboratoryId: string,
+  systemAdmin: boolean,
+  uploadIds: string[],
+) {
   if (uploadIds.length === 0) {
     return;
   }
   const client = createApiClient(apiBaseUrl);
   await Promise.allSettled(
-    uploadIds.map((uploadId) => client.delete(`/file-uploads/${uploadId}`)),
+    uploadIds.map((uploadId) =>
+      client.delete(localLaboratoryPath(laboratoryId, `file-uploads/${uploadId}`, systemAdmin)),
+    ),
   );
 }

@@ -1,4 +1,4 @@
-﻿use super::model::{
+use super::model::{
     InventoryItemResponse, InventoryItemRow, merge_inventory_items_rollback_details,
 };
 use super::queries::{
@@ -6,9 +6,9 @@ use super::queries::{
     fetch_inventory_items_for_update, move_inventory_item_attachments,
 };
 use super::service::{add_quantities_to_item, validate_quantity_item, validate_requested_ids};
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{MergeInventoryItems as MergeInventoryItemsCommand, UserId};
+use crate::domain::MergeInventoryItems as MergeInventoryItemsCommand;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
@@ -81,13 +81,14 @@ impl From<InventoryItemDatabaseError> for MergeInventoryItemsError {
 #[tracing::instrument(
     name = "Merge inventory items",
     skip(pool, payload),
-    fields(actor_user_id=%actor_user_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id)
 )]
 pub async fn merge_inventory_items(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, MergeInventoryItemsError> {
+    let actor = laboratory_context.authorization_actor();
     let command = MergeInventoryItemsCommand::try_from(payload.into_inner())
         .map_err(MergeInventoryItemsError::ValidationError)?;
     let target_inventory_item_id = Uuid::from(command.target_inventory_item_id);
@@ -104,7 +105,7 @@ pub async fn merge_inventory_items(
     for inventory_item_id in &all_ids {
         if !validate_permission(
             &pool,
-            &actor_user_id,
+            &actor,
             ResourceType::InventoryItem,
             Action::Update(*inventory_item_id),
         )
@@ -159,7 +160,7 @@ pub async fn merge_inventory_items(
 
     record_audit(
         &mut transaction,
-        actor_user_id,
+        laboratory_context.actor(),
         AuditAction::Adjust,
         AuditResource::InventoryItem,
         Some(target_after.inventory_item_id),

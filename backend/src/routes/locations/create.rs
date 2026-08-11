@@ -1,9 +1,8 @@
 use super::model::{LocationResponse, create_location_rollback_details};
 use super::queries::{LocationDatabaseError, insert_location};
 use super::service::{build_path_and_depth, resolve_new_parent};
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{LaboratoryId, UserId};
 use crate::domain::{LocationCode, LocationName, NewLocation};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
@@ -81,18 +80,18 @@ impl From<LocationDatabaseError> for CreateLocationError {
 #[tracing::instrument(
     name = "Create a location",
     skip(pool, payload),
-    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, laboratory_id=%laboratory_context)
 )]
 pub async fn create_location(
-    actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    laboratory_id: web::Path<Uuid>,
+    laboratory_context: LaboratoryContext,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, CreateLocationError> {
-    let laboratory_id: LaboratoryId = laboratory_id.into_inner().into();
+    let actor = laboratory_context.actor();
+    let laboratory_id = laboratory_context.laboratory_id();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        actor,
         ResourceType::Location,
         Action::Create(laboratory_id.into()),
     )
@@ -131,7 +130,7 @@ pub async fn create_location(
 
     record_audit(
         &mut transaction,
-        actor_user_id,
+        actor,
         AuditAction::Create,
         AuditResource::Location,
         Some(location.location_id),

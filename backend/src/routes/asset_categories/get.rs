@@ -1,12 +1,12 @@
 use super::model::AssetCategoryResponse;
 use super::queries::{fetch_asset_category, fetch_asset_category_parameter_assignments};
-use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::{AssetCategoryId, UserId};
+use crate::access_control::AssetCategoryPathId;
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
+use crate::domain::AssetCategoryId;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum GetAssetCategoryError {
@@ -37,24 +37,25 @@ impl ResponseError for GetAssetCategoryError {
 #[tracing::instrument(
     name = "Get an asset category",
     skip(pool),
-    fields(actor_user_id=%actor_user_id, category_id=%category_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, category_id=%category_id)
 )]
 pub async fn get_asset_category(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    category_id: web::Path<Uuid>,
+    category_id: AssetCategoryPathId,
 ) -> Result<HttpResponse, GetAssetCategoryError> {
+    let actor = laboratory_context.authorization_actor();
     let category_id: AssetCategoryId = category_id.into_inner().into();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::AssetCategory,
         Action::Read(category_id.into()),
     )
     .await?
     {
         return Err(GetAssetCategoryError::Forbidden(
-            "You don't have permission to view this asset category.".into(),
+            "You are not allowed to get this asset category.".into(),
         ));
     }
 

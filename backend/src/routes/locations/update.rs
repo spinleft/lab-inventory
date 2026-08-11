@@ -1,11 +1,10 @@
 use super::model::{LocationResponse, update_location_rollback_details};
 use super::queries::{LocationDatabaseError, fetch_location_for_update};
 use super::service::{build_path_and_depth, move_location, resolve_moved_parent};
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::LocationPathId;
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{
-    LocationCode, LocationId, LocationName, NullableUpdate, UpdateLocation, UserId,
-};
+use crate::domain::{LocationCode, LocationId, LocationName, NullableUpdate, UpdateLocation};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
@@ -100,25 +99,26 @@ impl From<LocationDatabaseError> for UpdateLocationError {
 #[tracing::instrument(
     name = "Update a location",
     skip(pool, payload),
-    fields(actor_user_id=%actor_user_id, location_id=%location_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, location_id=%location_id)
 )]
 pub async fn update_location(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    location_id: web::Path<Uuid>,
+    location_id: LocationPathId,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, UpdateLocationError> {
+    let actor = laboratory_context.authorization_actor();
     let location_id: LocationId = location_id.into_inner().into();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::Location,
         Action::Update(location_id.into()),
     )
     .await?
     {
-        return Err(UpdateLocationError::Forbidden(
-            "You don't have permission to update this location.".into(),
+        return Err(UpdateLocationError::NotFound(
+            "Location not found".into(),
         ));
     }
 
@@ -169,7 +169,7 @@ pub async fn update_location(
 
     record_audit(
         &mut transaction,
-        actor_user_id,
+        laboratory_context.actor(),
         AuditAction::Update,
         AuditResource::Location,
         Some(updated.location_id),

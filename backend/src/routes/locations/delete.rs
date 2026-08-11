@@ -3,15 +3,14 @@ use super::queries::{
     LocationDatabaseError, fetch_location_for_update, fetch_location_tree_for_update,
 };
 use super::service::delete_location_subtree;
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::LocationPathId;
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::UserId;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum DeleteLocationError {
@@ -58,24 +57,25 @@ impl From<LocationDatabaseError> for DeleteLocationError {
 #[tracing::instrument(
     name = "Delete a location",
     skip(pool),
-    fields(actor_user_id=%actor_user_id, location_id=%location_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, location_id=%location_id)
 )]
 pub async fn delete_location(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    location_id: web::Path<Uuid>,
+    location_id: LocationPathId,
 ) -> Result<HttpResponse, DeleteLocationError> {
+    let actor = laboratory_context.authorization_actor();
     let location_id = location_id.into_inner();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::Location,
         Action::Delete(location_id),
     )
     .await?
     {
         return Err(DeleteLocationError::Forbidden(
-            "You don't have permission to delete locations.".into(),
+            "You are not allowed to delete this location.".into(),
         ));
     }
 
@@ -95,7 +95,7 @@ pub async fn delete_location(
 
     record_audit(
         &mut transaction,
-        actor_user_id,
+        laboratory_context.actor(),
         AuditAction::Delete,
         AuditResource::Location,
         Some(existing.location_id),

@@ -14,6 +14,7 @@ use super::service::{
     federation_reader_for_laboratory, lab_admin_for_laboratory, merge_guest_link_user,
     validate_target_guest,
 };
+use crate::access_control::LaboratoryContext;
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::configuration::FederationSettings;
 use crate::domain::UserId;
@@ -72,29 +73,23 @@ pub struct MergeGuestLinkBody {
 #[tracing::instrument(
     name = "Create federation pairing code",
     skip(pool, settings),
-    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_id)
+    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_context)
 )]
 pub async fn create_pairing_code(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
     settings: web::Data<FederationSettings>,
-    laboratory_id: web::Path<Uuid>,
+    laboratory_context: LaboratoryContext,
 ) -> Result<HttpResponse, FederationError> {
     ensure_enabled(&settings)?;
-    let laboratory_id = laboratory_id.into_inner();
+    let laboratory_id = Uuid::from(laboratory_context.laboratory_id());
     let actor = lab_admin_for_laboratory(&pool, actor_user_id, laboratory_id).await?;
     let local_node = fetch_local_node(&pool).await?;
     let code = generate_token(24);
     let code_hash = sha256_hex(code.as_bytes());
     let expires_at = Utc::now() + Duration::minutes(15);
-    let row = insert_pairing_code(
-        &pool,
-        laboratory_id,
-        &code_hash,
-        expires_at,
-        *actor.user_id,
-    )
-    .await?;
+    let row =
+        insert_pairing_code(&pool, laboratory_id, &code_hash, expires_at, *actor.user_id).await?;
 
     Ok(HttpResponse::Created().json(PairingCodeResponse {
         pairing_code_id: row.pairing_code_id,
@@ -109,19 +104,19 @@ pub async fn create_pairing_code(
 #[tracing::instrument(
     name = "Create federation trust",
     skip(pool, settings, client, body, req),
-    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_id)
+    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_context)
 )]
 pub async fn create_trust(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
     settings: web::Data<FederationSettings>,
     client: web::Data<reqwest::Client>,
-    laboratory_id: web::Path<Uuid>,
+    laboratory_context: LaboratoryContext,
     body: web::Json<CreateTrustBody>,
     req: HttpRequest,
 ) -> Result<HttpResponse, FederationError> {
     ensure_enabled(&settings)?;
-    let laboratory_id = laboratory_id.into_inner();
+    let laboratory_id = Uuid::from(laboratory_context.laboratory_id());
     let actor = lab_admin_for_laboratory(&pool, actor_user_id, laboratory_id).await?;
     let payload = body.into_inner();
     validate_tls_pin_value(payload.tls_certificate_sha256.as_deref())?;
@@ -214,16 +209,16 @@ pub async fn create_trust(
 #[tracing::instrument(
     name = "List federation trusts",
     skip(pool, settings),
-    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_id)
+    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_context)
 )]
 pub async fn list_trusts(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
     settings: web::Data<FederationSettings>,
-    laboratory_id: web::Path<Uuid>,
+    laboratory_context: LaboratoryContext,
 ) -> Result<HttpResponse, FederationError> {
     ensure_enabled(&settings)?;
-    let laboratory_id = laboratory_id.into_inner();
+    let laboratory_id = Uuid::from(laboratory_context.laboratory_id());
     federation_reader_for_laboratory(&pool, actor_user_id, laboratory_id).await?;
     let trusts = fetch_trusts(&pool, laboratory_id).await?;
 
@@ -239,10 +234,12 @@ pub async fn revoke_trust(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
     settings: web::Data<FederationSettings>,
-    path: web::Path<(Uuid, Uuid)>,
+    laboratory_context: LaboratoryContext,
+    trust_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, FederationError> {
     ensure_enabled(&settings)?;
-    let (laboratory_id, trust_id) = path.into_inner();
+    let laboratory_id = Uuid::from(laboratory_context.laboratory_id());
+    let trust_id = trust_id.into_inner();
     tracing::Span::current().record("laboratory_id", tracing::field::display(laboratory_id));
     tracing::Span::current().record("trust_id", tracing::field::display(trust_id));
     let actor = lab_admin_for_laboratory(&pool, actor_user_id, laboratory_id).await?;
@@ -271,16 +268,16 @@ pub async fn revoke_trust(
 #[tracing::instrument(
     name = "List federation guest links",
     skip(pool, settings),
-    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_id)
+    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_context)
 )]
 pub async fn list_guest_links(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
     settings: web::Data<FederationSettings>,
-    laboratory_id: web::Path<Uuid>,
+    laboratory_context: LaboratoryContext,
 ) -> Result<HttpResponse, FederationError> {
     ensure_enabled(&settings)?;
-    let laboratory_id = laboratory_id.into_inner();
+    let laboratory_id = Uuid::from(laboratory_context.laboratory_id());
     lab_admin_for_laboratory(&pool, actor_user_id, laboratory_id).await?;
     let links = fetch_guest_links(&pool, laboratory_id).await?;
     Ok(HttpResponse::Ok().json(
@@ -300,11 +297,13 @@ pub async fn merge_guest_link(
     actor_user_id: UserId,
     pool: web::Data<PgPool>,
     settings: web::Data<FederationSettings>,
-    path: web::Path<(Uuid, Uuid)>,
+    laboratory_context: LaboratoryContext,
+    link_id: web::Path<Uuid>,
     body: web::Json<MergeGuestLinkBody>,
 ) -> Result<HttpResponse, FederationError> {
     ensure_enabled(&settings)?;
-    let (laboratory_id, link_id) = path.into_inner();
+    let laboratory_id = Uuid::from(laboratory_context.laboratory_id());
+    let link_id = link_id.into_inner();
     tracing::Span::current().record("laboratory_id", tracing::field::display(laboratory_id));
     tracing::Span::current().record("link_id", tracing::field::display(link_id));
     let actor = lab_admin_for_laboratory(&pool, actor_user_id, laboratory_id).await?;

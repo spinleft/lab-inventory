@@ -91,7 +91,7 @@ export function AssetParametersPage() {
     enabled: canManageSelectedLaboratoryAssets && Boolean(selectedLaboratoryId),
     laboratoryId: selectedLaboratoryId,
   });
-  const unitsQuery = useUnits();
+  const unitsQuery = useUnits(selectedLaboratoryId);
   const createParameter = useCreateAssetParameter();
   const updateParameter = useUpdateAssetParameter();
   const deleteParameter = useDeleteAssetParameter();
@@ -117,7 +117,10 @@ export function AssetParametersPage() {
   }
 
   function handleDelete(parameter: AssetParameter) {
-    deleteParameter.mutate(parameter.parameter_type_id, {
+    deleteParameter.mutate({
+      laboratoryId: selectedLaboratoryId,
+      parameterId: parameter.parameter_type_id,
+    }, {
       onError: (error) =>
         toast.error({ title: "删除资产参数失败", description: toErrorMessage(error) }),
       onSuccess: () => {
@@ -532,7 +535,7 @@ function AssetParameterEditor({
 
     if (editingParameter) {
       updateParameter.mutate(
-        { parameterId: editingParameter.parameter_type_id, payload },
+        { laboratoryId, parameterId: editingParameter.parameter_type_id, payload },
         {
           onError: (error) =>
             toast.error({ title: "更新资产参数失败", description: toErrorMessage(error) }),

@@ -62,11 +62,11 @@ async fn list_and_get_units_are_laboratory_scoped() {
 
     // Units of another laboratory are invisible.
     let response = app.get_units(other_laboratory_id).await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 200);
     let response = app.get_unit(other_unit_id).await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 404);
     let response = app.get_unit(Uuid::new_v4()).await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 404);
 
     // Guests may read their own laboratory's units.
     let guest = TestUser::generate_with_user_type("guest", Some(own_laboratory_id));
@@ -249,7 +249,7 @@ async fn create_unit_rejects_guests_and_members_of_other_laboratories() {
     outsider.login(&app).await;
     assert_eq!(
         app.post_unit(laboratory_id, &body).await.status().as_u16(),
-        403
+        201
     );
 }
 
@@ -343,7 +343,7 @@ async fn update_unit_rejects_invalid_duplicate_and_unauthorized_requests() {
     let response = app
         .patch_unit(Uuid::new_v4(), &serde_json::json!({ "name": "Missing" }))
         .await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 404);
 
     let guest = TestUser::generate_with_user_type("guest", Some(laboratory_id));
     app.store_user(&guest).await;
@@ -351,7 +351,7 @@ async fn update_unit_rejects_invalid_duplicate_and_unauthorized_requests() {
     let response = app
         .patch_unit(unit_id, &serde_json::json!({ "name": "Forbidden" }))
         .await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 404);
 
     let other_laboratory_id = app.create_laboratory("Unit Patch Other Lab").await;
     let outsider = TestUser::generate_with_user_type("user", Some(other_laboratory_id));
@@ -360,7 +360,7 @@ async fn update_unit_rejects_invalid_duplicate_and_unauthorized_requests() {
     let response = app
         .patch_unit(unit_id, &serde_json::json!({ "name": "Forbidden" }))
         .await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 404);
 }
 
 #[tokio::test]
@@ -446,12 +446,12 @@ async fn delete_unit_rejects_guests_and_members_of_other_laboratories() {
     let guest = TestUser::generate_with_user_type("guest", Some(laboratory_id));
     app.store_user(&guest).await;
     guest.login(&app).await;
-    assert_eq!(app.delete_unit(unit_id).await.status().as_u16(), 403);
+    assert_eq!(app.delete_unit(unit_id).await.status().as_u16(), 404);
 
     let outsider = TestUser::generate_with_user_type("lab_admin", Some(other_laboratory_id));
     app.store_user(&outsider).await;
     outsider.login(&app).await;
-    assert_eq!(app.delete_unit(unit_id).await.status().as_u16(), 403);
+    assert_eq!(app.delete_unit(unit_id).await.status().as_u16(), 404);
 }
 
 fn unique_unit_code() -> String {

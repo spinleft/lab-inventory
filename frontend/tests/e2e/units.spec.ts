@@ -2,6 +2,7 @@ import { expect, type Page, test } from "@playwright/test";
 
 const apiBaseUrl = "http://127.0.0.1:18081/api/v1";
 const appUrl = "/admin/units";
+const laboratoryId = "10000000-0000-4000-8000-000000000010";
 
 const currentUser = {
   email: "root@example.com",
@@ -42,7 +43,22 @@ test("manage units", async ({ page }) => {
   await page.route("**/api/v1/auth/me", async (route) => {
     await route.fulfill({ json: currentUser });
   });
-  await page.route("**/api/v1/units", async (route) => {
+  await page.route("**/api/v1/admin/laboratories", async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          address: "Building A",
+          contact: null,
+          created_at: "2026-06-23T08:00:00Z",
+          description: null,
+          laboratory_id: laboratoryId,
+          name: "Main Lab",
+          updated_at: "2026-06-23T08:00:00Z",
+        },
+      ],
+    });
+  });
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/units`, async (route) => {
     if (route.request().method() === "POST") {
       postedUnit = route.request().postDataJSON() as Record<string, unknown>;
       units = [

@@ -6,7 +6,7 @@
 use super::model::{
     AssetPublicResponse, AttachmentDownloadRow, AttachmentPublicRow, CategoryRow,
     InventoryItemPublicResponse, LaboratoryPublicRow, LocationRow, PaginatedJson,
-    ParameterResponse, ParameterRow, ParameterValueResponse,
+    ParameterResponse, ParameterRow, ParameterValueResponse, UnitRow,
 };
 use super::queries;
 use crate::routes::federation::model::FederationError;
@@ -180,7 +180,11 @@ pub(super) async fn list_categories(
         .get("root_category_id")
         .and_then(|value| value.parse::<Uuid>().ok())
     {
-        Some(root_id) => Some(queries::fetch_category(pool, laboratory_id, root_id).await?.path),
+        Some(root_id) => Some(
+            queries::fetch_category(pool, laboratory_id, root_id)
+                .await?
+                .path,
+        ),
         None => None,
     };
 
@@ -205,7 +209,11 @@ pub(super) async fn list_locations(
         .get("root_location_id")
         .and_then(|value| value.parse::<Uuid>().ok())
     {
-        Some(root_id) => Some(queries::fetch_location(pool, laboratory_id, root_id).await?.path),
+        Some(root_id) => Some(
+            queries::fetch_location(pool, laboratory_id, root_id)
+                .await?
+                .path,
+        ),
         None => None,
     };
 
@@ -218,6 +226,21 @@ pub(super) async fn fetch_location(
     location_id: Uuid,
 ) -> Result<LocationRow, FederationError> {
     queries::fetch_location(pool, laboratory_id, location_id).await
+}
+
+pub(super) async fn list_units(
+    pool: &PgPool,
+    laboratory_id: Uuid,
+) -> Result<Vec<UnitRow>, FederationError> {
+    queries::fetch_units(pool, laboratory_id).await
+}
+
+pub(super) async fn fetch_unit(
+    pool: &PgPool,
+    laboratory_id: Uuid,
+    unit_id: Uuid,
+) -> Result<UnitRow, FederationError> {
+    queries::fetch_unit(pool, laboratory_id, unit_id).await
 }
 
 pub(super) async fn list_parameters(

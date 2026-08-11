@@ -1,12 +1,12 @@
 use super::model::LocationResponse;
 use super::queries::fetch_location;
-use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::{LocationId, UserId};
+use crate::access_control::LocationPathId;
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
+use crate::domain::LocationId;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum GetLocationError {
@@ -37,24 +37,25 @@ impl ResponseError for GetLocationError {
 #[tracing::instrument(
     name = "Get a location",
     skip(pool),
-    fields(actor_user_id=%actor_user_id, location_id=%location_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, location_id=%location_id)
 )]
 pub async fn get_location(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    location_id: web::Path<Uuid>,
+    location_id: LocationPathId,
 ) -> Result<HttpResponse, GetLocationError> {
+    let actor = laboratory_context.authorization_actor();
     let location_id: LocationId = location_id.into_inner().into();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::Location,
         Action::Read(location_id.into()),
     )
     .await?
     {
-        return Err(GetLocationError::Forbidden(
-            "You don't have permission to view this location.".into(),
+        return Err(GetLocationError::NotFound(
+            "Location not found".into(),
         ));
     }
 

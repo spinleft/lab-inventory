@@ -1,15 +1,14 @@
 use super::model::{UnitResponse, create_unit_rollback_details};
 use super::queries::{UnitDatabaseError, insert_unit};
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{NewUnit, UnitCode, UnitDimension, UnitName, UnitSymbol, UserId};
+use crate::domain::{NewUnit, UnitCode, UnitDimension, UnitName, UnitSymbol};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use serde::Deserialize;
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -79,17 +78,18 @@ impl From<UnitDatabaseError> for CreateUnitError {
 #[tracing::instrument(
     name = "Create a unit",
     skip(pool, payload),
-    fields(actor_user_id=%actor_user_id, unit_code=%payload.code)
+    fields(actor_user_id=%laboratory_context.actor().user_id, unit_code=%payload.code)
 )]
 pub async fn create_unit(
-    actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    laboratory_id: web::Path<Uuid>,
+    laboratory_context: LaboratoryContext,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, CreateUnitError> {
+    let actor = laboratory_context.actor();
+    let laboratory_id = laboratory_context.laboratory_id();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        actor,
         ResourceType::Unit,
         Action::Create(*laboratory_id),
     )
@@ -110,7 +110,7 @@ pub async fn create_unit(
     let unit = insert_unit(&mut transaction, *laboratory_id, &new_unit).await?;
     record_audit(
         &mut transaction,
-        actor_user_id,
+        actor,
         AuditAction::Create,
         AuditResource::Unit,
         Some(unit.unit_id),

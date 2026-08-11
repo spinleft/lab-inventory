@@ -110,7 +110,6 @@ async fn fetch_audit_log_count(
         .map_err(|e| ListAuditLogsError::UnexpectedError(e.into()))
 }
 
-
 fn push_audit_log_filters(builder: &mut QueryBuilder<'_, Postgres>, query: &AuditLogListQuery) {
     builder.push(" WHERE TRUE");
     if let Some(actor_user_id) = query.actor_user_id {

@@ -1,10 +1,9 @@
 use super::model::delete_user_rollback_details;
 use super::queries::{UserDatabaseError, delete_user_from_database, fetch_user};
-use crate::access_control::get_actor;
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::{Action, Actor, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
+use crate::domain::UserRole;
 use crate::domain::UserType;
-use crate::domain::{UserId, UserRole};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
@@ -54,10 +53,10 @@ impl From<UserDatabaseError> for DeleteUserError {
 #[tracing::instrument(
     name = "Delete a user",
     skip(pool),
-    fields(actor_user_id=%actor_user_id, target_user_id=%target_user_id)
+    fields(actor_user_id=%actor.user_id, target_user_id=%target_user_id)
 )]
 pub async fn delete_user(
-    actor_user_id: UserId,
+    actor: Actor,
     pool: web::Data<PgPool>,
     target_user_id: web::Path<Uuid>,
 ) -> Result<HttpResponse, DeleteUserError> {
@@ -78,12 +77,6 @@ pub async fn delete_user(
         laboratory_id: target_laboratory_id,
     };
 
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(DeleteUserError::UnexpectedError)?
-        .ok_or(DeleteUserError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
     if actor.user_id == target_user_id {
         return Err(DeleteUserError::ValidationError(
             "Users cannot delete themselves".into(),
@@ -91,7 +84,7 @@ pub async fn delete_user(
     }
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::User,
         Action::DeleteUser(&target_user_role),
     )
@@ -109,7 +102,7 @@ pub async fn delete_user(
     let deleted_user = delete_user_from_database(&mut transaction, target.user_id).await?;
     record_audit(
         &mut transaction,
-        actor_user_id,
+        &actor,
         AuditAction::Delete,
         AuditResource::User,
         Some(deleted_user.user_id),

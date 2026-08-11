@@ -425,8 +425,7 @@ async fn attachment_constraints_are_enforced_by_the_database() {
         .await;
     let asset_id = insert_test_asset(&app, laboratory_id, unit_id).await;
     let inventory_item_id =
-        insert_quantity_inventory_item(&app, asset_id, laboratory_id, Some("ATTACH"))
-            .await;
+        insert_quantity_inventory_item(&app, asset_id, laboratory_id, Some("ATTACH")).await;
 
     let legacy_columns: Vec<String> = sqlx::query_scalar(
         r#"

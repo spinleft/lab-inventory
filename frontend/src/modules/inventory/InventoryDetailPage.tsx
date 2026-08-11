@@ -89,7 +89,7 @@ export function InventoryDetailPage() {
     laboratoryId: item?.laboratory_id ?? "",
     scope: selectedDataScope,
   });
-  const unitsQuery = useUnits();
+  const unitsQuery = useUnits(inventoryQuery.data?.laboratory_id ?? "", selectedDataScope);
   const createInventoryItems = useCreateInventoryItems();
   const createBorrowRequest = useCreateBorrowRequest();
   const updateInventoryItem = useUpdateInventoryItem();

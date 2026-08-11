@@ -198,12 +198,9 @@ pub(super) async fn merge_guest_link_user(
     link_id: Uuid,
     target_guest_user_id: Uuid,
 ) -> Result<(), FederationError> {
-    let old_guest_user_id = super::queries::fetch_guest_link_user_for_update(
-        transaction,
-        laboratory_id,
-        link_id,
-    )
-    .await?;
+    let old_guest_user_id =
+        super::queries::fetch_guest_link_user_for_update(transaction, laboratory_id, link_id)
+            .await?;
     super::queries::update_guest_link_user(
         transaction,
         laboratory_id,

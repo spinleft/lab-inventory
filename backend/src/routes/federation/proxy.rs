@@ -1,8 +1,6 @@
 use super::model::FederationError;
 use super::public_data::parse_read_target;
-use super::queries::{
-    fetch_active_trust, fetch_local_node, fetch_proxy_user, fetch_remote_node,
-};
+use super::queries::{fetch_active_trust, fetch_local_node, fetch_proxy_user, fetch_remote_node};
 use super::security::{OutboundFederationIdentity, ensure_enabled, signed_headers, verify_tls_pin};
 use super::service::federation_actor;
 use crate::configuration::FederationSettings;

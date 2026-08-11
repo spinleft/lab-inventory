@@ -1,10 +1,7 @@
 use super::model::delete_laboratory_rollback_details;
-use super::queries::{
-    LaboratoryDatabaseError, delete_laboratory_from_database, fetch_laboratory,
-};
-use crate::access_control::{Action, ResourceType, validate_permission};
+use super::queries::{LaboratoryDatabaseError, delete_laboratory_from_database, fetch_laboratory};
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::UserId;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
@@ -53,16 +50,17 @@ impl From<LaboratoryDatabaseError> for DeleteLaboratoryError {
 #[tracing::instrument(
     name = "Delete a laboratory",
     skip(pool),
-    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, laboratory_id=%laboratory_context)
 )]
 pub async fn delete_laboratory(
-    actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    laboratory_id: web::Path<Uuid>,
+    laboratory_context: LaboratoryContext,
 ) -> Result<HttpResponse, DeleteLaboratoryError> {
+    let actor = laboratory_context.actor();
+    let laboratory_id = Uuid::from(laboratory_context.laboratory_id());
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        actor,
         ResourceType::Laboratory,
         Action::Delete(Uuid::nil()),
     )
@@ -74,7 +72,7 @@ pub async fn delete_laboratory(
     }
 
     let existing =
-        fetch_laboratory(&pool, *laboratory_id)
+        fetch_laboratory(&pool, laboratory_id)
             .await?
             .ok_or(DeleteLaboratoryError::NotFound(
                 "Laboratory not found".into(),
@@ -86,7 +84,7 @@ pub async fn delete_laboratory(
     delete_laboratory_from_database(&mut transaction, existing.laboratory_id).await?;
     record_audit(
         &mut transaction,
-        actor_user_id,
+        actor,
         AuditAction::Delete,
         AuditResource::Laboratory,
         Some(existing.laboratory_id),

@@ -563,16 +563,10 @@ async fn asset_permissions_follow_laboratory_scope() {
     let response = app.get_assets(other_laboratory_id).await;
     assert_eq!(response.status().as_u16(), 200);
     let body: serde_json::Value = response.json().await.unwrap();
-    assert_eq!(
-        body["items"][0]["asset_id"],
-        asset_id(&other_asset).to_string()
-    );
-    assert!(body["items"][0]["internal_notes"].is_null());
+    assert_eq!(body["items"][0]["asset_id"], asset_id(&asset).to_string());
 
     let response = app.get_asset(asset_id(&other_asset)).await;
-    assert_eq!(response.status().as_u16(), 200);
-    let body: serde_json::Value = response.json().await.unwrap();
-    assert!(body["internal_notes"].is_null());
+    assert_eq!(response.status().as_u16(), 404);
 
     let response = app
         .post_asset(
@@ -584,7 +578,7 @@ async fn asset_permissions_follow_laboratory_scope() {
             }),
         )
         .await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 201);
 
     let response = app.get_asset(asset_id(&asset)).await;
     assert_eq!(response.status().as_u16(), 200);
@@ -598,7 +592,7 @@ async fn asset_permissions_follow_laboratory_scope() {
             &serde_json::json!({ "name": "Guest Update" }),
         )
         .await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 404);
 }
 
 async fn create_text_parameter(

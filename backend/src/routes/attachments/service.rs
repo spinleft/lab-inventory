@@ -76,11 +76,8 @@ impl From<AttachmentDatabaseError> for AssignAttachmentError {
 /// Consumes the given uploads and turns each into an attachment on `target`.
 ///
 /// `expected_laboratory_id` is checked against every upload when supplied. The
-/// create endpoints pass it because they already know the laboratory they are
-/// writing into and want an explicit error; the assign handlers only hold the
-/// target id and pass `None`, relying on the `(asset_id, laboratory_id)` and
-/// `(inventory_item_id, laboratory_id)` composite foreign keys to reject uploads
-/// from another laboratory.
+/// Callers that know the target laboratory pass it so uploads from another
+/// laboratory are rejected before an attachment row is inserted.
 pub(crate) async fn assign_uploaded_attachments(
     transaction: &mut Transaction<'_, Postgres>,
     actor_user_id: UserId,

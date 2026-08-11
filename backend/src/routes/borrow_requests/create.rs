@@ -1,11 +1,11 @@
 use super::model::BorrowRequestResponse;
 use super::queries::{fetch_borrow_request_for_update, insert_borrow_request};
 use super::service::{
-    BorrowRequestError, actor_for_user, fetch_user_snapshot, record_borrow_request_audit,
-    resolve_guest_link_id, validate_inventory_item_read_permission, validate_request_actor,
+    BorrowRequestError, fetch_user_snapshot, record_borrow_request_audit, resolve_guest_link_id,
+    validate_request_actor,
 };
+use crate::access_control::{InventoryItemPathId, LaboratoryContext};
 use crate::audit::AuditAction;
-use crate::domain::UserId;
 use crate::routes::inventory_items::fetch_inventory_item_for_update;
 use actix_web::{HttpResponse, web};
 use anyhow::Context;
@@ -22,15 +22,16 @@ pub struct CreateBorrowRequestBody {
 #[tracing::instrument(
     name = "Create borrow request",
     skip(pool, payload),
-    fields(actor_user_id=%actor_user_id, inventory_item_id=%inventory_item_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, inventory_item_id=%inventory_item_id)
 )]
 pub async fn create_borrow_request(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    inventory_item_id: web::Path<Uuid>,
+    inventory_item_id: InventoryItemPathId,
     payload: web::Json<CreateBorrowRequestBody>,
 ) -> Result<HttpResponse, BorrowRequestError> {
-    let actor = actor_for_user(&pool, actor_user_id).await?;
+    let actor = laboratory_context.actor();
+    let laboratory_id = laboratory_context.laboratory_id();
     let mut transaction = pool
         .begin()
         .await
@@ -38,8 +39,12 @@ pub async fn create_borrow_request(
     let item = fetch_inventory_item_for_update(&mut transaction, inventory_item_id.into_inner())
         .await?
         .ok_or_else(|| BorrowRequestError::NotFound("Inventory item not found".into()))?;
-    let laboratory_id = validate_inventory_item_read_permission(&actor, item.laboratory_id)?;
-    validate_request_actor(&actor, laboratory_id)?;
+    if item.laboratory_id != *laboratory_id {
+        return Err(BorrowRequestError::NotFound(
+            "Inventory item not found".into(),
+        ));
+    }
+    validate_request_actor(actor, laboratory_id)?;
     if item.status != "available" {
         return Err(BorrowRequestError::ConflictError(
             "Only available inventory items can be borrowed".into(),
@@ -52,7 +57,8 @@ pub async fn create_borrow_request(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    let guest_link_id = resolve_guest_link_id(&mut transaction, actor.user_id, laboratory_id).await?;
+    let guest_link_id =
+        resolve_guest_link_id(&mut transaction, actor.user_id, laboratory_id).await?;
     let (requester_username, requester_user_type) =
         fetch_user_snapshot(&mut transaction, actor.user_id).await?;
     let borrow_request_id = Uuid::new_v4();
@@ -75,7 +81,7 @@ pub async fn create_borrow_request(
         .ok_or_else(|| BorrowRequestError::NotFound("Borrow request not found".into()))?;
     record_borrow_request_audit(
         &mut transaction,
-        &actor,
+        actor,
         AuditAction::Create,
         row.borrow_request_id,
         row.inventory_item_id,

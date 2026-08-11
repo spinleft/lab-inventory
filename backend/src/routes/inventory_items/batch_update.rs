@@ -1,9 +1,9 @@
-﻿use super::model::{InventoryItemResponse, update_inventory_item_rollback_details};
+use super::model::{InventoryItemResponse, update_inventory_item_rollback_details};
 use super::queries::{InventoryItemDatabaseError, fetch_inventory_items_for_update};
 use super::service::{apply_inventory_item_patch, validate_requested_ids};
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{InventoryItemIds, UpdateInventoryItem, UserId};
+use crate::domain::{InventoryItemIds, UpdateInventoryItem};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
@@ -100,13 +100,14 @@ impl From<InventoryItemDatabaseError> for BatchUpdateInventoryItemsError {
 #[tracing::instrument(
     name = "Batch update inventory items",
     skip(pool, payload),
-    fields(actor_user_id=%actor_user_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id)
 )]
 pub async fn batch_update_inventory_items(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, BatchUpdateInventoryItemsError> {
+    let actor = laboratory_context.authorization_actor();
     let payload = payload.into_inner();
     let inventory_item_ids = InventoryItemIds::parse(payload.inventory_item_ids.clone())
         .map_err(BatchUpdateInventoryItemsError::ValidationError)?;
@@ -125,7 +126,7 @@ pub async fn batch_update_inventory_items(
     for inventory_item_id in &inventory_item_ids {
         if !validate_permission(
             &pool,
-            &actor_user_id,
+            &actor,
             ResourceType::InventoryItem,
             Action::Update(*inventory_item_id),
         )
@@ -151,7 +152,7 @@ pub async fn batch_update_inventory_items(
             apply_inventory_item_patch(&mut transaction, &existing, patch.clone()).await?;
         record_audit(
             &mut transaction,
-            actor_user_id,
+            laboratory_context.actor(),
             AuditAction::Update,
             AuditResource::InventoryItem,
             Some(updated.inventory_item_id),

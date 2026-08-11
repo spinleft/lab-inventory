@@ -1,13 +1,12 @@
 use super::model::LocationResponse;
 use super::queries::{fetch_location, fetch_locations};
-use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::{LaboratoryId, LocationId, UserId};
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
+use crate::domain::LocationId;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use serde::Deserialize;
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[derive(Deserialize)]
 pub struct ListQuery {
@@ -43,18 +42,18 @@ impl ResponseError for ListLocationsError {
 #[tracing::instrument(
     name = "List locations",
     skip(pool, query),
-    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, laboratory_id=%laboratory_context)
 )]
 pub async fn list_locations(
-    actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    laboratory_id: web::Path<Uuid>,
+    laboratory_context: LaboratoryContext,
     query: web::Query<ListQuery>,
 ) -> Result<HttpResponse, ListLocationsError> {
-    let laboratory_id: LaboratoryId = laboratory_id.into_inner().into();
+    let actor = laboratory_context.actor();
+    let laboratory_id = laboratory_context.laboratory_id();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        actor,
         ResourceType::Location,
         Action::Browse(laboratory_id.into()),
     )

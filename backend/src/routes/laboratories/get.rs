@@ -1,7 +1,6 @@
 use super::model::LaboratoryResponse;
 use super::queries::fetch_laboratory;
-use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::UserId;
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
@@ -37,19 +36,20 @@ impl ResponseError for GetLaboratoryError {
 #[tracing::instrument(
     name = "Get a laboratory",
     skip(pool),
-    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, laboratory_id=%laboratory_context)
 )]
 pub async fn get_laboratory(
-    actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    laboratory_id: web::Path<Uuid>,
+    laboratory_context: LaboratoryContext,
 ) -> Result<HttpResponse, GetLaboratoryError> {
-    let laboratory = fetch_laboratory(&pool, *laboratory_id)
+    let actor = laboratory_context.actor();
+    let laboratory_id = Uuid::from(laboratory_context.laboratory_id());
+    let laboratory = fetch_laboratory(&pool, laboratory_id)
         .await?
         .ok_or(GetLaboratoryError::NotFound("Laboratory not found".into()))?;
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        actor,
         ResourceType::Laboratory,
         Action::Read(laboratory.laboratory_id),
     )

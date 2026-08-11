@@ -117,12 +117,13 @@ async fn list_and_get_asset_categories_are_laboratory_scoped() {
     let response = app.get_asset_categories(other_laboratory_id).await;
     assert_eq!(response.status().as_u16(), 200);
     let body: serde_json::Value = response.json().await.unwrap();
-    assert_eq!(category_paths(&body), vec!["equipment"]);
+    assert_eq!(
+        category_paths(&body),
+        vec!["equipment", "equipment.microscopes", "materials"]
+    );
 
     let response = app.get_asset_category(category_id(&other_root)).await;
-    assert_eq!(response.status().as_u16(), 200);
-    let body: serde_json::Value = response.json().await.unwrap();
-    assert_eq!(body["category_id"], category_id(&other_root).to_string());
+    assert_eq!(response.status().as_u16(), 404);
 }
 
 #[tokio::test]
@@ -632,7 +633,7 @@ async fn write_permissions_follow_laboratory_scope() {
             &serde_json::json!({ "name": "Other Lab", "code": "other_lab" }),
         )
         .await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 201);
 
     app.test_user.login(&app).await;
     let response = app

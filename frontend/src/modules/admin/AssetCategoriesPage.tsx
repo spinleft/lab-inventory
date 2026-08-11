@@ -139,7 +139,10 @@ export function AssetCategoriesPage() {
   }
 
   function handleDelete(category: AssetCategory) {
-    deleteCategory.mutate(category.category_id, {
+    deleteCategory.mutate({
+      categoryId: category.category_id,
+      laboratoryId: selectedLaboratoryId,
+    }, {
       onError: (error) =>
         toast.error({ title: "删除资产分类失败", description: toErrorMessage(error) }),
       onSuccess: () => {
@@ -536,7 +539,7 @@ function CategoryEditor({
 
     if (editingCategory) {
       updateCategory.mutate(
-        { categoryId: editingCategory.category_id, payload },
+        { categoryId: editingCategory.category_id, laboratoryId, payload },
         {
           onError: (error) =>
             toast.error({ title: "更新资产分类失败", description: toErrorMessage(error) }),

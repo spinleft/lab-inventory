@@ -1,12 +1,12 @@
 use super::model::AttachmentResponse;
 use super::queries::fetch_attachment;
-use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::{AttachmentId, UserId};
+use crate::access_control::AttachmentPathId;
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
+use crate::domain::AttachmentId;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum GetAttachmentError {
@@ -43,17 +43,18 @@ impl ResponseError for GetAttachmentError {
 #[tracing::instrument(
     name = "Get attachment metadata",
     skip(pool),
-    fields(actor_user_id=%actor_user_id, attachment_id=%attachment_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, attachment_id=%attachment_id)
 )]
 pub async fn get_attachment(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    attachment_id: web::Path<Uuid>,
+    attachment_id: AttachmentPathId,
 ) -> Result<HttpResponse, GetAttachmentError> {
+    let actor = laboratory_context.authorization_actor();
     let attachment_id: AttachmentId = attachment_id.into_inner().into();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::AttachmentAssignment,
         Action::Read(attachment_id.into()),
     )

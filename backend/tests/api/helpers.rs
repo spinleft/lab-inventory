@@ -156,10 +156,10 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
-    pub async fn post_guest_registration_code(&self, laboratory_id: Uuid) -> reqwest::Response {
+    pub async fn post_guest_registration_code(&self, _laboratory_id: Uuid) -> reqwest::Response {
         self.api_client
             .post(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/guest-registration-codes",
+                "{}/api/v1/local/guest-registration-codes",
                 &self.address
             ))
             .send()
@@ -195,12 +195,88 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
+    async fn current_session_is_system_admin(&self) -> bool {
+        let response = self
+            .api_client
+            .get(format!("{}/api/v1/auth/me", &self.address))
+            .send()
+            .await
+            .expect("Failed to inspect the current test session.");
+        if !response.status().is_success() {
+            return false;
+        }
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .expect("Failed to deserialize the current test user.");
+        matches!(
+            body.pointer("/user_type/name")
+                .and_then(|value| value.as_str()),
+            Some("root" | "super_admin")
+        )
+    }
+
+    async fn laboratory_api_path(&self, laboratory_id: Uuid, tail: &str) -> String {
+        let tail = tail.trim_matches('/');
+        if self.current_session_is_system_admin().await {
+            if tail.is_empty() {
+                format!("/api/v1/admin/laboratories/{laboratory_id}")
+            } else {
+                format!("/api/v1/admin/laboratories/{laboratory_id}/{tail}")
+            }
+        } else if tail.is_empty() {
+            "/api/v1/local/laboratory".to_string()
+        } else {
+            format!("/api/v1/local/{tail}")
+        }
+    }
+
+    async fn resource_api_path(
+        &self,
+        table: &str,
+        id_column: &str,
+        resource_id: Uuid,
+        tail: &str,
+    ) -> String {
+        if !self.current_session_is_system_admin().await {
+            return format!("/api/v1/local/{}", tail.trim_matches('/'));
+        }
+        let query = format!("SELECT laboratory_id FROM {table} WHERE {id_column} = $1");
+        let laboratory_id = sqlx::query_scalar::<_, Uuid>(&query)
+            .bind(resource_id)
+            .fetch_optional(&self.db_pool)
+            .await
+            .expect("Failed to find the resource laboratory for a test request.")
+            .or(sqlx::query_scalar::<_, Uuid>(
+                "SELECT laboratory_id FROM laboratories ORDER BY created_at LIMIT 1",
+            )
+            .fetch_optional(&self.db_pool)
+            .await
+            .expect("Failed to find a fallback laboratory for a test request."))
+            .unwrap_or_else(Uuid::nil);
+        self.laboratory_api_path(laboratory_id, tail).await
+    }
+
+    async fn users_api_path(&self, tail: &str) -> String {
+        let prefix = if self.current_session_is_system_admin().await {
+            "/api/v1/admin/users"
+        } else {
+            "/api/v1/local/users"
+        };
+        let tail = tail.trim_matches('/');
+        if tail.is_empty() {
+            prefix.to_string()
+        } else {
+            format!("{prefix}/{tail}")
+        }
+    }
+
     pub async fn post_laboratory<Body>(&self, body: &Body) -> reqwest::Response
     where
         Body: serde::Serialize,
     {
         self.api_client
-            .post(format!("{}/api/v1/laboratories", &self.address))
+            .post(format!("{}/api/v1/admin/laboratories", &self.address))
             .json(body)
             .send()
             .await
@@ -209,18 +285,16 @@ impl TestApp {
 
     pub async fn get_laboratories(&self) -> reqwest::Response {
         self.api_client
-            .get(format!("{}/api/v1/laboratories", &self.address))
+            .get(format!("{}/api/v1/admin/laboratories", &self.address))
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
     pub async fn get_laboratory(&self, laboratory_id: Uuid) -> reqwest::Response {
+        let path = self.laboratory_api_path(laboratory_id, "").await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/laboratories/{laboratory_id}",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -234,11 +308,9 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self.laboratory_api_path(laboratory_id, "").await;
         self.api_client
-            .patch(format!(
-                "{}/api/v1/laboratories/{laboratory_id}",
-                &self.address
-            ))
+            .patch(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -248,7 +320,7 @@ impl TestApp {
     pub async fn delete_laboratory(&self, laboratory_id: Uuid) -> reqwest::Response {
         self.api_client
             .delete(format!(
-                "{}/api/v1/laboratories/{laboratory_id}",
+                "{}/api/v1/admin/laboratories/{laboratory_id}",
                 &self.address
             ))
             .send()
@@ -256,10 +328,10 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
-    pub async fn post_federation_pairing_code(&self, laboratory_id: Uuid) -> reqwest::Response {
+    pub async fn post_federation_pairing_code(&self, _laboratory_id: Uuid) -> reqwest::Response {
         self.api_client
             .post(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/federation/pairing-codes",
+                "{}/api/v1/local/federation/pairing-codes",
                 &self.address
             ))
             .send()
@@ -269,38 +341,32 @@ impl TestApp {
 
     pub async fn post_federation_trust<Body>(
         &self,
-        laboratory_id: Uuid,
+        _laboratory_id: Uuid,
         body: &Body,
     ) -> reqwest::Response
     where
         Body: serde::Serialize,
     {
         self.api_client
-            .post(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/federation/trusts",
-                &self.address
-            ))
+            .post(format!("{}/api/v1/local/federation/trusts", &self.address))
             .json(body)
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
-    pub async fn get_federation_trusts(&self, laboratory_id: Uuid) -> reqwest::Response {
+    pub async fn get_federation_trusts(&self, _laboratory_id: Uuid) -> reqwest::Response {
         self.api_client
-            .get(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/federation/trusts",
-                &self.address
-            ))
+            .get(format!("{}/api/v1/local/federation/trusts", &self.address))
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
-    pub async fn get_federation_guest_links(&self, laboratory_id: Uuid) -> reqwest::Response {
+    pub async fn get_federation_guest_links(&self, _laboratory_id: Uuid) -> reqwest::Response {
         self.api_client
             .get(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/federation/guest-links",
+                "{}/api/v1/local/federation/guest-links",
                 &self.address
             ))
             .send()
@@ -310,7 +376,7 @@ impl TestApp {
 
     pub async fn merge_federation_guest_link<Body>(
         &self,
-        laboratory_id: Uuid,
+        _laboratory_id: Uuid,
         link_id: Uuid,
         body: &Body,
     ) -> reqwest::Response
@@ -319,7 +385,7 @@ impl TestApp {
     {
         self.api_client
             .post(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/federation/guest-links/{link_id}/merge",
+                "{}/api/v1/local/federation/guest-links/{link_id}/merge",
                 &self.address
             ))
             .json(body)
@@ -367,11 +433,11 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self
+            .laboratory_api_path(laboratory_id, "asset-categories")
+            .await;
         self.api_client
-            .post(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/asset-categories",
-                &self.address
-            ))
+            .post(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -379,11 +445,11 @@ impl TestApp {
     }
 
     pub async fn get_asset_categories(&self, laboratory_id: Uuid) -> reqwest::Response {
+        let path = self
+            .laboratory_api_path(laboratory_id, "asset-categories")
+            .await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/asset-categories",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -394,22 +460,30 @@ impl TestApp {
         laboratory_id: Uuid,
         root_category_id: Uuid,
     ) -> reqwest::Response {
+        let path = self
+            .laboratory_api_path(
+                laboratory_id,
+                &format!("asset-categories?root_category_id={root_category_id}"),
+            )
+            .await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/asset-categories?root_category_id={root_category_id}",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
     pub async fn get_asset_category(&self, category_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "asset_categories",
+                "category_id",
+                category_id,
+                &format!("asset-categories/{category_id}"),
+            )
+            .await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/asset-categories/{category_id}",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -423,11 +497,16 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self
+            .resource_api_path(
+                "asset_categories",
+                "category_id",
+                category_id,
+                &format!("asset-categories/{category_id}"),
+            )
+            .await;
         self.api_client
-            .patch(format!(
-                "{}/api/v1/asset-categories/{category_id}",
-                &self.address
-            ))
+            .patch(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -435,11 +514,16 @@ impl TestApp {
     }
 
     pub async fn delete_asset_category(&self, category_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "asset_categories",
+                "category_id",
+                category_id,
+                &format!("asset-categories/{category_id}"),
+            )
+            .await;
         self.api_client
-            .delete(format!(
-                "{}/api/v1/asset-categories/{category_id}",
-                &self.address
-            ))
+            .delete(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -453,11 +537,11 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self
+            .laboratory_api_path(laboratory_id, "asset-parameters")
+            .await;
         self.api_client
-            .post(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/asset-parameters",
-                &self.address
-            ))
+            .post(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -465,22 +549,27 @@ impl TestApp {
     }
 
     pub async fn get_asset_parameters(&self, laboratory_id: Uuid) -> reqwest::Response {
+        let path = self
+            .laboratory_api_path(laboratory_id, "asset-parameters")
+            .await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/asset-parameters",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
     pub async fn get_asset_parameter(&self, parameter_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "asset_parameter_types",
+                "parameter_type_id",
+                parameter_id,
+                &format!("asset-parameters/{parameter_id}"),
+            )
+            .await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/asset-parameters/{parameter_id}",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -494,11 +583,16 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self
+            .resource_api_path(
+                "asset_parameter_types",
+                "parameter_type_id",
+                parameter_id,
+                &format!("asset-parameters/{parameter_id}"),
+            )
+            .await;
         self.api_client
-            .patch(format!(
-                "{}/api/v1/asset-parameters/{parameter_id}",
-                &self.address
-            ))
+            .patch(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -506,11 +600,16 @@ impl TestApp {
     }
 
     pub async fn delete_asset_parameter(&self, parameter_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "asset_parameter_types",
+                "parameter_type_id",
+                parameter_id,
+                &format!("asset-parameters/{parameter_id}"),
+            )
+            .await;
         self.api_client
-            .delete(format!(
-                "{}/api/v1/asset-parameters/{parameter_id}",
-                &self.address
-            ))
+            .delete(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -520,11 +619,9 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self.laboratory_api_path(laboratory_id, "assets").await;
         self.api_client
-            .post(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/assets",
-                &self.address
-            ))
+            .post(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -543,11 +640,11 @@ impl TestApp {
             .mime_str(mime_type)
             .expect("Invalid file MIME type");
         let form = reqwest::multipart::Form::new().part("file", part);
+        let path = self
+            .laboratory_api_path(laboratory_id, "file-uploads")
+            .await;
         self.api_client
-            .post(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/file-uploads",
-                &self.address
-            ))
+            .post(format!("{}{}", &self.address, path))
             .multipart(form)
             .send()
             .await
@@ -555,8 +652,16 @@ impl TestApp {
     }
 
     pub async fn delete_file_upload(&self, upload_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "file_uploads",
+                "upload_id",
+                upload_id,
+                &format!("file-uploads/{upload_id}"),
+            )
+            .await;
         self.api_client
-            .delete(format!("{}/api/v1/file-uploads/{upload_id}", &self.address))
+            .delete(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -570,11 +675,16 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self
+            .resource_api_path(
+                "assets",
+                "asset_id",
+                asset_id,
+                &format!("assets/{asset_id}/attachments"),
+            )
+            .await;
         self.api_client
-            .post(format!(
-                "{}/api/v1/assets/{asset_id}/attachments",
-                &self.address
-            ))
+            .post(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -589,11 +699,16 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self
+            .resource_api_path(
+                "asset_inventory_items",
+                "inventory_item_id",
+                inventory_item_id,
+                &format!("inventory-items/{inventory_item_id}/attachments"),
+            )
+            .await;
         self.api_client
-            .post(format!(
-                "{}/api/v1/inventory-items/{inventory_item_id}/attachments",
-                &self.address
-            ))
+            .post(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -601,11 +716,16 @@ impl TestApp {
     }
 
     pub async fn get_asset_attachments(&self, asset_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "assets",
+                "asset_id",
+                asset_id,
+                &format!("assets/{asset_id}/attachments"),
+            )
+            .await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/assets/{asset_id}/attachments",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -615,33 +735,41 @@ impl TestApp {
         &self,
         inventory_item_id: Uuid,
     ) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "asset_inventory_items",
+                "inventory_item_id",
+                inventory_item_id,
+                &format!("inventory-items/{inventory_item_id}/attachments"),
+            )
+            .await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/inventory-items/{inventory_item_id}/attachments",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
     pub async fn get_laboratory_attachments(&self, laboratory_id: Uuid) -> reqwest::Response {
+        let path = self.laboratory_api_path(laboratory_id, "attachments").await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/attachments",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
     pub async fn get_attachment(&self, attachment_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "asset_attachment_assignments",
+                "attachment_id",
+                attachment_id,
+                &format!("attachments/{attachment_id}"),
+            )
+            .await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/attachments/{attachment_id}",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -655,11 +783,16 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self
+            .resource_api_path(
+                "asset_attachment_assignments",
+                "attachment_id",
+                attachment_id,
+                &format!("attachments/{attachment_id}"),
+            )
+            .await;
         self.api_client
-            .patch(format!(
-                "{}/api/v1/attachments/{attachment_id}",
-                &self.address
-            ))
+            .patch(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -667,33 +800,41 @@ impl TestApp {
     }
 
     pub async fn delete_attachment(&self, attachment_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "asset_attachment_assignments",
+                "attachment_id",
+                attachment_id,
+                &format!("attachments/{attachment_id}"),
+            )
+            .await;
         self.api_client
-            .delete(format!(
-                "{}/api/v1/attachments/{attachment_id}",
-                &self.address
-            ))
+            .delete(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
     pub async fn download_attachment(&self, attachment_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "asset_attachment_assignments",
+                "attachment_id",
+                attachment_id,
+                &format!("attachments/{attachment_id}/download"),
+            )
+            .await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/attachments/{attachment_id}/download",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
     pub async fn get_assets(&self, laboratory_id: Uuid) -> reqwest::Response {
+        let path = self.laboratory_api_path(laboratory_id, "assets").await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/assets",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -704,30 +845,43 @@ impl TestApp {
         laboratory_id: Uuid,
         query: &str,
     ) -> reqwest::Response {
+        let path = self
+            .laboratory_api_path(laboratory_id, &format!("assets?{query}"))
+            .await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/assets?{query}",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
     pub async fn get_asset(&self, asset_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "assets",
+                "asset_id",
+                asset_id,
+                &format!("assets/{asset_id}"),
+            )
+            .await;
         self.api_client
-            .get(format!("{}/api/v1/assets/{asset_id}", &self.address))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
     pub async fn get_asset_with_query(&self, asset_id: Uuid, query: &str) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "assets",
+                "asset_id",
+                asset_id,
+                &format!("assets/{asset_id}?{query}"),
+            )
+            .await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/assets/{asset_id}?{query}",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -737,8 +891,16 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self
+            .resource_api_path(
+                "assets",
+                "asset_id",
+                asset_id,
+                &format!("assets/{asset_id}"),
+            )
+            .await;
         self.api_client
-            .patch(format!("{}/api/v1/assets/{asset_id}", &self.address))
+            .patch(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -746,8 +908,16 @@ impl TestApp {
     }
 
     pub async fn delete_asset(&self, asset_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "assets",
+                "asset_id",
+                asset_id,
+                &format!("assets/{asset_id}"),
+            )
+            .await;
         self.api_client
-            .delete(format!("{}/api/v1/assets/{asset_id}", &self.address))
+            .delete(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -757,11 +927,16 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self
+            .resource_api_path(
+                "assets",
+                "asset_id",
+                asset_id,
+                &format!("assets/{asset_id}/inventory-items"),
+            )
+            .await;
         self.api_client
-            .post(format!(
-                "{}/api/v1/assets/{asset_id}/inventory-items",
-                &self.address
-            ))
+            .post(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -769,11 +944,11 @@ impl TestApp {
     }
 
     pub async fn get_inventory_items(&self, laboratory_id: Uuid) -> reqwest::Response {
+        let path = self
+            .laboratory_api_path(laboratory_id, "inventory-items")
+            .await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/inventory-items",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -784,22 +959,27 @@ impl TestApp {
         laboratory_id: Uuid,
         query: &str,
     ) -> reqwest::Response {
+        let path = self
+            .laboratory_api_path(laboratory_id, &format!("inventory-items?{query}"))
+            .await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/inventory-items?{query}",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
     pub async fn get_inventory_item(&self, inventory_item_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "asset_inventory_items",
+                "inventory_item_id",
+                inventory_item_id,
+                &format!("inventory-items/{inventory_item_id}"),
+            )
+            .await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/inventory-items/{inventory_item_id}",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -815,7 +995,7 @@ impl TestApp {
     {
         self.api_client
             .post(format!(
-                "{}/api/v1/inventory-items/{inventory_item_id}/borrow-requests",
+                "{}/api/v1/local/inventory-items/{inventory_item_id}/borrow-requests",
                 &self.address
             ))
             .json(body)
@@ -824,12 +1004,9 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
-    pub async fn get_borrow_requests(&self, laboratory_id: Uuid) -> reqwest::Response {
+    pub async fn get_borrow_requests(&self, _laboratory_id: Uuid) -> reqwest::Response {
         self.api_client
-            .get(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/borrow-requests",
-                &self.address
-            ))
+            .get(format!("{}/api/v1/local/borrow-requests", &self.address))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -837,7 +1014,7 @@ impl TestApp {
 
     pub async fn patch_borrow_request<Body>(
         &self,
-        laboratory_id: Uuid,
+        _laboratory_id: Uuid,
         borrow_request_id: Uuid,
         body: &Body,
     ) -> reqwest::Response
@@ -846,7 +1023,7 @@ impl TestApp {
     {
         self.api_client
             .patch(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/borrow-requests/{borrow_request_id}",
+                "{}/api/v1/local/borrow-requests/{borrow_request_id}",
                 &self.address
             ))
             .json(body)
@@ -863,23 +1040,35 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self
+            .resource_api_path(
+                "asset_inventory_items",
+                "inventory_item_id",
+                inventory_item_id,
+                &format!("inventory-items/{inventory_item_id}"),
+            )
+            .await;
         self.api_client
-            .patch(format!(
-                "{}/api/v1/inventory-items/{inventory_item_id}",
-                &self.address
-            ))
+            .patch(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
-    pub async fn patch_inventory_items_batch<Body>(&self, body: &Body) -> reqwest::Response
+    pub async fn patch_inventory_items_batch<Body>(
+        &self,
+        laboratory_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
     where
         Body: serde::Serialize,
     {
+        let path = self
+            .laboratory_api_path(laboratory_id, "inventory-items/batch")
+            .await;
         self.api_client
-            .patch(format!("{}/api/v1/inventory-items/batch", &self.address))
+            .patch(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -894,23 +1083,35 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self
+            .resource_api_path(
+                "asset_inventory_items",
+                "inventory_item_id",
+                inventory_item_id,
+                &format!("inventory-items/{inventory_item_id}/split"),
+            )
+            .await;
         self.api_client
-            .post(format!(
-                "{}/api/v1/inventory-items/{inventory_item_id}/split",
-                &self.address
-            ))
+            .post(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
-    pub async fn merge_inventory_items<Body>(&self, body: &Body) -> reqwest::Response
+    pub async fn merge_inventory_items<Body>(
+        &self,
+        laboratory_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
     where
         Body: serde::Serialize,
     {
+        let path = self
+            .laboratory_api_path(laboratory_id, "inventory-items/merge")
+            .await;
         self.api_client
-            .post(format!("{}/api/v1/inventory-items/merge", &self.address))
+            .post(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -918,25 +1119,34 @@ impl TestApp {
     }
 
     pub async fn delete_inventory_item(&self, inventory_item_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "asset_inventory_items",
+                "inventory_item_id",
+                inventory_item_id,
+                &format!("inventory-items/{inventory_item_id}"),
+            )
+            .await;
         self.api_client
-            .delete(format!(
-                "{}/api/v1/inventory-items/{inventory_item_id}",
-                &self.address
-            ))
+            .delete(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
-    pub async fn batch_delete_inventory_items<Body>(&self, body: &Body) -> reqwest::Response
+    pub async fn batch_delete_inventory_items<Body>(
+        &self,
+        laboratory_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
     where
         Body: serde::Serialize,
     {
+        let path = self
+            .laboratory_api_path(laboratory_id, "inventory-items/batch-delete")
+            .await;
         self.api_client
-            .post(format!(
-                "{}/api/v1/inventory-items/batch-delete",
-                &self.address
-            ))
+            .post(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -947,11 +1157,9 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self.laboratory_api_path(laboratory_id, "units").await;
         self.api_client
-            .post(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/units",
-                &self.address
-            ))
+            .post(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -959,19 +1167,20 @@ impl TestApp {
     }
 
     pub async fn get_units(&self, laboratory_id: Uuid) -> reqwest::Response {
+        let path = self.laboratory_api_path(laboratory_id, "units").await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/units",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
     pub async fn get_unit(&self, unit_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path("units", "unit_id", unit_id, &format!("units/{unit_id}"))
+            .await;
         self.api_client
-            .get(format!("{}/api/v1/units/{unit_id}", &self.address))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -981,8 +1190,11 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self
+            .resource_api_path("units", "unit_id", unit_id, &format!("units/{unit_id}"))
+            .await;
         self.api_client
-            .patch(format!("{}/api/v1/units/{unit_id}", &self.address))
+            .patch(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -990,8 +1202,11 @@ impl TestApp {
     }
 
     pub async fn delete_unit(&self, unit_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path("units", "unit_id", unit_id, &format!("units/{unit_id}"))
+            .await;
         self.api_client
-            .delete(format!("{}/api/v1/units/{unit_id}", &self.address))
+            .delete(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1001,11 +1216,9 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self.laboratory_api_path(laboratory_id, "locations").await;
         self.api_client
-            .post(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/locations",
-                &self.address
-            ))
+            .post(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -1013,11 +1226,9 @@ impl TestApp {
     }
 
     pub async fn get_locations(&self, laboratory_id: Uuid) -> reqwest::Response {
+        let path = self.laboratory_api_path(laboratory_id, "locations").await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/locations",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1028,19 +1239,30 @@ impl TestApp {
         laboratory_id: Uuid,
         root_location_id: Uuid,
     ) -> reqwest::Response {
+        let path = self
+            .laboratory_api_path(
+                laboratory_id,
+                &format!("locations?root_location_id={root_location_id}"),
+            )
+            .await;
         self.api_client
-            .get(format!(
-                "{}/api/v1/laboratories/{laboratory_id}/locations?root_location_id={root_location_id}",
-                &self.address
-            ))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
     }
 
     pub async fn get_location(&self, location_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "locations",
+                "location_id",
+                location_id,
+                &format!("locations/{location_id}"),
+            )
+            .await;
         self.api_client
-            .get(format!("{}/api/v1/locations/{location_id}", &self.address))
+            .get(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1050,8 +1272,16 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self
+            .resource_api_path(
+                "locations",
+                "location_id",
+                location_id,
+                &format!("locations/{location_id}"),
+            )
+            .await;
         self.api_client
-            .patch(format!("{}/api/v1/locations/{location_id}", &self.address))
+            .patch(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -1059,8 +1289,16 @@ impl TestApp {
     }
 
     pub async fn delete_location(&self, location_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "locations",
+                "location_id",
+                location_id,
+                &format!("locations/{location_id}"),
+            )
+            .await;
         self.api_client
-            .delete(format!("{}/api/v1/locations/{location_id}", &self.address))
+            .delete(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1070,8 +1308,9 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self.users_api_path("").await;
         self.api_client
-            .post(format!("{}/api/v1/users", &self.address))
+            .post(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -1082,8 +1321,9 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
+        let path = self.users_api_path(&user_id.to_string()).await;
         self.api_client
-            .patch(format!("{}/api/v1/users/{user_id}", &self.address))
+            .patch(format!("{}{}", &self.address, path))
             .json(body)
             .send()
             .await
@@ -1091,8 +1331,9 @@ impl TestApp {
     }
 
     pub async fn delete_user(&self, user_id: Uuid) -> reqwest::Response {
+        let path = self.users_api_path(&user_id.to_string()).await;
         self.api_client
-            .delete(format!("{}/api/v1/users/{user_id}", &self.address))
+            .delete(format!("{}{}", &self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")

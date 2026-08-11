@@ -4,6 +4,7 @@ import {
   assetDetailPath,
   inventoryItemDetailPath,
   laboratoryCollectionPath,
+  localLaboratoryScope,
   remoteLaboratoryScope,
 } from "./scope";
 
@@ -43,6 +44,18 @@ describe("federation api schemas", () => {
 });
 
 describe("federation scope paths", () => {
+  it("builds local and system-administrator paths without a caller-supplied lab id", () => {
+    const scope = localLaboratoryScope(REMOTE_LABORATORY_ID);
+
+    expect(laboratoryCollectionPath(scope, "assets")).toBe("/local/assets");
+    expect(laboratoryCollectionPath(scope, "assets", true)).toBe(
+      `/admin/laboratories/${REMOTE_LABORATORY_ID}/assets`,
+    );
+    expect(assetDetailPath(scope, "00000000-0000-4000-8000-000000000201")).toBe(
+      "/local/assets/00000000-0000-4000-8000-000000000201",
+    );
+  });
+
   it("builds remote proxy paths for collection and detail reads", () => {
     const scope = remoteLaboratoryScope(REMOTE_NODE_ID, REMOTE_LABORATORY_ID);
 

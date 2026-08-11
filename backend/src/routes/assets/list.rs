@@ -1,7 +1,7 @@
 use super::model::{AssetResponse, AssetRow, parse_include};
 use super::queries::{asset_select, fetch_parameter_values_for_assets};
-use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::{AssetTrackingMode, InventoryStatus, LaboratoryId, UserId};
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
+use crate::domain::{AssetTrackingMode, InventoryStatus, LaboratoryId};
 use crate::routes::shared::parameter_filters::{
     ParameterFilter, ParameterFilterError, parse_parameter_filters, push_parameter_filters,
 };
@@ -64,18 +64,18 @@ impl From<PaginationError> for ListAssetsError {
 #[tracing::instrument(
     name = "List assets",
     skip(pool, query),
-    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, laboratory_id=%laboratory_context)
 )]
 pub async fn list_assets(
-    actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    laboratory_id: web::Path<Uuid>,
+    laboratory_context: LaboratoryContext,
     query: web::Query<ListAssetsQuery>,
 ) -> Result<HttpResponse, ListAssetsError> {
-    let laboratory_id: LaboratoryId = laboratory_id.into_inner().into();
+    let actor = laboratory_context.actor();
+    let laboratory_id = laboratory_context.laboratory_id();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        actor,
         ResourceType::Asset,
         Action::Browse(laboratory_id.into()),
     )
@@ -87,7 +87,7 @@ pub async fn list_assets(
     }
     let include_internal_notes = validate_permission(
         &pool,
-        &actor_user_id,
+        actor,
         ResourceType::Asset,
         Action::BrowseInternal(laboratory_id.into()),
     )

@@ -1,4 +1,4 @@
-﻿use super::model::{
+use super::model::{
     AssetParameterValueInput, AssetResponse, AssetRow, update_asset_rollback_details,
 };
 use super::queries::{
@@ -9,11 +9,12 @@ use super::service::{
     apply_asset_parameter_updates, convert_inventory_quantities_to_unit,
     validate_required_parameters,
 };
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::AssetPathId;
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{
     AssetCategoryId, AssetId, AssetName, AssetTrackingMode, LaboratoryId, NullableUpdate,
-    UpdateAsset, UserId,
+    UpdateAsset,
 };
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
@@ -138,18 +139,19 @@ impl From<AssetDatabaseError> for UpdateAssetError {
 #[tracing::instrument(
     name = "Update an asset",
     skip(pool, payload),
-    fields(actor_user_id=%actor_user_id, asset_id=%asset_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, asset_id=%asset_id)
 )]
 pub async fn update_asset(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    asset_id: web::Path<Uuid>,
+    asset_id: AssetPathId,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, UpdateAssetError> {
+    let actor = laboratory_context.authorization_actor();
     let asset_id: AssetId = asset_id.into_inner().into();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::Asset,
         Action::Update(asset_id.into()),
     )
@@ -257,7 +259,7 @@ pub async fn update_asset(
 
     record_audit(
         &mut transaction,
-        actor_user_id,
+        laboratory_context.actor(),
         AuditAction::Update,
         AuditResource::Asset,
         Some(asset.asset_id),

@@ -1,6 +1,7 @@
 use super::queries::{delete_file_upload_from_database, fetch_file_upload_for_update};
-use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::{FileStorageKey, FileUploadId, UserId};
+use crate::access_control::FileUploadPathId;
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
+use crate::domain::{FileStorageKey, FileUploadId};
 use crate::file_storage::FileStorage;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
@@ -43,25 +44,26 @@ impl ResponseError for DeleteFileUploadError {
 #[tracing::instrument(
     name = "Delete file upload",
     skip(pool, storage),
-    fields(actor_user_id=%actor_user_id, upload_id=%upload_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, upload_id=%upload_id)
 )]
 pub async fn delete_file_upload(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
     storage: web::Data<FileStorage>,
-    upload_id: web::Path<FileUploadId>,
+    upload_id: FileUploadPathId,
 ) -> Result<HttpResponse, DeleteFileUploadError> {
-    let upload_id = upload_id.into_inner();
+    let actor = laboratory_context.authorization_actor();
+    let upload_id: FileUploadId = upload_id.into_inner().into();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::FileUpload,
         Action::Delete(upload_id.into()),
     )
     .await?
     {
         return Err(DeleteFileUploadError::Forbidden(
-            "You don't have permission to delete files.".into(),
+            "You are not allowed to delete this file upload.".into(),
         ));
     }
     let mut transaction = pool

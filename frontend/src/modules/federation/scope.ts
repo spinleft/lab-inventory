@@ -52,26 +52,48 @@ export function parseLaboratoryScopeValue(value: string): LaboratoryDataScope | 
   return null;
 }
 
-export function laboratoryCollectionPath(scope: LaboratoryDataScope, collection: string) {
+export function localLaboratoryPath(
+  laboratoryId: string,
+  path: string,
+  systemAdmin = false,
+) {
+  const prefix = systemAdmin ? `/admin/laboratories/${laboratoryId}` : "/local";
+  return path ? `${prefix}/${path}` : prefix;
+}
+
+export function laboratoryCollectionPath(
+  scope: LaboratoryDataScope,
+  collection: string,
+  systemAdmin = false,
+) {
   if (scope.kind === "local") {
-    return `/laboratories/${scope.laboratoryId}/${collection}`;
+    return localLaboratoryPath(scope.laboratoryId, collection, systemAdmin);
   }
   return `/federation/nodes/${scope.remoteNodeId}/laboratories/${scope.remoteLaboratoryId}/${collection}`;
 }
 
-export function assetDetailPath(scope: LaboratoryDataScope | undefined, assetId: string) {
+export function assetDetailPath(
+  scope: LaboratoryDataScope | undefined,
+  assetId: string,
+  systemAdmin = false,
+) {
   if (scope?.kind === "remote") {
     return `/federation/nodes/${scope.remoteNodeId}/laboratories/${scope.remoteLaboratoryId}/assets/${assetId}`;
   }
-  return `/assets/${assetId}`;
+  return localLaboratoryPath(scope?.laboratoryId ?? "", `assets/${assetId}`, systemAdmin);
 }
 
 export function inventoryItemDetailPath(
   scope: LaboratoryDataScope | undefined,
   inventoryItemId: string,
+  systemAdmin = false,
 ) {
   if (scope?.kind === "remote") {
     return `/federation/nodes/${scope.remoteNodeId}/laboratories/${scope.remoteLaboratoryId}/inventory-items/${inventoryItemId}`;
   }
-  return `/inventory-items/${inventoryItemId}`;
+  return localLaboratoryPath(
+    scope?.laboratoryId ?? "",
+    `inventory-items/${inventoryItemId}`,
+    systemAdmin,
+  );
 }

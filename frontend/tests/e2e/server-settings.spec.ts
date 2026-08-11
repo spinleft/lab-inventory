@@ -23,22 +23,23 @@ test("user configures and tests a backend server", async ({ page }) => {
 
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "后端服务器设置" }),
+    page.getByRole("heading", { exact: true, name: "服务端" }),
   ).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   await page.getByLabel("后端 API 地址").fill("http://127.0.0.1:8000");
-  await page.getByRole("button", { name: "测试连接" }).click();
-
-  await expect(page.getByText("连接正常。")).toBeVisible();
-  await expect(page.getByLabel("后端 API 地址")).toHaveValue(
-    "http://127.0.0.1:8000/api/v1",
-  );
-  await page.getByRole("button", { name: "继续" }).click();
+  await page.getByRole("button", { name: "保存并继续" }).click();
 
   await expect(
     page.getByRole("heading", { exact: true, name: "登录" }),
   ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.localStorage.getItem("labInventory.apiBaseUrl"),
+      ),
+    )
+    .toBe("http://127.0.0.1:8000/api/v1");
   await expectNoHorizontalOverflow(page);
 });
 

@@ -6,14 +6,14 @@
 //! answer with the same error type, so it lives here alongside the flows that
 //! raise it.
 use super::model::{BorrowRequestStatus, borrow_request_audit_details};
-use super::queries::{fetch_borrow_actor, fetch_guest_link_id, insert_local_guest_link};
-use crate::access_control::{Actor, get_actor};
+use super::queries::{fetch_borrow_actor, fetch_guest_link_id};
+use crate::access_control::Actor;
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{LaboratoryId, UserId};
 use crate::utils::error_chain_fmt;
 use actix_web::ResponseError;
 use actix_web::http::StatusCode;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 #[derive(thiserror::Error)]
@@ -48,31 +48,6 @@ impl ResponseError for BorrowRequestError {
     }
 }
 
-pub(super) async fn actor_for_user(
-    pool: &PgPool,
-    actor_user_id: UserId,
-) -> Result<Actor, BorrowRequestError> {
-    get_actor(pool, actor_user_id)
-        .await
-        .map_err(BorrowRequestError::UnexpectedError)?
-        .ok_or_else(|| BorrowRequestError::Forbidden("Actor not found in the database".into()))
-}
-
-pub(super) fn validate_inventory_item_read_permission(
-    actor: &Actor,
-    laboratory_id: Uuid,
-) -> Result<LaboratoryId, BorrowRequestError> {
-    let laboratory_id = LaboratoryId::parse(laboratory_id)
-        .map_err(|e| BorrowRequestError::UnexpectedError(anyhow::anyhow!(e)))?;
-    if actor.can_query_laboratory_resource(&laboratory_id) {
-        Ok(laboratory_id)
-    } else {
-        Err(BorrowRequestError::Forbidden(
-            "You do not have permission to view inventory items for this laboratory".into(),
-        ))
-    }
-}
-
 /// Borrowing is for outsiders: you ask another laboratory for something, never
 /// your own.
 pub(super) fn validate_request_actor(
@@ -83,16 +58,8 @@ pub(super) fn validate_request_actor(
     if actor.is_guest() && actor.laboratory_id == Some(laboratory_id) {
         return Ok(());
     }
-    // Same-server cross-laboratory admins and users can also request borrows;
-    // they will be auto-registered as local guest links.
-    if (actor.is_lab_admin() || actor.is_regular_user())
-        && actor.laboratory_id.is_some()
-        && actor.laboratory_id != Some(laboratory_id)
-    {
-        return Ok(());
-    }
     Err(BorrowRequestError::Forbidden(
-        "Only guest users or cross-laboratory users can request borrows".into(),
+        "Only guest users can request borrows".into(),
     ))
 }
 
@@ -140,35 +107,9 @@ pub(super) async fn resolve_guest_link_id(
         return Ok(link_id);
     }
 
-    let actor = fetch_borrow_actor(transaction, user_id)
-        .await?
-        .ok_or_else(|| BorrowRequestError::Forbidden("Actor not found in the database".into()))?;
-    let is_cross_lab = matches!(actor.user_type_name.as_str(), "lab_admin" | "user")
-        && actor.laboratory_id.is_some()
-        && actor.laboratory_id != Some(*laboratory_id);
-    if !is_cross_lab {
-        return Err(BorrowRequestError::Forbidden(
-            "Only federated guest users or cross-laboratory users can create borrow requests"
-                .into(),
-        ));
-    }
-
-    let home_laboratory_id = actor
-        .laboratory_id
-        .ok_or_else(|| BorrowRequestError::Forbidden("Actor has no home laboratory".into()))?;
-    let link_id = Uuid::new_v4();
-    insert_local_guest_link(
-        transaction,
-        link_id,
-        laboratory_id,
-        home_laboratory_id,
-        user_id,
-        &actor.username,
-        &actor.user_type_name,
-    )
-    .await?;
-
-    Ok(link_id)
+    Err(BorrowRequestError::Forbidden(
+        "A federation guest link is required to create borrow requests".into(),
+    ))
 }
 
 /// The name and role a request records for whoever filed or decided it, copied

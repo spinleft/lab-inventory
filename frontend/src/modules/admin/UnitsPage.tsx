@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Ruler, Trash2 } from "lucide-react";
 import { Fragment, type FormEvent, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../app/auth-context";
+import { useLaboratorySelection } from "../../app/laboratory-selection-context";
 import { useBackendConfig } from "../../shared/api/backendConfig";
 import { formatDate } from "../../shared/lib/date";
 import { toErrorMessage } from "../../shared/lib/errors";
@@ -48,13 +49,14 @@ type UnitDimensionGroup = {
 
 export function UnitsPage() {
   const { currentUser } = useAuth();
+  const { selectedLaboratoryId } = useLaboratorySelection();
   const { apiBaseUrl } = useBackendConfig();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const unitsQuery = useUnits();
-  const createUnit = useCreateUnit();
-  const updateUnit = useUpdateUnit();
-  const deleteUnit = useDeleteUnit();
+  const unitsQuery = useUnits(selectedLaboratoryId);
+  const createUnit = useCreateUnit(selectedLaboratoryId);
+  const updateUnit = useUpdateUnit(selectedLaboratoryId);
+  const deleteUnit = useDeleteUnit(selectedLaboratoryId);
   const canManage = canManageUnits(currentUser);
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<Unit | "new" | null>(null);

@@ -64,7 +64,7 @@ export function useBorrowRequests({
     queryFn: async () => {
       const client = createApiClient(apiBaseUrl);
       return borrowRequestsSchema.parse(
-        await client.get(`/laboratories/${laboratoryId}/borrow-requests`,
+        await client.get("/local/borrow-requests",
           status && status !== "all" ? { status } : undefined,
         ),
       );
@@ -88,7 +88,7 @@ export function useResolveBorrowRequest() {
     }) => {
       const client = createApiClient(apiBaseUrl);
       return borrowRequestSchema.parse(
-        await client.patch(`/laboratories/${laboratoryId}/borrow-requests/${borrowRequestId}`, payload),
+        await client.patch(`/local/borrow-requests/${borrowRequestId}`, payload),
       );
     },
     onSuccess: (_request, variables) => {
@@ -115,7 +115,7 @@ export function useCreateBorrowRequest() {
     }) => {
       const client = createApiClient(apiBaseUrl);
       return borrowRequestSchema.parse(
-        await client.post(`/inventory-items/${inventoryItemId}/borrow-requests`, payload),
+        await client.post(`/local/inventory-items/${inventoryItemId}/borrow-requests`, payload),
       );
     },
     onSuccess: (_request, variables) => {
@@ -144,7 +144,7 @@ export function useBorrowedInventoryItems(laboratoryId: string) {
           total: z.number(),
         })
         .parse(
-          await client.get(`/laboratories/${laboratoryId}/inventory-items`, {
+          await client.get("/local/inventory-items", {
             status: "borrowed",
             limit: 200,
             offset: 0,

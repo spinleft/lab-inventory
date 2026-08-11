@@ -1,12 +1,11 @@
 use super::model::{UserResponse, UserRow, update_user_rollback_details};
 use super::queries::{UserDatabaseError, fetch_user, update_user_in_database};
-use crate::access_control::get_actor;
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::{Action, Actor, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
+use crate::domain::UserRole;
 use crate::domain::{
     LaboratoryId, NullableUpdate, PhoneNumber, UpdateUser, UserEmail, UserName, UserType,
 };
-use crate::domain::{UserId, UserRole};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
@@ -109,20 +108,14 @@ impl From<UserDatabaseError> for UpdateUserError {
 #[tracing::instrument(
     name = "Update a user",
     skip(pool, payload),
-    fields(actor_user_id=%actor_user_id, target_user_id=%target_user_id)
+    fields(actor_user_id=%actor.user_id, target_user_id=%target_user_id)
 )]
 pub async fn update_user(
     pool: web::Data<PgPool>,
-    actor_user_id: UserId,
+    actor: Actor,
     target_user_id: web::Path<Uuid>,
     payload: web::Json<UpdateUserJsonData>,
 ) -> Result<HttpResponse, UpdateUserError> {
-    let actor = get_actor(&pool, actor_user_id)
-        .await
-        .map_err(UpdateUserError::UnexpectedError)?
-        .ok_or(UpdateUserError::Forbidden(
-            "Actor not found in the database".into(),
-        ))?;
     let target_user = fetch_user(&pool, *target_user_id).await?;
     let target_user_id = target_user.user_id.into();
     let target_user_type = parse_user_type(&target_user)?;
@@ -149,7 +142,7 @@ pub async fn update_user(
     if (actor.user_id != target_user_id)
         && !validate_permission(
             &pool,
-            &actor_user_id,
+            &actor,
             ResourceType::User,
             Action::UpdateUser(&target_user_role, &update_user_role),
         )
@@ -185,7 +178,7 @@ pub async fn update_user(
 
     record_audit(
         &mut transaction,
-        actor_user_id,
+        &actor,
         AuditAction::Update,
         AuditResource::User,
         Some(user.user_id),

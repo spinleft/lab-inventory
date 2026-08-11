@@ -3,15 +3,15 @@ use super::queries::{
     AssetParameterDatabaseError, delete_asset_parameter_from_database,
     fetch_asset_parameter_for_update, fetch_asset_parameter_options_for_update,
 };
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::AssetParameterPathId;
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{AssetParameterId, UserId};
+use crate::domain::AssetParameterId;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum DeleteAssetParameterError {
@@ -58,24 +58,25 @@ impl From<AssetParameterDatabaseError> for DeleteAssetParameterError {
 #[tracing::instrument(
     name = "Delete an asset parameter",
     skip(pool),
-    fields(actor_user_id=%actor_user_id, parameter_id=%parameter_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, parameter_id=%parameter_id)
 )]
 pub async fn delete_asset_parameter(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    parameter_id: web::Path<Uuid>,
+    parameter_id: AssetParameterPathId,
 ) -> Result<HttpResponse, DeleteAssetParameterError> {
+    let actor = laboratory_context.authorization_actor();
     let parameter_id: AssetParameterId = parameter_id.into_inner().into();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::AssetParameter,
         Action::Delete(parameter_id.into()),
     )
     .await?
     {
         return Err(DeleteAssetParameterError::Forbidden(
-            "You don't have permission to delete this asset parameter.".into(),
+            "You are not allowed to delete this asset parameter.".into(),
         ));
     }
 
@@ -95,7 +96,7 @@ pub async fn delete_asset_parameter(
     delete_asset_parameter_from_database(&mut transaction, existing.parameter_type_id).await?;
     record_audit(
         &mut transaction,
-        actor_user_id,
+        laboratory_context.actor(),
         AuditAction::Delete,
         AuditResource::AssetParameter,
         Some(existing.parameter_type_id),

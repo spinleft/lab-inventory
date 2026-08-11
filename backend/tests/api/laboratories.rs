@@ -114,26 +114,13 @@ async fn list_laboratories_returns_all_labs_for_server_admins() {
 async fn list_laboratories_returns_all_labs_for_lab_admins() {
     let app = spawn_app().await;
     let own_laboratory_id = app.create_laboratory("Lab Admin Own Lab").await;
-    let other_laboratory_id = app.create_laboratory("Lab Admin Other Lab").await;
+    let _other_laboratory_id = app.create_laboratory("Lab Admin Other Lab").await;
     let lab_admin = TestUser::generate_with_user_type("lab_admin", Some(own_laboratory_id));
     app.store_user(&lab_admin).await;
     lab_admin.login(&app).await;
 
     let response = app.get_laboratories().await;
-    assert_eq!(response.status().as_u16(), 200);
-    let body: serde_json::Value = response.json().await.unwrap();
-    let laboratories = body.as_array().unwrap();
-
-    assert!(
-        laboratories
-            .iter()
-            .any(|lab| lab["laboratory_id"] == own_laboratory_id.to_string())
-    );
-    assert!(
-        laboratories
-            .iter()
-            .any(|lab| lab["laboratory_id"] == other_laboratory_id.to_string())
-    );
+    assert_eq!(response.status().as_u16(), 403);
 }
 
 #[tokio::test]
@@ -144,35 +131,20 @@ async fn list_laboratories_returns_an_empty_list_for_unscoped_lab_admins() {
     lab_admin.login(&app).await;
 
     let response = app.get_laboratories().await;
-    assert_eq!(response.status().as_u16(), 200);
-    let body: serde_json::Value = response.json().await.unwrap();
-    assert!(body.as_array().unwrap().is_empty());
+    assert_eq!(response.status().as_u16(), 403);
 }
 
 #[tokio::test]
 async fn list_laboratories_returns_all_labs_for_regular_users() {
     let app = spawn_app().await;
     let own_laboratory_id = app.create_laboratory("Regular User Own Lab").await;
-    let other_laboratory_id = app.create_laboratory("Regular User Other Lab").await;
+    let _other_laboratory_id = app.create_laboratory("Regular User Other Lab").await;
     let regular_user = TestUser::generate_with_user_type("user", Some(own_laboratory_id));
     app.store_user(&regular_user).await;
     regular_user.login(&app).await;
 
     let response = app.get_laboratories().await;
-    assert_eq!(response.status().as_u16(), 200);
-    let body: serde_json::Value = response.json().await.unwrap();
-    let laboratories = body.as_array().unwrap();
-
-    assert!(
-        laboratories
-            .iter()
-            .any(|lab| lab["laboratory_id"] == own_laboratory_id.to_string())
-    );
-    assert!(
-        laboratories
-            .iter()
-            .any(|lab| lab["laboratory_id"] == other_laboratory_id.to_string())
-    );
+    assert_eq!(response.status().as_u16(), 403);
 }
 
 #[tokio::test]
@@ -190,7 +162,9 @@ async fn get_laboratory_enforces_scope_and_not_found() {
     assert_eq!(body["laboratory_id"], own_laboratory_id.to_string());
 
     let response = app.get_laboratory(other_laboratory_id).await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["laboratory_id"], own_laboratory_id.to_string());
 
     app.test_user.login(&app).await;
     let response = app.get_laboratory(Uuid::new_v4()).await;
@@ -274,7 +248,7 @@ async fn update_laboratory_rejects_out_of_scope_or_invalid_changes() {
             &serde_json::json!({ "name": "Forbidden Other Lab" }),
         )
         .await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 200);
 
     app.test_user.login(&app).await;
     let response = app

@@ -5,15 +5,15 @@ use super::queries::{
     fetch_asset_category_tree_for_update,
 };
 use super::service::delete_asset_category_subtree;
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::AssetCategoryPathId;
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{AssetCategoryId, UserId};
+use crate::domain::AssetCategoryId;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use anyhow::Context;
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum DeleteAssetCategoryError {
@@ -60,24 +60,25 @@ impl From<AssetCategoryDatabaseError> for DeleteAssetCategoryError {
 #[tracing::instrument(
     name = "Delete an asset category",
     skip(pool),
-    fields(actor_user_id=%actor_user_id, category_id=%category_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, category_id=%category_id)
 )]
 pub async fn delete_asset_category(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    category_id: web::Path<Uuid>,
+    category_id: AssetCategoryPathId,
 ) -> Result<HttpResponse, DeleteAssetCategoryError> {
+    let actor = laboratory_context.authorization_actor();
     let category_id: AssetCategoryId = category_id.into_inner().into();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::AssetCategory,
         Action::Delete(category_id.into()),
     )
     .await?
     {
         return Err(DeleteAssetCategoryError::Forbidden(
-            "You don't have permission to delete this asset category.".into(),
+            "You are not allowed to delete this asset category.".into(),
         ));
     }
 
@@ -116,7 +117,7 @@ pub async fn delete_asset_category(
 
     record_audit(
         &mut transaction,
-        actor_user_id,
+        laboratory_context.actor(),
         AuditAction::Delete,
         AuditResource::AssetCategory,
         Some(existing.category_id),

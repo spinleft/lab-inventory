@@ -1,12 +1,10 @@
 use super::model::UnitResponse;
 use super::queries::fetch_units;
-use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::{LaboratoryId, UserId};
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum ListUnitsError {
@@ -31,16 +29,16 @@ impl ResponseError for ListUnitsError {
     }
 }
 
-#[tracing::instrument(name = "List units", skip(pool), fields(actor_user_id=%actor_user_id))]
+#[tracing::instrument(name = "List units", skip(pool), fields(actor_user_id=%laboratory_context.actor().user_id))]
 pub async fn list_units(
-    actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    laboratory_id: web::Path<Uuid>,
+    laboratory_context: LaboratoryContext,
 ) -> Result<HttpResponse, ListUnitsError> {
-    let laboratory_id: LaboratoryId = laboratory_id.into_inner().into();
+    let actor = laboratory_context.actor();
+    let laboratory_id = laboratory_context.laboratory_id();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        actor,
         ResourceType::Unit,
         Action::Browse(laboratory_id.into()),
     )

@@ -1,5 +1,6 @@
 use crate::authentication::{
     GuestRegistrationHasher, GuestRegistrationRateLimiter, reject_anonymous_users,
+    reject_non_laboratory_users, reject_non_system_admins,
 };
 use crate::configuration::{ApplicationSettings, DatabaseSettings, FederationSettings, Settings};
 use crate::file_storage::FileStorage;
@@ -197,7 +198,7 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
             .route("/auth/logout", web::post().to(logout))
             .service(
                 web::resource("/auth/guest-registration")
-                    .wrap(from_fn(enforce_guest_registration_rate_limit))
+                    .wrap(from_fn(enforce_guest_registratiown_rate_limit))
                     .route(web::post().to(register_guest)),
             )
             .route(
@@ -215,232 +216,207 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
             .service(
                 web::scope("")
                     .wrap(from_fn(reject_anonymous_users))
-                    .route("/auth/me", web::get().to(me))
-                    .route("/auth/password", web::patch().to(change_password))
-                    .route("/audit-logs", web::get().to(list_audit_logs))
-                    .route(
-                        "/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}",
-                        web::get().to(proxy_get),
-                    )
-                    .route(
-                        "/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}/{tail:.*}",
-                        web::get().to(proxy_get),
-                    )
-                    .route("/laboratories", web::post().to(create_laboratory))
-                    .route("/laboratories", web::get().to(list_laboratories))
-                    .route(
-                        "/laboratories/{laboratory_id}/guest-registration-codes",
-                        web::post().to(create_guest_registration_code),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/federation/pairing-codes",
-                        web::post().to(create_pairing_code),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/federation/trusts",
-                        web::post().to(create_trust),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/federation/trusts",
-                        web::get().to(list_trusts),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/federation/trusts/{trust_id}",
-                        web::delete().to(revoke_trust),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/federation/guest-links",
-                        web::get().to(list_guest_links),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/federation/guest-links/{link_id}/merge",
-                        web::post().to(merge_guest_link),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/borrow-requests",
-                        web::get().to(list_borrow_requests),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/borrow-requests/{borrow_request_id}",
-                        web::patch().to(resolve_borrow_request),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/asset-categories",
-                        web::get().to(list_asset_categories),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/asset-categories",
-                        web::post().to(create_asset_category),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/asset-parameters",
-                        web::get().to(list_asset_parameters),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/asset-parameters",
-                        web::post().to(create_asset_parameter),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/assets",
-                        web::get().to(list_assets),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/assets",
-                        web::post().to(create_asset),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/file-uploads",
-                        web::post().to(upload_file),
-                    )
-                    .route(
-                        "/file-uploads/{upload_id}",
-                        web::delete().to(delete_file_upload),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/attachments",
-                        web::get().to(list_laboratory_attachments),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/inventory-items",
-                        web::get().to(list_inventory_items),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/units",
-                        web::get().to(list_units),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/units",
-                        web::post().to(create_unit),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/locations",
-                        web::get().to(list_locations),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}/locations",
-                        web::post().to(create_location),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}",
-                        web::get().to(get_laboratory),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}",
-                        web::patch().to(update_laboratory),
-                    )
-                    .route(
-                        "/laboratories/{laboratory_id}",
-                        web::delete().to(delete_laboratory),
-                    )
-                    .route("/users", web::post().to(create_user))
-                    .route("/users", web::get().to(list_users))
-                    .route("/users/{target_user_id}", web::get().to(get_user))
-                    .route("/users/{target_user_id}", web::patch().to(update_user))
-                    .route("/users/{target_user_id}", web::delete().to(delete_user))
-                    .route("/units/{unit_id}", web::get().to(get_unit))
-                    .route("/units/{unit_id}", web::patch().to(update_unit))
-                    .route("/units/{unit_id}", web::delete().to(delete_unit))
-                    .route(
-                        "/asset-categories/{category_id}",
-                        web::get().to(get_asset_category),
-                    )
-                    .route(
-                        "/asset-categories/{category_id}",
-                        web::patch().to(update_asset_category),
-                    )
-                    .route(
-                        "/asset-categories/{category_id}",
-                        web::delete().to(delete_asset_category),
-                    )
-                    .route(
-                        "/asset-parameters/{parameter_id}",
-                        web::get().to(get_asset_parameter),
-                    )
-                    .route(
-                        "/asset-parameters/{parameter_id}",
-                        web::patch().to(update_asset_parameter),
-                    )
-                    .route(
-                        "/asset-parameters/{parameter_id}",
-                        web::delete().to(delete_asset_parameter),
-                    )
-                    .route("/assets/{asset_id}", web::get().to(get_asset))
-                    .route("/assets/{asset_id}", web::patch().to(update_asset))
-                    .route("/assets/{asset_id}", web::delete().to(delete_asset))
-                    .route(
-                        "/assets/{asset_id}/attachments",
-                        web::post().to(assign_asset_attachment),
-                    )
-                    .route(
-                        "/assets/{asset_id}/attachments",
-                        web::get().to(list_asset_attachments),
-                    )
-                    .route(
-                        "/assets/{asset_id}/inventory-items",
-                        web::post().to(create_inventory_items),
-                    )
-                    .route(
-                        "/inventory-items/batch",
-                        web::patch().to(batch_update_inventory_items),
-                    )
-                    .route(
-                        "/inventory-items/batch-delete",
-                        web::post().to(batch_delete_inventory_items),
-                    )
-                    .route(
-                        "/inventory-items/merge",
-                        web::post().to(merge_inventory_items),
-                    )
-                    .route(
-                        "/inventory-items/{inventory_item_id}/split",
-                        web::post().to(split_inventory_item),
-                    )
-                    .route(
-                        "/inventory-items/{inventory_item_id}",
-                        web::get().to(get_inventory_item),
-                    )
-                    .route(
-                        "/inventory-items/{inventory_item_id}/borrow-requests",
-                        web::post().to(create_borrow_request),
-                    )
-                    .route(
-                        "/inventory-items/{inventory_item_id}",
-                        web::patch().to(update_inventory_item),
-                    )
-                    .route(
-                        "/inventory-items/{inventory_item_id}",
-                        web::delete().to(delete_inventory_item),
-                    )
-                    .route(
-                        "/inventory-items/{inventory_item_id}/attachments",
-                        web::post().to(assign_inventory_item_attachment),
-                    )
-                    .route(
-                        "/inventory-items/{inventory_item_id}/attachments",
-                        web::get().to(list_inventory_item_attachments),
-                    )
-                    .route(
-                        "/attachments/{attachment_id}",
-                        web::get().to(get_attachment),
-                    )
-                    .route(
-                        "/attachments/{attachment_id}",
-                        web::patch().to(update_attachment),
-                    )
-                    .route(
-                        "/attachments/{attachment_id}",
-                        web::delete().to(delete_attachment),
-                    )
-                    .route(
-                        "/attachments/{attachment_id}/download",
-                        web::get().to(download_attachment),
-                    )
-                    .route("/locations/{location_id}", web::get().to(get_location))
-                    .route("/locations/{location_id}", web::patch().to(update_location))
-                    .route(
-                        "/locations/{location_id}",
-                        web::delete().to(delete_location),
-                    ),
+                    .configure(protected_routes),
             ),
     );
+}
+
+fn protected_routes(cfg: &mut web::ServiceConfig) {
+    cfg.route("/auth/me", web::get().to(me))
+        .route("/auth/password", web::patch().to(change_password))
+        .route("/audit-logs", web::get().to(list_audit_logs))
+        .route(
+            "/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}",
+            web::get().to(proxy_get),
+        )
+        .route(
+            "/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}/{tail:.*}",
+            web::get().to(proxy_get),
+        )
+        .service(
+            web::scope("/local")
+                .wrap(from_fn(reject_non_laboratory_users))
+                .configure(local_routes),
+        )
+        .service(
+            web::scope("/admin")
+                .wrap(from_fn(reject_non_system_admins))
+                .configure(admin_routes),
+        );
+}
+
+fn local_routes(cfg: &mut web::ServiceConfig) {
+    cfg.route("/laboratory", web::get().to(get_laboratory))
+        .route("/laboratory", web::patch().to(update_laboratory))
+        .route("/users", web::post().to(create_user))
+        .route("/users", web::get().to(list_users))
+        .route("/users/{target_user_id}", web::get().to(get_user))
+        .route("/users/{target_user_id}", web::patch().to(update_user))
+        .route("/users/{target_user_id}", web::delete().to(delete_user))
+        .route(
+            "/guest-registration-codes",
+            web::post().to(create_guest_registration_code),
+        )
+        .route(
+            "/federation/pairing-codes",
+            web::post().to(create_pairing_code),
+        )
+        .route("/federation/trusts", web::post().to(create_trust))
+        .route("/federation/trusts", web::get().to(list_trusts))
+        .route(
+            "/federation/trusts/{trust_id}",
+            web::delete().to(revoke_trust),
+        )
+        .route("/federation/guest-links", web::get().to(list_guest_links))
+        .route(
+            "/federation/guest-links/{link_id}/merge",
+            web::post().to(merge_guest_link),
+        )
+        .route("/borrow-requests", web::get().to(list_borrow_requests))
+        .route(
+            "/borrow-requests/{borrow_request_id}",
+            web::patch().to(resolve_borrow_request),
+        )
+        .route(
+            "/inventory-items/{inventory_item_id}/borrow-requests",
+            web::post().to(create_borrow_request),
+        )
+        .configure(laboratory_resource_routes);
+}
+
+fn admin_routes(cfg: &mut web::ServiceConfig) {
+    cfg.route("/laboratories", web::post().to(create_laboratory))
+        .route("/laboratories", web::get().to(list_laboratories))
+        .route("/users", web::post().to(create_user))
+        .route("/users", web::get().to(list_users))
+        .route("/users/{target_user_id}", web::get().to(get_user))
+        .route("/users/{target_user_id}", web::patch().to(update_user))
+        .route("/users/{target_user_id}", web::delete().to(delete_user))
+        .service(
+            web::scope("/laboratories/{laboratory_id}")
+                .route("", web::get().to(get_laboratory))
+                .route("", web::patch().to(update_laboratory))
+                .route("", web::delete().to(delete_laboratory))
+                .configure(laboratory_resource_routes),
+        );
+}
+
+fn laboratory_resource_routes(cfg: &mut web::ServiceConfig) {
+    cfg.route("/asset-categories", web::get().to(list_asset_categories))
+        .route("/asset-categories", web::post().to(create_asset_category))
+        .route(
+            "/asset-categories/{category_id}",
+            web::get().to(get_asset_category),
+        )
+        .route(
+            "/asset-categories/{category_id}",
+            web::patch().to(update_asset_category),
+        )
+        .route(
+            "/asset-categories/{category_id}",
+            web::delete().to(delete_asset_category),
+        )
+        .route("/asset-parameters", web::get().to(list_asset_parameters))
+        .route("/asset-parameters", web::post().to(create_asset_parameter))
+        .route(
+            "/asset-parameters/{parameter_id}",
+            web::get().to(get_asset_parameter),
+        )
+        .route(
+            "/asset-parameters/{parameter_id}",
+            web::patch().to(update_asset_parameter),
+        )
+        .route(
+            "/asset-parameters/{parameter_id}",
+            web::delete().to(delete_asset_parameter),
+        )
+        .route("/assets", web::get().to(list_assets))
+        .route("/assets", web::post().to(create_asset))
+        .route("/assets/{asset_id}", web::get().to(get_asset))
+        .route("/assets/{asset_id}", web::patch().to(update_asset))
+        .route("/assets/{asset_id}", web::delete().to(delete_asset))
+        .route(
+            "/assets/{asset_id}/attachments",
+            web::post().to(assign_asset_attachment),
+        )
+        .route(
+            "/assets/{asset_id}/attachments",
+            web::get().to(list_asset_attachments),
+        )
+        .route(
+            "/assets/{asset_id}/inventory-items",
+            web::post().to(create_inventory_items),
+        )
+        .route("/inventory-items", web::get().to(list_inventory_items))
+        .route(
+            "/inventory-items/batch",
+            web::patch().to(batch_update_inventory_items),
+        )
+        .route(
+            "/inventory-items/batch-delete",
+            web::post().to(batch_delete_inventory_items),
+        )
+        .route(
+            "/inventory-items/merge",
+            web::post().to(merge_inventory_items),
+        )
+        .route(
+            "/inventory-items/{inventory_item_id}/split",
+            web::post().to(split_inventory_item),
+        )
+        .route(
+            "/inventory-items/{inventory_item_id}",
+            web::get().to(get_inventory_item),
+        )
+        .route(
+            "/inventory-items/{inventory_item_id}",
+            web::patch().to(update_inventory_item),
+        )
+        .route(
+            "/inventory-items/{inventory_item_id}",
+            web::delete().to(delete_inventory_item),
+        )
+        .route(
+            "/inventory-items/{inventory_item_id}/attachments",
+            web::post().to(assign_inventory_item_attachment),
+        )
+        .route(
+            "/inventory-items/{inventory_item_id}/attachments",
+            web::get().to(list_inventory_item_attachments),
+        )
+        .route("/units", web::get().to(list_units))
+        .route("/units", web::post().to(create_unit))
+        .route("/units/{unit_id}", web::get().to(get_unit))
+        .route("/units/{unit_id}", web::patch().to(update_unit))
+        .route("/units/{unit_id}", web::delete().to(delete_unit))
+        .route("/locations", web::get().to(list_locations))
+        .route("/locations", web::post().to(create_location))
+        .route("/locations/{location_id}", web::get().to(get_location))
+        .route("/locations/{location_id}", web::patch().to(update_location))
+        .route(
+            "/locations/{location_id}",
+            web::delete().to(delete_location),
+        )
+        .route("/file-uploads", web::post().to(upload_file))
+        .route(
+            "/file-uploads/{upload_id}",
+            web::delete().to(delete_file_upload),
+        )
+        .route("/attachments", web::get().to(list_laboratory_attachments))
+        .route(
+            "/attachments/{attachment_id}",
+            web::get().to(get_attachment),
+        )
+        .route(
+            "/attachments/{attachment_id}",
+            web::patch().to(update_attachment),
+        )
+        .route(
+            "/attachments/{attachment_id}",
+            web::delete().to(delete_attachment),
+        )
+        .route(
+            "/attachments/{attachment_id}/download",
+            web::get().to(download_attachment),
+        );
 }

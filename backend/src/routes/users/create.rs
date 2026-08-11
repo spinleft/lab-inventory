@@ -1,10 +1,10 @@
 use super::model::{UserResponse, create_user_rollback_details};
 use super::queries::{UserDatabaseError, insert_user};
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::{Action, Actor, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::authentication::hash_password;
+use crate::domain::UserRole;
 use crate::domain::{NewUser, PhoneNumber, UserEmail, UserName, UserPassword, UserType};
-use crate::domain::{UserId, UserRole};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
@@ -127,13 +127,13 @@ impl From<UserDatabaseError> for CreateUserError {
     name = "Creating a user",
     skip(pool, payload),
     fields(
-        actor_user_id=%actor_user_id,
+        actor_user_id=%actor.user_id,
         username=%payload.username,
         user_type=%payload.user_type,
     )
 )]
 pub async fn create_user(
-    actor_user_id: UserId,
+    actor: Actor,
     pool: web::Data<PgPool>,
     payload: web::Json<CreateUserJsonData>,
 ) -> Result<HttpResponse, CreateUserError> {
@@ -145,7 +145,7 @@ pub async fn create_user(
     };
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::User,
         Action::CreateUser(&new_user_role),
     )
@@ -164,7 +164,7 @@ pub async fn create_user(
     let created_user = insert_user(&mut transaction, new_user, password_hash).await?;
     record_audit(
         &mut transaction,
-        actor_user_id,
+        &actor,
         AuditAction::Create,
         AuditResource::User,
         Some(created_user.user_id),

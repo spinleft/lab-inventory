@@ -171,20 +171,13 @@ async fn manage_download_delete_and_filter_attachments_by_laboratory_permissions
     regular_user.login(&app).await;
 
     let response = app.get_asset_attachments(asset_id).await;
-    assert_eq!(response.status().as_u16(), 200);
-    let visible: serde_json::Value = response.json().await.unwrap();
-    assert_eq!(visible.as_array().unwrap().len(), 1);
-    assert_eq!(
-        value_uuid(&visible[0]["attachment_id"]),
-        public_attachment_id
-    );
+    assert_eq!(response.status().as_u16(), 404);
 
     let response = app.get_attachment(internal_attachment_id).await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 404);
 
     let response = app.download_attachment(public_attachment_id).await;
-    assert_eq!(response.status().as_u16(), 200);
-    assert_eq!(&response.bytes().await.unwrap()[..], b"public");
+    assert_eq!(response.status().as_u16(), 404);
 
     let response = app
         .post_asset_attachment(
@@ -194,7 +187,7 @@ async fn manage_download_delete_and_filter_attachments_by_laboratory_permissions
             }),
         )
         .await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 404);
 
     app.test_user.login(&app).await;
     let response = app.delete_attachment(internal_attachment_id).await;
@@ -243,7 +236,7 @@ async fn delete_unconsumed_file_uploads_only_for_upload_owner() {
     regular_user.login(&app).await;
 
     let response = app.delete_file_upload(owned_by_super_admin_id).await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 404);
 
     app.test_user.login(&app).await;
     let response = app

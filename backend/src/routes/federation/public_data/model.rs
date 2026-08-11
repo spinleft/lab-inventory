@@ -18,6 +18,8 @@ pub(crate) enum FederationReadTarget {
     InventoryItemAttachments(Uuid),
     Locations,
     Location(Uuid),
+    Units,
+    Unit(Uuid),
     Attachments,
     Attachment(Uuid),
     AttachmentDownload(Uuid),
@@ -227,6 +229,19 @@ pub(super) struct LocationRow {
     pub(super) description: Option<String>,
     pub(super) created_at: DateTime<Utc>,
     pub(super) updated_at: DateTime<Utc>,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+pub(super) struct UnitRow {
+    pub(super) unit_id: Uuid,
+    pub(super) laboratory_id: Uuid,
+    pub(super) code: String,
+    pub(super) name: String,
+    pub(super) symbol: String,
+    pub(super) dimension: String,
+    pub(super) scale_to_base: f64,
+    pub(super) allow_decimal: bool,
+    pub(super) created_at: DateTime<Utc>,
 }
 
 #[derive(Serialize, sqlx::FromRow)]

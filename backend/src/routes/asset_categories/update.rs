@@ -10,11 +10,11 @@ use super::service::{
     build_path_and_depth, move_asset_category, replace_parameter_assignments, resolve_moved_parent,
     validate_parameter_assignments,
 };
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::AssetCategoryPathId;
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{
     AssetCategoryCode, AssetCategoryId, AssetCategoryName, NullableUpdate, UpdateAssetCategory,
-    UserId,
 };
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
@@ -120,25 +120,26 @@ impl From<AssetCategoryDatabaseError> for UpdateAssetCategoryError {
 #[tracing::instrument(
     name = "Update an asset category",
     skip(pool, payload),
-    fields(actor_user_id=%actor_user_id, category_id=%category_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, category_id=%category_id)
 )]
 pub async fn update_asset_category(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    category_id: web::Path<Uuid>,
+    category_id: AssetCategoryPathId,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, UpdateAssetCategoryError> {
+    let actor = laboratory_context.authorization_actor();
     let category_id: AssetCategoryId = category_id.into_inner().into();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::AssetCategory,
         Action::Update(category_id.into()),
     )
     .await?
     {
         return Err(UpdateAssetCategoryError::Forbidden(
-            "You don't have permission to update this asset category.".into(),
+            "You are not allowed to update this asset category.".into(),
         ));
     }
 
@@ -224,7 +225,7 @@ pub async fn update_asset_category(
 
     record_audit(
         &mut transaction,
-        actor_user_id,
+        laboratory_context.actor(),
         AuditAction::Update,
         AuditResource::AssetCategory,
         Some(updated.category_id),

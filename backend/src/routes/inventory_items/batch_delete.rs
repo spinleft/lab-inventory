@@ -1,13 +1,13 @@
-﻿use super::delete::delete_storage_objects;
+use super::delete::delete_storage_objects;
 use super::model::delete_inventory_item_rollback_details;
 use super::queries::{
     InventoryItemDatabaseError, delete_inventory_item_attachments,
     delete_inventory_item_from_database, fetch_inventory_items_for_update,
 };
 use super::service::validate_requested_ids;
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{InventoryItemIds, UserId};
+use crate::domain::InventoryItemIds;
 use crate::file_storage::FileStorage;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
@@ -69,14 +69,15 @@ impl From<InventoryItemDatabaseError> for BatchDeleteInventoryItemsError {
 #[tracing::instrument(
     name = "Batch delete inventory items",
     skip(pool, storage, payload),
-    fields(actor_user_id=%actor_user_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id)
 )]
 pub async fn batch_delete_inventory_items(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
     storage: web::Data<FileStorage>,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, BatchDeleteInventoryItemsError> {
+    let actor = laboratory_context.authorization_actor();
     let inventory_item_ids = InventoryItemIds::parse(payload.into_inner().inventory_item_ids)
         .map_err(BatchDeleteInventoryItemsError::ValidationError)?;
     let inventory_item_ids: Vec<_> = inventory_item_ids
@@ -87,7 +88,7 @@ pub async fn batch_delete_inventory_items(
     for inventory_item_id in &inventory_item_ids {
         if !validate_permission(
             &pool,
-            &actor_user_id,
+            &actor,
             ResourceType::InventoryItem,
             Action::Delete(*inventory_item_id),
         )
@@ -125,7 +126,7 @@ pub async fn batch_delete_inventory_items(
         delete_inventory_item_from_database(&mut transaction, item.inventory_item_id).await?;
         record_audit(
             &mut transaction,
-            actor_user_id,
+            laboratory_context.actor(),
             AuditAction::Delete,
             AuditResource::InventoryItem,
             Some(item.inventory_item_id),

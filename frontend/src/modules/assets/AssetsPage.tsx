@@ -231,7 +231,7 @@ export function AssetsPage() {
     laboratoryId: selectedLaboratoryId,
     scope: selectedDataScope,
   });
-  const unitsQuery = useUnits();
+  const unitsQuery = useUnits(selectedLaboratoryId, selectedDataScope);
   const createAsset = useCreateAsset();
   const updateAsset = useUpdateAsset();
   const deleteAsset = useDeleteAsset();
@@ -443,7 +443,10 @@ export function AssetsPage() {
 
   function confirmDelete() {
     if (!deletingAsset) return;
-    deleteAsset.mutate(deletingAsset.asset_id, {
+    deleteAsset.mutate({
+      assetId: deletingAsset.asset_id,
+      laboratoryId: selectedLaboratoryId,
+    }, {
       onError: (error) =>
         toast.error({ title: "删除资产失败", description: toErrorMessage(error) }),
       onSuccess: () => {
@@ -1571,7 +1574,7 @@ export function AssetEditor({
 
     if (editingAsset) {
       updateAsset.mutate(
-        { assetId: editingAsset.asset_id, payload },
+        { assetId: editingAsset.asset_id, laboratoryId, payload },
         {
           onError: (error) =>
             toast.error({ title: "更新资产失败", description: toErrorMessage(error) }),

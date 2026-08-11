@@ -82,7 +82,7 @@ import {
   useInventoryItems,
   useUpdateInventoryItem,
 } from "./api";
-import { canRequestBorrow } from "../auth/permissions";
+import { canRequestBorrow, isSystemAdmin } from "../auth/permissions";
 import {
   categoryLabel,
   formatNumber,
@@ -265,7 +265,7 @@ export function InventoryPage() {
     laboratoryId: selectedLaboratoryId,
     scope: selectedDataScope,
   });
-  const unitsQuery = useUnits();
+  const unitsQuery = useUnits(selectedLaboratoryId, selectedDataScope);
   const createInventoryItems = useCreateInventoryItems();
   const updateInventoryItem = useUpdateInventoryItem();
   const deleteInventoryItem = useDeleteInventoryItem();
@@ -370,9 +370,12 @@ export function InventoryPage() {
       queryFn: async () => {
         const client = createApiClient(apiBaseUrl);
         return assetSchema.parse(
-          await client.get(assetDetailPath(selectedDataScope, assetId), {
+          await client.get(
+            assetDetailPath(selectedDataScope, assetId, isSystemAdmin(currentUser)),
+            {
             include: "parameters",
-          }),
+            },
+          ),
         );
       },
     })),
@@ -503,7 +506,10 @@ export function InventoryPage() {
 
   function confirmDelete() {
     if (!deletingItem) return;
-    deleteInventoryItem.mutate(deletingItem.inventory_item_id, {
+    deleteInventoryItem.mutate({
+      inventoryItemId: deletingItem.inventory_item_id,
+      laboratoryId: selectedLaboratoryId,
+    }, {
       onError: (error) =>
         toast.error({ title: "删除库存失败", description: toErrorMessage(error) }),
       onSuccess: () => {
@@ -1552,6 +1558,7 @@ export function InventoryEditor({
       createInventoryItems.mutate(
         {
           assetId: selectedAsset.asset_id,
+          laboratoryId,
           payload: buildInventoryCreateRequestPayload(
             payloadResult.payload,
             attachmentClaims.claims,
@@ -1582,6 +1589,7 @@ export function InventoryEditor({
       updateInventoryItem.mutate(
         {
           inventoryItemId: editingItem.inventory_item_id,
+          laboratoryId,
           payload: payloadResult.payload,
         },
         {

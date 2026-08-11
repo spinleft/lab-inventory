@@ -120,7 +120,10 @@ export function LocationsPage() {
   }
 
   function handleDelete(location: Location) {
-    deleteLocation.mutate(location.location_id, {
+    deleteLocation.mutate({
+      laboratoryId: selectedLaboratoryId,
+      locationId: location.location_id,
+    }, {
       onError: (error) =>
         toast.error({ title: "删除位置失败", description: toErrorMessage(error) }),
       onSuccess: () => {
@@ -439,7 +442,7 @@ function LocationEditor({
 
     if (editingLocation) {
       updateLocation.mutate(
-        { locationId: editingLocation.location_id, payload },
+        { laboratoryId, locationId: editingLocation.location_id, payload },
         {
           onError: (error) =>
             toast.error({ title: "更新位置失败", description: toErrorMessage(error) }),

@@ -32,7 +32,7 @@ test("login, navigate, theme, audit, and logout", async ({ page }) => {
     loggedIn = false;
     await route.fulfill({ json: { message: "Logout successful" } });
   });
-  await page.route("**/api/v1/laboratories", async (route) => {
+  await page.route("**/api/v1/admin/laboratories", async (route) => {
     await route.fulfill({
       json: [
         {

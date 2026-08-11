@@ -1,6 +1,4 @@
-use crate::domain::{
-    AssetTrackingMode, InventoryItemSerialNumber, InventoryStatus, LocationId,
-};
+use crate::domain::{AssetTrackingMode, InventoryItemSerialNumber, InventoryStatus, LocationId};
 use std::collections::HashSet;
 
 /// Quantities are always expressed in the owning asset's `inventory_unit_id`, so

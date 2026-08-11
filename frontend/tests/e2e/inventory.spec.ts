@@ -39,7 +39,7 @@ test("browse, filter, edit, create, delete, and open inventory detail", async ({
   await page.route("**/api/v1/auth/me", async (route) => {
     await route.fulfill({ json: currentUser });
   });
-  await page.route("**/api/v1/laboratories", async (route) => {
+  await page.route("**/api/v1/admin/laboratories", async (route) => {
     await route.fulfill({
       json: [
         {
@@ -54,7 +54,7 @@ test("browse, filter, edit, create, delete, and open inventory detail", async ({
       ],
     });
   });
-  await page.route(`**/api/v1/laboratories/${laboratoryId}/asset-categories`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/asset-categories`, async (route) => {
     await route.fulfill({
       json: [
         {
@@ -73,7 +73,7 @@ test("browse, filter, edit, create, delete, and open inventory detail", async ({
       ],
     });
   });
-  await page.route(`**/api/v1/laboratories/${laboratoryId}/asset-parameters`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/asset-parameters`, async (route) => {
     await route.fulfill({
       json: [
         {
@@ -92,7 +92,7 @@ test("browse, filter, edit, create, delete, and open inventory detail", async ({
       ],
     });
   });
-  await page.route(`**/api/v1/laboratories/${laboratoryId}/locations`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/locations`, async (route) => {
     await route.fulfill({
       json: [
         {
@@ -122,7 +122,7 @@ test("browse, filter, edit, create, delete, and open inventory detail", async ({
       ],
     });
   });
-  await page.route("**/api/v1/units", async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/units`, async (route) => {
     await route.fulfill({
       json: [
         {
@@ -138,7 +138,7 @@ test("browse, filter, edit, create, delete, and open inventory detail", async ({
       ],
     });
   });
-  await page.route(`**/api/v1/laboratories/${laboratoryId}/inventory-items**`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/inventory-items**`, async (route) => {
     lastInventoryUrl = new URL(route.request().url());
     await route.fulfill({
       json: {
@@ -149,7 +149,7 @@ test("browse, filter, edit, create, delete, and open inventory detail", async ({
       },
     });
   });
-  await page.route(`**/api/v1/laboratories/${laboratoryId}/assets**`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/assets**`, async (route) => {
     lastAssetsUrl = new URL(route.request().url());
     await route.fulfill({
       json: {
@@ -160,25 +160,25 @@ test("browse, filter, edit, create, delete, and open inventory detail", async ({
       },
     });
   });
-  await page.route(`**/api/v1/assets/${serializedAssetId}/attachments`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/assets/${serializedAssetId}/attachments`, async (route) => {
     await route.fulfill({ json: [] });
   });
-  await page.route(`**/api/v1/assets/${quantityAssetId}/attachments`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/assets/${quantityAssetId}/attachments`, async (route) => {
     await route.fulfill({ json: [] });
   });
-  await page.route(`**/api/v1/inventory-items/${serializedItemId}/attachments`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/inventory-items/${serializedItemId}/attachments`, async (route) => {
     await route.fulfill({ json: [] });
   });
-  await page.route(`**/api/v1/inventory-items/${quantityItemId}/attachments`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/inventory-items/${quantityItemId}/attachments`, async (route) => {
     await route.fulfill({ json: [] });
   });
-  await page.route(`**/api/v1/assets/${serializedAssetId}**`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/assets/${serializedAssetId}**`, async (route) => {
     await route.fulfill({ json: assetDetail(serializedAssetId) });
   });
-  await page.route(`**/api/v1/assets/${quantityAssetId}**`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/assets/${quantityAssetId}**`, async (route) => {
     await route.fulfill({ json: assetDetail(quantityAssetId, "试剂", "quantity") });
   });
-  await page.route(`**/api/v1/assets/${quantityAssetId}/inventory-items`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/assets/${quantityAssetId}/inventory-items`, async (route) => {
     postedInventory = route.request().postDataJSON() as Record<string, unknown>;
     const created = {
       ...quantityInventoryItem("40000000-0000-4000-8000-000000000599"),
@@ -188,7 +188,7 @@ test("browse, filter, edit, create, delete, and open inventory detail", async ({
     inventoryItems = [created, ...inventoryItems];
     await route.fulfill({ status: 201, json: [created] });
   });
-  await page.route(`**/api/v1/assets/${serializedAssetId}/inventory-items`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/assets/${serializedAssetId}/inventory-items`, async (route) => {
     postedSerializedInventory = route.request().postDataJSON() as Record<string, unknown>;
     const created = {
       ...serializedInventoryItem(),
@@ -198,7 +198,7 @@ test("browse, filter, edit, create, delete, and open inventory detail", async ({
     inventoryItems = [created, ...inventoryItems];
     await route.fulfill({ status: 201, json: [created] });
   });
-  await page.route(`**/api/v1/inventory-items/${serializedItemId}`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/inventory-items/${serializedItemId}`, async (route) => {
     if (route.request().method() === "PATCH") {
       patchedInventory = route.request().postDataJSON() as Record<string, unknown>;
       inventoryItems = inventoryItems.map((item) =>
@@ -217,7 +217,7 @@ test("browse, filter, edit, create, delete, and open inventory detail", async ({
     }
     await route.fulfill({ json: inventoryItems.find((item) => item.inventory_item_id === serializedItemId) });
   });
-  await page.route(`**/api/v1/inventory-items/${quantityItemId}`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/inventory-items/${quantityItemId}`, async (route) => {
     await route.fulfill({ json: inventoryItems.find((item) => item.inventory_item_id === quantityItemId) });
   });
   await page.addInitScript((url) => {

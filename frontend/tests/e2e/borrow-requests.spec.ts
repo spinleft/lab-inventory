@@ -25,31 +25,31 @@ test("guest can request borrow from inventory detail", async ({ page }) => {
   await page.route("**/api/v1/auth/me", async (route) => {
     await route.fulfill({ json: currentUser });
   });
-  await page.route(`**/api/v1/inventory-items/${inventoryItemId}`, async (route) => {
+  await page.route(`**/api/v1/local/inventory-items/${inventoryItemId}`, async (route) => {
     await route.fulfill({ json: inventoryItem() });
   });
-  await page.route(`**/api/v1/assets/${assetId}**`, async (route) => {
+  await page.route(`**/api/v1/local/assets/${assetId}**`, async (route) => {
     await route.fulfill({ json: assetDetail() });
   });
-  await page.route(`**/api/v1/laboratories/${laboratoryId}/asset-categories`, async (route) => {
+  await page.route("**/api/v1/local/asset-categories", async (route) => {
     await route.fulfill({ json: [] });
   });
-  await page.route(`**/api/v1/laboratories/${laboratoryId}/asset-parameters`, async (route) => {
+  await page.route("**/api/v1/local/asset-parameters", async (route) => {
     await route.fulfill({ json: [] });
   });
-  await page.route(`**/api/v1/laboratories/${laboratoryId}/locations`, async (route) => {
+  await page.route("**/api/v1/local/locations", async (route) => {
     await route.fulfill({ json: [] });
   });
-  await page.route("**/api/v1/units", async (route) => {
+  await page.route("**/api/v1/local/units", async (route) => {
     await route.fulfill({ json: [unitFixture()] });
   });
-  await page.route(`**/api/v1/assets/${assetId}/attachments`, async (route) => {
+  await page.route(`**/api/v1/local/assets/${assetId}/attachments`, async (route) => {
     await route.fulfill({ json: [] });
   });
-  await page.route(`**/api/v1/inventory-items/${inventoryItemId}/attachments`, async (route) => {
+  await page.route(`**/api/v1/local/inventory-items/${inventoryItemId}/attachments`, async (route) => {
     await route.fulfill({ json: [] });
   });
-  await page.route(`**/api/v1/inventory-items/${inventoryItemId}/borrow-requests`, async (route) => {
+  await page.route(`**/api/v1/local/inventory-items/${inventoryItemId}/borrow-requests`, async (route) => {
     postedBorrowRequest = route.request().postDataJSON() as Record<string, unknown>;
     await route.fulfill({
       status: 201,
@@ -93,7 +93,7 @@ test("lab users can approve borrow requests", async ({ page }) => {
   await page.route("**/api/v1/auth/me", async (route) => {
     await route.fulfill({ json: currentUser });
   });
-  await page.route("**/api/v1/laboratories", async (route) => {
+  await page.route("**/api/v1/admin/laboratories", async (route) => {
     await route.fulfill({
       json: [
         {
@@ -108,10 +108,10 @@ test("lab users can approve borrow requests", async ({ page }) => {
       ],
     });
   });
-  await page.route(`**/api/v1/laboratories/${laboratoryId}/federation/trusts`, async (route) => {
+  await page.route("**/api/v1/local/federation/trusts", async (route) => {
     await route.fulfill({ json: [] });
   });
-  await page.route(`**/api/v1/laboratories/${laboratoryId}/borrow-requests**`, async (route) => {
+  await page.route("**/api/v1/local/borrow-requests**", async (route) => {
     if (route.request().method() === "PATCH") {
       pendingRequests = [];
       borrowedItems = [inventoryItem({ status: "borrowed" })];
@@ -123,7 +123,7 @@ test("lab users can approve borrow requests", async ({ page }) => {
 
     await route.fulfill({ json: pendingRequests });
   });
-  await page.route(`**/api/v1/laboratories/${laboratoryId}/inventory-items`, async (route) => {
+  await page.route("**/api/v1/local/inventory-items", async (route) => {
     const url = new URL(route.request().url());
     if (url.searchParams.get("status") === "borrowed") {
       await route.fulfill({

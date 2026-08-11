@@ -55,6 +55,10 @@ pub(crate) fn parse_read_target(tail: &str) -> Result<FederationReadTarget, Fede
         (Some("locations"), Some(location_id), None) => {
             Ok(FederationReadTarget::Location(parse_uuid(location_id)?))
         }
+        (Some("units"), None, None) => Ok(FederationReadTarget::Units),
+        (Some("units"), Some(unit_id), None) => {
+            Ok(FederationReadTarget::Unit(parse_uuid(unit_id)?))
+        }
         (Some("attachments"), None, None) => Ok(FederationReadTarget::Attachments),
         (Some("attachments"), Some(attachment_id), None) => {
             Ok(FederationReadTarget::Attachment(parse_uuid(attachment_id)?))
@@ -79,8 +83,10 @@ pub(crate) async fn respond_public_data(
         FederationReadTarget::Laboratory => {
             Ok(HttpResponse::Ok().json(service::fetch_laboratory(pool, laboratory_id).await?))
         }
-        FederationReadTarget::Assets => Ok(HttpResponse::Ok()
-            .json(service::list_assets(pool, laboratory_id, query_string).await?)),
+        FederationReadTarget::Assets => {
+            Ok(HttpResponse::Ok()
+                .json(service::list_assets(pool, laboratory_id, query_string).await?))
+        }
         FederationReadTarget::Asset(asset_id) => Ok(HttpResponse::Ok()
             .json(service::fetch_asset(pool, laboratory_id, asset_id, query_string).await?)),
         FederationReadTarget::InventoryItems => Ok(HttpResponse::Ok()
@@ -95,6 +101,12 @@ pub(crate) async fn respond_public_data(
             .json(service::list_locations(pool, laboratory_id, query_string).await?)),
         FederationReadTarget::Location(location_id) => Ok(HttpResponse::Ok()
             .json(service::fetch_location(pool, laboratory_id, location_id).await?)),
+        FederationReadTarget::Units => {
+            Ok(HttpResponse::Ok().json(service::list_units(pool, laboratory_id).await?))
+        }
+        FederationReadTarget::Unit(unit_id) => {
+            Ok(HttpResponse::Ok().json(service::fetch_unit(pool, laboratory_id, unit_id).await?))
+        }
         FederationReadTarget::AssetParameters => {
             Ok(HttpResponse::Ok().json(service::list_parameters(pool, laboratory_id).await?))
         }
@@ -106,9 +118,8 @@ pub(crate) async fn respond_public_data(
             .json(service::fetch_attachment(pool, laboratory_id, attachment_id).await?)),
         FederationReadTarget::AssetAttachments(asset_id) => Ok(HttpResponse::Ok()
             .json(service::list_asset_attachments(pool, laboratory_id, asset_id).await?)),
-        FederationReadTarget::InventoryItemAttachments(item_id) => Ok(HttpResponse::Ok().json(
-            service::list_inventory_item_attachments(pool, laboratory_id, item_id).await?,
-        )),
+        FederationReadTarget::InventoryItemAttachments(item_id) => Ok(HttpResponse::Ok()
+            .json(service::list_inventory_item_attachments(pool, laboratory_id, item_id).await?)),
         FederationReadTarget::AttachmentDownload(attachment_id) => {
             download_attachment(pool, storage, laboratory_id, attachment_id).await
         }

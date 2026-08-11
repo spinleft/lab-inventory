@@ -77,7 +77,7 @@ export function useFederationTrusts({
     queryFn: async () => {
       const client = createApiClient(apiBaseUrl);
       return federationTrustsSchema.parse(
-        await client.get(`/laboratories/${laboratoryId}/federation/trusts`),
+        await client.get("/local/federation/trusts"),
       );
     },
   });
@@ -98,7 +98,7 @@ export function useFederationGuestLinks({
     queryFn: async () => {
       const client = createApiClient(apiBaseUrl);
       return federationGuestLinksSchema.parse(
-        await client.get(`/laboratories/${laboratoryId}/federation/guest-links`),
+        await client.get("/local/federation/guest-links"),
       );
     },
   });
@@ -111,7 +111,7 @@ export function useCreateFederationPairingCode() {
     mutationFn: async (laboratoryId: string) => {
       const client = createApiClient(apiBaseUrl);
       return pairingCodeSchema.parse(
-        await client.post(`/laboratories/${laboratoryId}/federation/pairing-codes`),
+        await client.post("/local/federation/pairing-codes"),
       );
     },
   });
@@ -130,7 +130,7 @@ export function useCreateFederationTrust() {
     }) => {
       const client = createApiClient(apiBaseUrl);
       return federationTrustSchema.parse(
-        await client.post(`/laboratories/${laboratoryId}/federation/trusts`, payload),
+        await client.post("/local/federation/trusts", payload),
       );
     },
   });
@@ -148,7 +148,7 @@ export function useRevokeFederationTrust() {
       trustId: string;
     }) => {
       const client = createApiClient(apiBaseUrl);
-      await client.delete(`/laboratories/${laboratoryId}/federation/trusts/${trustId}`);
+      await client.delete(`/local/federation/trusts/${trustId}`);
     },
   });
 }
@@ -169,7 +169,7 @@ export function useMergeFederationGuestLink() {
       const client = createApiClient(apiBaseUrl);
       return federationGuestLinkSchema.parse(
         await client.post(
-          `/laboratories/${laboratoryId}/federation/guest-links/${linkId}/merge`,
+          `/local/federation/guest-links/${linkId}/merge`,
           { target_guest_user_id: targetGuestUserId },
         ),
       );

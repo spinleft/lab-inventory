@@ -6,6 +6,7 @@ const corsHeaders = {
 };
 
 test("user logs in with backend credentials", async ({ page }) => {
+  let loggedIn = false;
   const currentUser = {
     user_id: "00000000-0000-4000-8000-000000000001",
     username: "root",
@@ -17,18 +18,28 @@ test("user logs in with backend credentials", async ({ page }) => {
     laboratory: null,
   };
   await page.route("**/api/v1/auth/login", async (route) => {
+    loggedIn = true;
     await route.fulfill({
       headers: corsHeaders,
       json: { message: "Login successful" },
     });
   });
   await page.route("**/api/v1/auth/me", async (route) => {
+    if (!loggedIn) {
+      await route.fulfill({
+        status: 401,
+        headers: corsHeaders,
+        json: { error: "Authentication required" },
+      });
+      return;
+    }
     await route.fulfill({
       headers: corsHeaders,
       json: currentUser,
     });
   });
   await page.route("**/api/v1/auth/logout", async (route) => {
+    loggedIn = false;
     await route.fulfill({
       headers: corsHeaders,
       json: { message: "Logout successful" },

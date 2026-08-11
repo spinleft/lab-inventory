@@ -1,9 +1,9 @@
 use super::model::{AttachmentResponse, AttachmentTarget};
+use super::queries::{fetch_asset_laboratory_id, fetch_inventory_item_laboratory_id};
 use super::service::{AssignAttachmentError, assign_uploaded_attachments};
-use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::{
-    AssetId, AttachmentDisplayName, FileUploadId, InventoryItemId, NewAttachment, UserId,
-};
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
+use crate::access_control::{AssetPathId, InventoryItemPathId};
+use crate::domain::{AssetId, AttachmentDisplayName, FileUploadId, InventoryItemId, NewAttachment};
 use actix_web::{HttpResponse, web};
 use anyhow::Context;
 use serde::Deserialize;
@@ -48,18 +48,25 @@ impl TryFrom<AttachmentJsonData> for NewAttachment {
 #[tracing::instrument(
     name = "Create an asset attachment",
     skip(pool, payload),
-    fields(actor_user_id=%actor_user_id, asset_id=%asset_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, asset_id=%asset_id)
 )]
 pub async fn assign_asset_attachment(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    asset_id: web::Path<Uuid>,
+    asset_id: AssetPathId,
     payload: web::Json<AttachmentJsonData>,
 ) -> Result<HttpResponse, AssignAttachmentError> {
+    let actor = laboratory_context.authorization_actor();
     let asset_id: AssetId = asset_id.into_inner().into();
+    let asset_laboratory_id = fetch_asset_laboratory_id(&pool, asset_id)
+        .await?
+        .ok_or_else(|| AssignAttachmentError::NotFound("Asset not found".into()))?;
+    if laboratory_context.laboratory_id() != asset_laboratory_id {
+        return Err(AssignAttachmentError::NotFound("Asset not found".into()));
+    }
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::Asset,
         Action::Update(asset_id.into()),
     )
@@ -73,7 +80,7 @@ pub async fn assign_asset_attachment(
     let upload_id = payload.upload_id();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::FileUpload,
         Action::Assign(upload_id.into()),
     )
@@ -93,9 +100,9 @@ pub async fn assign_asset_attachment(
         .map_err(AssignAttachmentError::ValidationError)?;
     let mut rows = assign_uploaded_attachments(
         &mut transaction,
-        actor_user_id,
+        laboratory_context.actor().user_id,
         AttachmentTarget::Asset(asset_id.into()),
-        None,
+        Some(asset_laboratory_id),
         std::slice::from_ref(&new_attachment),
     )
     .await?;
@@ -110,18 +117,27 @@ pub async fn assign_asset_attachment(
 #[tracing::instrument(
     name = "Create an inventory item attachment",
     skip(pool, payload),
-    fields(actor_user_id=%actor_user_id, inventory_item_id=%inventory_item_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, inventory_item_id=%inventory_item_id)
 )]
 pub async fn assign_inventory_item_attachment(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    inventory_item_id: web::Path<Uuid>,
+    inventory_item_id: InventoryItemPathId,
     payload: web::Json<AttachmentJsonData>,
 ) -> Result<HttpResponse, AssignAttachmentError> {
+    let actor = laboratory_context.authorization_actor();
     let inventory_item_id: InventoryItemId = inventory_item_id.into_inner().into();
+    let inventory_item_laboratory_id = fetch_inventory_item_laboratory_id(&pool, inventory_item_id)
+        .await?
+        .ok_or_else(|| AssignAttachmentError::NotFound("Inventory item not found".into()))?;
+    if laboratory_context.laboratory_id() != inventory_item_laboratory_id {
+        return Err(AssignAttachmentError::NotFound(
+            "Inventory item not found".into(),
+        ));
+    }
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::InventoryItem,
         Action::Update(inventory_item_id.into()),
     )
@@ -135,7 +151,7 @@ pub async fn assign_inventory_item_attachment(
     let upload_id = payload.upload_id();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::FileUpload,
         Action::Assign(upload_id.into()),
     )
@@ -155,9 +171,9 @@ pub async fn assign_inventory_item_attachment(
         .map_err(AssignAttachmentError::ValidationError)?;
     let mut rows = assign_uploaded_attachments(
         &mut transaction,
-        actor_user_id,
+        laboratory_context.actor().user_id,
         AttachmentTarget::InventoryItem(inventory_item_id.into()),
-        None,
+        Some(inventory_item_laboratory_id),
         std::slice::from_ref(&new_attachment),
     )
     .await?;

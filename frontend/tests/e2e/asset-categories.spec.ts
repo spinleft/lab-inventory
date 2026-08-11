@@ -47,7 +47,7 @@ test("manage asset category parameter assignments", async ({ page }) => {
   await page.route("**/api/v1/auth/me", async (route) => {
     await route.fulfill({ json: currentUser });
   });
-  await page.route("**/api/v1/laboratories", async (route) => {
+  await page.route("**/api/v1/admin/laboratories", async (route) => {
     await route.fulfill({
       json: [
         {
@@ -62,7 +62,7 @@ test("manage asset category parameter assignments", async ({ page }) => {
       ],
     });
   });
-  await page.route(`**/api/v1/laboratories/${laboratoryId}/asset-parameters`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/asset-parameters`, async (route) => {
     await route.fulfill({
       json: [
         {
@@ -94,10 +94,10 @@ test("manage asset category parameter assignments", async ({ page }) => {
       ],
     });
   });
-  await page.route(`**/api/v1/laboratories/${laboratoryId}/asset-categories`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/asset-categories`, async (route) => {
     await route.fulfill({ json: categories });
   });
-  await page.route(`**/api/v1/asset-categories/${categoryId}`, async (route) => {
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/asset-categories/${categoryId}`, async (route) => {
     patchedCategory = route.request().postDataJSON() as Record<string, unknown>;
     categories = [
       {

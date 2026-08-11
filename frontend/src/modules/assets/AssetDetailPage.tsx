@@ -66,7 +66,7 @@ export function AssetDetailPage() {
     laboratoryId: asset?.laboratory_id ?? "",
     scope: selectedDataScope,
   });
-  const unitsQuery = useUnits();
+  const unitsQuery = useUnits(assetQuery.data?.laboratory_id ?? "", selectedDataScope);
   const createAsset = useCreateAsset();
   const updateAsset = useUpdateAsset();
   const createInventoryItems = useCreateInventoryItems();

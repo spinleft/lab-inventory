@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useAuth } from "../../app/auth-context";
 import { useBackendConfig } from "../../shared/api/backendConfig";
 import { toErrorMessage } from "../../shared/lib/errors";
 import { formatDate } from "../../shared/lib/date";
@@ -17,6 +18,7 @@ import { EmptyState } from "../../shared/ui/EmptyState";
 import { FormField } from "../../shared/ui/FormField";
 import { Select } from "../../shared/ui/Select";
 import { useToast } from "../../shared/ui/Toast";
+import { isSystemAdmin } from "../auth/permissions";
 import {
   type Attachment,
   type AttachmentClaim,
@@ -105,9 +107,10 @@ export function PendingAttachmentUploader({
   pendingAttachments: PendingAttachment[];
 }) {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
   const toast = useToast();
   const uploadFile = useUploadFile();
-  const deleteUpload = useDeleteFileUpload();
+  const deleteUpload = useDeleteFileUpload(laboratoryId);
   const pendingRef = useRef(pendingAttachments);
   const [uploadingCount, setUploadingCount] = useState(0);
 
@@ -120,9 +123,14 @@ export function PendingAttachmentUploader({
       if (!cleanupOnUnmount) {
         return;
       }
-      void deleteFileUploads(apiBaseUrl, pendingAttachmentUploadIds(pendingRef.current));
+      void deleteFileUploads(
+        apiBaseUrl,
+        laboratoryId,
+        isSystemAdmin(currentUser),
+        pendingAttachmentUploadIds(pendingRef.current),
+      );
     };
-  }, [apiBaseUrl, cleanupOnUnmount]);
+  }, [apiBaseUrl, cleanupOnUnmount, currentUser, laboratoryId]);
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
@@ -271,15 +279,17 @@ export function AttachmentSection({
   const assetAttachments = useAssetAttachments({
     assetId: target.type === "asset" ? target.id : "",
     enabled: target.type === "asset",
+    laboratoryId,
   });
   const inventoryAttachments = useInventoryItemAttachments({
     enabled: target.type === "inventory-item",
     inventoryItemId: target.type === "inventory-item" ? target.id : "",
+    laboratoryId,
   });
-  const createAssetAttachment = useCreateAssetAttachment();
-  const createInventoryItemAttachment = useCreateInventoryItemAttachment();
-  const deleteAttachment = useDeleteAttachment();
-  const downloadAttachment = useDownloadAttachment();
+  const createAssetAttachment = useCreateAssetAttachment(laboratoryId);
+  const createInventoryItemAttachment = useCreateInventoryItemAttachment(laboratoryId);
+  const deleteAttachment = useDeleteAttachment(laboratoryId);
+  const downloadAttachment = useDownloadAttachment(laboratoryId);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
 
   const query = target.type === "asset" ? assetAttachments : inventoryAttachments;

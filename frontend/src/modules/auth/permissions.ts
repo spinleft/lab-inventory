@@ -12,6 +12,10 @@ export function isSuperAdmin(user: CurrentUser) {
   return getUserTypeName(user) === "super_admin";
 }
 
+export function isSystemAdmin(user: CurrentUser) {
+  return isRoot(user) || isSuperAdmin(user);
+}
+
 export function isLabAdmin(user: CurrentUser) {
   return getUserTypeName(user) === "lab_admin";
 }

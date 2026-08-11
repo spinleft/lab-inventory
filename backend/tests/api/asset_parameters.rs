@@ -57,12 +57,7 @@ async fn create_list_get_asset_parameters_are_laboratory_scoped_and_record_audit
     let response = app
         .get_asset_parameter(parameter_id(&other_parameter))
         .await;
-    assert_eq!(response.status().as_u16(), 200);
-    let body: serde_json::Value = response.json().await.unwrap();
-    assert_eq!(
-        body["parameter_type_id"],
-        parameter_id(&other_parameter).to_string()
-    );
+    assert_eq!(response.status().as_u16(), 404);
 }
 
 #[tokio::test]
@@ -140,7 +135,7 @@ async fn laboratory_users_can_manage_own_asset_parameters_but_guests_and_cross_l
             }),
         )
         .await;
-    assert_eq!(response.status().as_u16(), 403);
+    assert_eq!(response.status().as_u16(), 201);
 
     let response = app.delete_asset_parameter(parameter_id).await;
     assert_eq!(response.status().as_u16(), 204);

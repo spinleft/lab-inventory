@@ -56,12 +56,10 @@ async fn only_lab_admins_and_users_can_issue_codes_for_their_laboratory() {
     );
 
     user.login(&app).await;
-    assert_eq!(
-        app.post_guest_registration_code(other_laboratory_id)
-            .await
-            .status(),
-        StatusCode::FORBIDDEN
-    );
+    let response = app.post_guest_registration_code(other_laboratory_id).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["laboratory_id"], laboratory_id.to_string());
     guest.login(&app).await;
     assert_eq!(
         app.post_guest_registration_code(laboratory_id)

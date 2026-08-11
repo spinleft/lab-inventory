@@ -3,11 +3,10 @@ use super::queries::{
     fetch_borrow_request_for_update, mark_inventory_item_borrowed, update_borrow_request_decision,
 };
 use super::service::{
-    BorrowRequestError, actor_for_user, fetch_user_snapshot, record_borrow_request_audit,
-    validate_resolver_actor,
+    BorrowRequestError, fetch_user_snapshot, record_borrow_request_audit, validate_resolver_actor,
 };
+use crate::access_control::{BorrowRequestPathId, LaboratoryContext};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{LaboratoryId, UserId};
 use crate::routes::inventory_items::{
     fetch_inventory_item_for_update, update_inventory_item_rollback_details,
 };
@@ -15,7 +14,6 @@ use actix_web::{HttpResponse, web};
 use anyhow::Context;
 use serde::Deserialize;
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,19 +25,18 @@ pub struct ResolveBorrowRequestBody {
 #[tracing::instrument(
     name = "Resolve borrow request",
     skip(pool, payload),
-    fields(actor_user_id=%actor_user_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id)
 )]
 pub async fn resolve_borrow_request(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    path: web::Path<(Uuid, Uuid)>,
+    borrow_request_id: BorrowRequestPathId,
     payload: web::Json<ResolveBorrowRequestBody>,
 ) -> Result<HttpResponse, BorrowRequestError> {
-    let actor = actor_for_user(&pool, actor_user_id).await?;
-    let (laboratory_id, borrow_request_id) = path.into_inner();
-    let laboratory_id = LaboratoryId::parse(laboratory_id)
-        .map_err(|e| BorrowRequestError::UnexpectedError(anyhow::anyhow!(e)))?;
-    validate_resolver_actor(&actor, laboratory_id)?;
+    let actor = laboratory_context.actor();
+    let laboratory_id = laboratory_context.laboratory_id();
+    let borrow_request_id = borrow_request_id.into_inner();
+    validate_resolver_actor(actor, laboratory_id)?;
     let decision = BorrowRequestStatus::parse(&payload.decision)
         .map_err(BorrowRequestError::ValidationError)?;
     if decision == BorrowRequestStatus::Pending {
@@ -84,7 +81,7 @@ pub async fn resolve_borrow_request(
         mark_inventory_item_borrowed(&mut transaction, item.inventory_item_id).await?;
         record_audit(
             &mut transaction,
-            &actor,
+            actor,
             AuditAction::Update,
             AuditResource::InventoryItem,
             Some(item.inventory_item_id),
@@ -112,7 +109,7 @@ pub async fn resolve_borrow_request(
 
     record_borrow_request_audit(
         &mut transaction,
-        &actor,
+        actor,
         AuditAction::Update,
         updated.borrow_request_id,
         updated.inventory_item_id,

@@ -8,7 +8,7 @@
 use super::model::{
     AssetPublicRow, AttachmentDownloadRow, AttachmentPublicRow, CategoryRow,
     InventoryItemPublicRow, LaboratoryPublicRow, LocationRow, ParameterOptionRow, ParameterRow,
-    ParameterValueRow,
+    ParameterValueRow, UnitRow,
 };
 use crate::routes::federation::model::FederationError;
 use sqlx::{PgPool, Postgres, QueryBuilder};
@@ -414,6 +414,44 @@ pub(super) async fn fetch_location(
     .await
     .map_err(unexpected)?
     .ok_or_else(|| FederationError::NotFound("Location not found".into()))
+}
+
+pub(super) async fn fetch_units(
+    pool: &PgPool,
+    laboratory_id: Uuid,
+) -> Result<Vec<UnitRow>, FederationError> {
+    sqlx::query_as::<_, UnitRow>(
+        r#"
+        SELECT unit_id, laboratory_id, code, name, symbol, dimension, scale_to_base, allow_decimal, created_at
+        FROM units
+        WHERE laboratory_id = $1
+        ORDER BY dimension, code
+        "#,
+    )
+    .bind(laboratory_id)
+    .fetch_all(pool)
+    .await
+    .map_err(unexpected)
+}
+
+pub(super) async fn fetch_unit(
+    pool: &PgPool,
+    laboratory_id: Uuid,
+    unit_id: Uuid,
+) -> Result<UnitRow, FederationError> {
+    sqlx::query_as::<_, UnitRow>(
+        r#"
+        SELECT unit_id, laboratory_id, code, name, symbol, dimension, scale_to_base, allow_decimal, created_at
+        FROM units
+        WHERE laboratory_id = $1 AND unit_id = $2
+        "#,
+    )
+    .bind(laboratory_id)
+    .bind(unit_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(unexpected)?
+    .ok_or_else(|| FederationError::NotFound("Unit not found".into()))
 }
 
 // ---------------------------------------------------------------------------

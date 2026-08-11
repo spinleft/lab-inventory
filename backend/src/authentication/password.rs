@@ -1,4 +1,4 @@
-use crate::telemetry::spawn_blocking_with_tracing;
+use crate::{domain::UserId, telemetry::spawn_blocking_with_tracing};
 use anyhow::Context;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use secrecy::{ExposeSecret, Secret};
@@ -51,7 +51,7 @@ async fn get_stored_credentials(
 pub async fn validate_credentials(
     credentials: Credentials,
     pool: &PgPool,
-) -> Result<uuid::Uuid, AuthError> {
+) -> Result<UserId, AuthError> {
     let mut user_id = None;
     let mut expected_password_hash = Secret::new(
         "$argon2id$v=19$m=15000,t=2,p=1$\
@@ -61,7 +61,7 @@ pub async fn validate_credentials(
     );
 
     if let Some(stored_credentials) = get_stored_credentials(&credentials.username, pool).await? {
-        user_id = Some(stored_credentials.user_id);
+        user_id = Some(stored_credentials.user_id.into());
         expected_password_hash = Secret::new(stored_credentials.password_hash);
     }
 

@@ -4,14 +4,14 @@ use super::queries::{
     fetch_inventory_item_attachments, fetch_inventory_item_laboratory_id,
     fetch_laboratory_attachments,
 };
-use crate::access_control::{Action, ResourceType, validate_permission};
-use crate::domain::{AssetId, InventoryItemId, LaboratoryId, UserId};
+use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
+use crate::access_control::{AssetPathId, InventoryItemPathId};
+use crate::domain::{AssetId, InventoryItemId};
 use crate::routes::{PaginatedResponse, Pagination, PaginationError};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 #[derive(thiserror::Error)]
 pub enum ListAttachmentError {
@@ -54,20 +54,24 @@ impl ResponseError for ListAttachmentError {
 #[tracing::instrument(
     name = "List asset attachments",
     skip(pool),
-    fields(actor_user_id=%actor_user_id, asset_id=%asset_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, asset_id=%asset_id)
 )]
 pub async fn list_asset_attachments(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    asset_id: web::Path<Uuid>,
+    asset_id: AssetPathId,
 ) -> Result<HttpResponse, ListAttachmentError> {
+    let actor = laboratory_context.authorization_actor();
     let asset_id: AssetId = asset_id.into_inner().into();
     let laboratory_id = fetch_asset_laboratory_id(&pool, asset_id)
         .await?
         .ok_or_else(|| ListAttachmentError::NotFound("Asset not found".into()))?;
+    if laboratory_context.laboratory_id() != laboratory_id {
+        return Err(ListAttachmentError::NotFound("Asset not found".into()));
+    }
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::AttachmentAssignment,
         Action::Browse(laboratory_id.into()),
     )
@@ -79,7 +83,7 @@ pub async fn list_asset_attachments(
     }
     let include_internal = validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::AttachmentAssignment,
         Action::BrowseInternal(laboratory_id.into()),
     )
@@ -95,20 +99,26 @@ pub async fn list_asset_attachments(
 #[tracing::instrument(
     name = "List inventory item attachments",
     skip(pool),
-    fields(actor_user_id=%actor_user_id, inventory_item_id=%inventory_item_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, inventory_item_id=%inventory_item_id)
 )]
 pub async fn list_inventory_item_attachments(
-    actor_user_id: UserId,
+    laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    inventory_item_id: web::Path<Uuid>,
+    inventory_item_id: InventoryItemPathId,
 ) -> Result<HttpResponse, ListAttachmentError> {
+    let actor = laboratory_context.authorization_actor();
     let inventory_item_id: InventoryItemId = inventory_item_id.into_inner().into();
     let laboratory_id = fetch_inventory_item_laboratory_id(&pool, inventory_item_id)
         .await?
         .ok_or_else(|| ListAttachmentError::NotFound("Inventory item not found".into()))?;
+    if laboratory_context.laboratory_id() != laboratory_id {
+        return Err(ListAttachmentError::NotFound(
+            "Inventory item not found".into(),
+        ));
+    }
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::AttachmentAssignment,
         Action::Browse(laboratory_id.into()),
     )
@@ -120,7 +130,7 @@ pub async fn list_inventory_item_attachments(
     }
     let include_internal = validate_permission(
         &pool,
-        &actor_user_id,
+        &actor,
         ResourceType::AttachmentAssignment,
         Action::BrowseInternal(laboratory_id.into()),
     )
@@ -137,18 +147,18 @@ pub async fn list_inventory_item_attachments(
 #[tracing::instrument(
     name = "List laboratory attachments",
     skip(pool, pagination),
-    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, laboratory_id=%laboratory_context)
 )]
 pub async fn list_laboratory_attachments(
-    actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    laboratory_id: web::Path<Uuid>,
+    laboratory_context: LaboratoryContext,
     pagination: web::Query<Pagination>,
 ) -> Result<HttpResponse, ListAttachmentError> {
-    let laboratory_id: LaboratoryId = laboratory_id.into_inner().into();
+    let actor = laboratory_context.actor();
+    let laboratory_id = laboratory_context.laboratory_id();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        actor,
         ResourceType::AttachmentAssignment,
         Action::Browse(laboratory_id.into()),
     )
@@ -160,7 +170,7 @@ pub async fn list_laboratory_attachments(
     }
     let include_internal = validate_permission(
         &pool,
-        &actor_user_id,
+        actor,
         ResourceType::AttachmentAssignment,
         Action::BrowseInternal(laboratory_id.into()),
     )

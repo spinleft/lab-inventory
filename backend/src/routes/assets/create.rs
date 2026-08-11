@@ -6,7 +6,7 @@ use super::queries::{
 use super::service::{
     apply_asset_parameter_updates, insert_asset_inventory_item, validate_required_parameters,
 };
-use crate::access_control::{Action, ResourceType, validate_permission};
+use crate::access_control::{Action, Actor, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{
     AssetName, AssetTrackingMode, FileUploadId, LaboratoryId, NewAsset, NewAttachment,
@@ -257,18 +257,18 @@ impl From<AssignAttachmentError> for CreateAssetError {
 #[tracing::instrument(
     name = "Create an asset",
     skip(pool, payload),
-    fields(actor_user_id=%actor_user_id, laboratory_id=%laboratory_id)
+    fields(actor_user_id=%laboratory_context.actor().user_id, laboratory_id=%laboratory_context)
 )]
 pub async fn create_asset(
-    actor_user_id: UserId,
     pool: web::Data<PgPool>,
-    laboratory_id: web::Path<Uuid>,
+    laboratory_context: LaboratoryContext,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, CreateAssetError> {
-    let laboratory_id: LaboratoryId = laboratory_id.into_inner().into();
+    let actor = laboratory_context.actor();
+    let laboratory_id = laboratory_context.laboratory_id();
     if !validate_permission(
         &pool,
-        &actor_user_id,
+        actor,
         ResourceType::Asset,
         Action::Create(laboratory_id.into()),
     )
@@ -280,7 +280,7 @@ pub async fn create_asset(
     }
 
     let payload = payload.into_inner();
-    validate_upload_permissions(&pool, &actor_user_id, payload.upload_ids()).await?;
+    validate_upload_permissions(&pool, actor, payload.upload_ids()).await?;
     let input = CreateAssetInput::try_from(payload).map_err(CreateAssetError::ValidationError)?;
 
     let mut transaction = pool
@@ -288,7 +288,7 @@ pub async fn create_asset(
         .await
         .context("Failed to acquire a Postgres connection from the pool")?;
     let asset_id =
-        insert_asset_graph(&mut transaction, actor_user_id, laboratory_id, &input).await?;
+        insert_asset_graph(&mut transaction, actor.user_id, laboratory_id, &input).await?;
 
     let asset = fetch_asset_for_update(&mut transaction, asset_id)
         .await?
@@ -302,7 +302,7 @@ pub async fn create_asset(
 
     record_audit(
         &mut transaction,
-        actor_user_id,
+        actor,
         AuditAction::Create,
         AuditResource::Asset,
         Some(asset.asset_id),
@@ -387,13 +387,13 @@ async fn insert_asset_graph(
 /// every referenced upload is authorised individually.
 async fn validate_upload_permissions(
     pool: &PgPool,
-    actor_user_id: &UserId,
+    actor: &Actor,
     upload_ids: impl Iterator<Item = FileUploadId>,
 ) -> Result<(), CreateAssetError> {
     for upload_id in upload_ids {
         if !validate_permission(
             pool,
-            actor_user_id,
+            actor,
             ResourceType::FileUpload,
             Action::Assign(upload_id.into()),
         )
