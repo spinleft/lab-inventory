@@ -198,7 +198,7 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
             .route("/auth/logout", web::post().to(logout))
             .service(
                 web::resource("/auth/guest-registration")
-                    .wrap(from_fn(enforce_guest_registratiown_rate_limit))
+                    .wrap(from_fn(enforce_guest_registration_rate_limit))
                     .route(web::post().to(register_guest)),
             )
             .route(
