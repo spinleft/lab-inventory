@@ -159,6 +159,20 @@ describe("ScanPage", () => {
     expect(screen.getByRole("button", { name: /使用摄像头扫码/ })).toBeInTheDocument();
   });
 
+  // jsdom exposes no camera, so this is also what a browser on a plain-HTTP LAN
+  // address sees: the API is simply absent. The message has to point at that
+  // rather than at a denied permission.
+  it("explains that an insecure context has no camera", async () => {
+    signIn(testRegularUser);
+    withFederationTrust();
+
+    const { user } = renderRoute(["/scan"]);
+
+    await user.click(await screen.findByRole("button", { name: /使用摄像头扫码/ }));
+
+    expect(await screen.findByText(/不是安全上下文/)).toBeInTheDocument();
+  });
+
   it("resolves a payload pasted into the manual field", async () => {
     signIn(testRegularUser);
     withFederationTrust();

@@ -52,3 +52,6 @@ test-results
 
 # Local copies of material this project is read against, not part of it.
 reference
+
+# 本地跑后端时,附件落在这里(configuration/base.yaml 的 local_root)。
+backend/storage

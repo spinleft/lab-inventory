@@ -293,6 +293,11 @@ jobs:
         run: npx tauri android init
         env:
           NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+      - name: 补齐清单权限
+        # init 重新生成 AndroidManifest.xml,摄像头权限要在这之后补回去,
+        # 否则扫码在真机上直接被系统判拒。见 frontend/scripts/android-permissions.mjs。
+        working-directory: frontend
+        run: node scripts/android-permissions.mjs
       - name: 构建 APK
         working-directory: frontend
         run: npx tauri android build --apk

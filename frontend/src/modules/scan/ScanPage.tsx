@@ -166,6 +166,35 @@ export function ScanPage() {
   );
 }
 
+/** Raised when the page is not a secure context, so there is no camera API. */
+class InsecureContextError extends Error {}
+
+/**
+ * Turns a `getUserMedia` failure into something the user can act on.
+ *
+ * The three causes need three different actions, and the old catch-all —
+ * "确认页面通过 HTTPS 访问" — sent people chasing TLS when the real problem was
+ * usually a denied permission.
+ */
+function describeCameraError(error: unknown) {
+  if (error instanceof InsecureContextError) {
+    return "当前页面不是安全上下文，浏览器不允许使用摄像头。请改用桌面端/安卓客户端，或让后端提供 HTTPS 访问，也可以直接手动输入。";
+  }
+  if (error instanceof DOMException) {
+    switch (error.name) {
+      case "NotAllowedError":
+      case "SecurityError":
+        return "摄像头权限被拒绝。请在系统设置或浏览器的权限设置里允许本应用使用摄像头后重试。";
+      case "NotFoundError":
+      case "OverconstrainedError":
+        return "没有找到可用的摄像头。";
+      case "NotReadableError":
+        return "摄像头被其他应用占用，关掉之后再试。";
+    }
+  }
+  return "无法启用摄像头，请改用手动输入。";
+}
+
 type CameraScannerProps = {
   disabled: boolean;
   /** Returns whether the value was accepted, so scanning can keep going. */
@@ -177,8 +206,13 @@ type CameraScannerProps = {
  *
  * Uses the platform `BarcodeDetector` where it exists and falls back to a
  * WebAssembly build of the same API otherwise, so there is one code path rather
- * than two. Requires a secure context: over plain HTTP the browser refuses
- * camera access and the manual field is the way in.
+ * than two.
+ *
+ * The camera needs a secure context, which a browser on a plain-HTTP LAN
+ * address is not — there the manual field is the only way in. The desktop and
+ * mobile clients are unaffected: they serve the page from
+ * `http://tauri.localhost`, and Chromium counts `.localhost` as trustworthy no
+ * matter what the backend address is.
  */
 function CameraScanner({ disabled, onDetected }: CameraScannerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -212,6 +246,11 @@ function CameraScanner({ disabled, onDetected }: CameraScannerProps) {
         const { BarcodeDetector } = await import("barcode-detector/ponyfill");
         const detector = new BarcodeDetector({ formats: ["qr_code"] });
 
+        // Outside a secure context the browser does not expose the API at all,
+        // which would otherwise surface as an unhelpful TypeError.
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new InsecureContextError();
+        }
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "environment" },
         });
@@ -250,11 +289,7 @@ function CameraScanner({ disabled, onDetected }: CameraScannerProps) {
         if (cancelled) {
           return;
         }
-        setCameraError(
-          error instanceof DOMException && error.name === "NotAllowedError"
-            ? "摄像头权限被拒绝，请在浏览器中允许后重试。"
-            : "无法启用摄像头。请确认页面通过 HTTPS 访问，或改用手动输入。",
-        );
+        setCameraError(describeCameraError(error));
         setScanning(false);
       }
     }

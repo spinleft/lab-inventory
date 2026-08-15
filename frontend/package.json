@@ -13,8 +13,8 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "tauri:android:init": "tauri android init",
-    "tauri:android:build": "tauri android build",
+    "tauri:android:init": "tauri android init && node scripts/android-permissions.mjs",
+    "tauri:android:build": "node scripts/android-permissions.mjs && tauri android build",
     "tauri:ios:init": "tauri ios init",
     "tauri:ios:build": "tauri ios build"
   },
