@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT inventory_item_id\n        FROM asset_inventory_items\n        WHERE laboratory_id = $1\n          AND location_id IN (\n              SELECT location_id\n              FROM locations\n              WHERE laboratory_id = $1\n                AND path <@ $2::text::ltree\n          )\n        ORDER BY inventory_item_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "inventory_item_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5fdc13ca37606060684301e42073f99cbb1b96443603680d8fd9ae55ac2ea1b1"
+}

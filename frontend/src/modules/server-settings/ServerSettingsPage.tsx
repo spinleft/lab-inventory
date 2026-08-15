@@ -1,6 +1,7 @@
 import { CheckCircle, RotateCcw, Server } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { apiFetch } from "../../shared/api/apiFetch";
 import {
   BackendConfigError,
   normalizeApiBaseUrl,
@@ -95,7 +96,7 @@ export function ServerSettingsPage() {
 }
 
 async function checkHealth(apiBaseUrl: string) {
-  const response = await fetch(`${apiBaseUrl.replace(/\/+$/, "")}/health_check`, {
+  const response = await apiFetch(`${apiBaseUrl.replace(/\/+$/, "")}/health_check`, {
     credentials: "include",
   });
   if (!response.ok) {

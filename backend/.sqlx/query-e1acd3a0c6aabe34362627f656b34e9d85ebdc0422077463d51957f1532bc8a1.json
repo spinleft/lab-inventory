@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM locations\n        WHERE laboratory_id = $1\n          AND path <@ $2::text::ltree\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e1acd3a0c6aabe34362627f656b34e9d85ebdc0422077463d51957f1532bc8a1"
+}

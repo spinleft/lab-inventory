@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE asset_inventory_items\n        SET\n            quantity_on_hand = quantity_on_hand + $2::double precision::numeric,\n            quantity_allocated = quantity_allocated + $3::double precision::numeric,\n            updated_at = now()\n        WHERE inventory_item_id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float8",
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "045006cec13160c64bf6124efb2f1db95296243f64e37132a4c83cdfc8b2f20e"
+}

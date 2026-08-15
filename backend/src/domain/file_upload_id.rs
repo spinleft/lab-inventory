@@ -38,8 +38,8 @@ impl From<FileUploadId> for Uuid {
     }
 }
 
-impl Into<FileUploadId> for Uuid {
-    fn into(self) -> FileUploadId {
-        FileUploadId(self)
+impl From<Uuid> for FileUploadId {
+    fn from(val: Uuid) -> Self {
+        FileUploadId(val)
     }
 }

@@ -22,7 +22,7 @@ pub async fn reject_anonymous_users(
     let pool = req
         .app_data::<web::Data<PgPool>>()
         .ok_or_else(|| e500("Database pool is not configured"))?;
-    let Some(actor) = get_actor(&pool, user_id).await.map_err(e500)? else {
+    let Some(actor) = get_actor(pool, user_id).await.map_err(e500)? else {
         session.log_out();
         return Ok(unauthorized_response(req));
     };

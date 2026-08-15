@@ -176,8 +176,10 @@ async fn handle_inbound(
         )
         .await?),
         (None, Some(target)) => {
-            Ok(respond_public_data(&pool, &storage, laboratory_id, target, req.query_string())
-                .await?)
+            Ok(
+                respond_public_data(&pool, &storage, laboratory_id, target, req.query_string())
+                    .await?,
+            )
         }
         (None, None) => Err(InboundFederationError::NotFound(
             "Federation route not found".into(),

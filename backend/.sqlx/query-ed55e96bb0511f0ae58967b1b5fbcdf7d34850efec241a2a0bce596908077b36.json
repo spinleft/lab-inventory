@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO federation_pairing_codes (\n            pairing_code_id,\n            local_laboratory_id,\n            code_hash,\n            expires_at,\n            created_by_user_id\n        )\n        VALUES ($1, $2, $3, $4, $5)\n        RETURNING pairing_code_id, local_laboratory_id, expires_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pairing_code_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "local_laboratory_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ed55e96bb0511f0ae58967b1b5fbcdf7d34850efec241a2a0bce596908077b36"
+}

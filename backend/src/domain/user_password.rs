@@ -32,9 +32,5 @@ impl Deref for UserPassword {
 }
 
 fn validate_password(password: &Secret<String>) -> bool {
-    if password.expose_secret().trim().len() < 8 {
-        false
-    } else {
-        true
-    }
+    password.expose_secret().trim().len() >= 8
 }

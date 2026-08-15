@@ -1,0 +1,106 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            assets.asset_id,\n            assets.laboratory_id,\n            assets.category_id,\n            assets.tracking_mode,\n            assets.name,\n            assets.model,\n            assets.manufacturer,\n            assets.inventory_unit_id,\n            assets.public_notes,\n            assets.internal_notes,\n            assets.created_at,\n            assets.updated_at,\n            (\n                SELECT COUNT(*)\n                FROM asset_inventory_items AS inventory_items\n                WHERE inventory_items.asset_id = assets.asset_id\n            ) AS \"inventory_item_count!\",\n            (\n                SELECT COALESCE(SUM(inventory_items.quantity_on_hand), 0)::double precision\n                FROM asset_inventory_items AS inventory_items\n                WHERE inventory_items.asset_id = assets.asset_id\n            ) AS \"quantity_on_hand!\",\n            (\n                SELECT COALESCE(SUM(inventory_items.quantity_allocated), 0)::double precision\n                FROM asset_inventory_items AS inventory_items\n                WHERE inventory_items.asset_id = assets.asset_id\n            ) AS \"quantity_allocated!\"\n        FROM assets\n        WHERE assets.asset_id = $1\n        FOR UPDATE\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "asset_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "laboratory_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "category_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "tracking_mode",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "manufacturer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "inventory_unit_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "public_notes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "internal_notes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "inventory_item_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 13,
+        "name": "quantity_on_hand!",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 14,
+        "name": "quantity_allocated!",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "24365c3a95ad41975e65cdf3d6a407214a64ddf72d0b442ae060303fa4562cd3"
+}

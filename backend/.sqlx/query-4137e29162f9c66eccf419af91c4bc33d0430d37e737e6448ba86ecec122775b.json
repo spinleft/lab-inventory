@@ -1,0 +1,106 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            inventory_item_id,\n            asset_id,\n            laboratory_id,\n            tracking_mode,\n            serial_number,\n            batch_number,\n            quantity_on_hand::double precision AS \"quantity_on_hand!\",\n            quantity_allocated::double precision AS \"quantity_allocated!\",\n            location_id,\n            status,\n            public_notes,\n            internal_notes,\n            created_at,\n            updated_at,\n            last_stocktake_at\n        FROM asset_inventory_items\n        WHERE asset_id = $1\n        ORDER BY created_at, inventory_item_id\n        FOR UPDATE\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "inventory_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "asset_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "laboratory_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "tracking_mode",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "serial_number",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "batch_number",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "quantity_on_hand!",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 7,
+        "name": "quantity_allocated!",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 8,
+        "name": "location_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "public_notes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "internal_notes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "last_stocktake_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      null,
+      null,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "4137e29162f9c66eccf419af91c4bc33d0430d37e737e6448ba86ecec122775b"
+}

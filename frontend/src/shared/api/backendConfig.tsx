@@ -7,8 +7,32 @@ import {
 } from "react";
 
 export const BACKEND_CONFIG_STORAGE_KEY = "labInventory.apiBaseUrl";
-const DEFAULT_API_BASE_URL =
-  import.meta.env.VITE_DEFAULT_API_BASE_URL ?? "http://127.0.0.1:8000/api/v1";
+
+declare global {
+  interface Window {
+    __LAB_INVENTORY_CONFIG__?: { apiBaseUrl?: string };
+  }
+}
+
+/**
+ * The API the app talks to when the user has not chosen one.
+ *
+ * Three layers, most specific first. `config.js` is written by the container at
+ * start-up, so one built image serves any deployment; the Vite variable is
+ * baked in at build time, which is what the Tauri bundles use; the literal is
+ * the local development backend.
+ */
+export function resolveDefaultApiBaseUrl() {
+  const runtime = window.__LAB_INVENTORY_CONFIG__?.apiBaseUrl?.trim();
+  const buildTime = import.meta.env.VITE_DEFAULT_API_BASE_URL?.trim();
+  const configured = runtime || buildTime || "http://127.0.0.1:8000/api/v1";
+
+  // A deployment that serves the app and the API from one origin configures
+  // `/api/v1`, which only means anything relative to where the page came from.
+  return configured.startsWith("/")
+    ? `${window.location.origin}${configured}`
+    : configured;
+}
 
 type BackendConfigContextValue = {
   apiBaseUrl: string;
@@ -28,7 +52,7 @@ export class BackendConfigError extends Error {
 }
 
 export function BackendConfigProvider({ children }: PropsWithChildren) {
-  const defaultApiBaseUrl = normalizeApiBaseUrl(DEFAULT_API_BASE_URL);
+  const defaultApiBaseUrl = normalizeApiBaseUrl(resolveDefaultApiBaseUrl());
   const initialConfig = readStoredApiBaseUrl(defaultApiBaseUrl);
   const [apiBaseUrl, setApiBaseUrlState] = useState(initialConfig.apiBaseUrl);
   const [hasConfiguredApiBaseUrl, setHasConfiguredApiBaseUrl] = useState(

@@ -8,11 +8,16 @@ application:
   hmac_secret: super-long-and-secret-random-key-needed-to-verify-message-integrity
   cookie_secure: false
   enable_federation: true
+  # Refuse to start while `root` still carries the password seeded by the
+  # migrations. Turned on by production.yaml; off here so tests and local
+  # development are not blocked by it.
+  require_root_password_rotation: false
   cors_allowed_origins:
   - http://localhost:5173
   - http://127.0.0.1:5173
   - http://localhost:3000
   - tauri://localhost
+  - http://tauri.localhost
   - https://tauri.localhost
 database:
   host: 127.0.0.1
@@ -21,6 +26,9 @@ database:
   password: password
   database_name: lab_inventory
   require_ssl: false
+  # Apply pending migrations on start. Off here because scripts/init_db owns
+  # the local schema; production.yaml turns it on.
+  run_migrations: false
 redis_uri: redis://127.0.0.1:6379
 file_storage:
   backend: local

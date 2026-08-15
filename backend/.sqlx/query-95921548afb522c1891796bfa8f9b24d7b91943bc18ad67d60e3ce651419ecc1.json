@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            remote_node_id,\n            base_url,\n            display_name,\n            shared_secret,\n            shared_secret_hash,\n            tls_certificate_sha256,\n            status,\n            key_version,\n            last_handshake_at\n        FROM federation_remote_nodes\n        WHERE remote_node_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "remote_node_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "base_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "shared_secret",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "shared_secret_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "tls_certificate_sha256",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "key_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "last_handshake_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "95921548afb522c1891796bfa8f9b24d7b91943bc18ad67d60e3ce651419ecc1"
+}

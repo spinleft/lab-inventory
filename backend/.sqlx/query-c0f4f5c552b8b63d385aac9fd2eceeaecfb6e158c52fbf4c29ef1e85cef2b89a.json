@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE asset_inventory_items\n        SET location_id = NULL,\n            updated_at = now()\n        WHERE laboratory_id = $1\n          AND location_id IN (\n              SELECT location_id\n              FROM locations\n              WHERE laboratory_id = $1\n                AND path <@ $2::text::ltree\n          )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c0f4f5c552b8b63d385aac9fd2eceeaecfb6e158c52fbf4c29ef1e85cef2b89a"
+}

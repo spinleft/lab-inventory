@@ -50,5 +50,5 @@ test-results
 *.sln
 *.sw?
 
-# Reference:
-referrence
+# Local copies of material this project is read against, not part of it.
+reference

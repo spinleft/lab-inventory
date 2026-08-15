@@ -54,11 +54,12 @@ pub async fn get_label_printer(
         ));
     }
 
-    let printer = fetch_label_printer(&pool, *printer_id)
-        .await?
-        .ok_or(GetLabelPrinterError::NotFound(
-            "Label printer not found".into(),
-        ))?;
+    let printer =
+        fetch_label_printer(&pool, *printer_id)
+            .await?
+            .ok_or(GetLabelPrinterError::NotFound(
+                "Label printer not found".into(),
+            ))?;
 
     Ok(HttpResponse::Ok().json(LabelPrinterResponse::from(printer)))
 }

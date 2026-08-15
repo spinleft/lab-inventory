@@ -1,0 +1,131 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            assignments.attachment_id,\n            assignments.laboratory_id,\n            assignments.file_id,\n            assignments.asset_id,\n            assignments.inventory_item_id,\n            assignments.display_name,\n            assignments.description,\n            assignments.is_public,\n            assignments.assigned_by_user_id,\n            assignments.created_at,\n            assignments.updated_at,\n            files.storage_backend,\n            files.storage_key,\n            files.original_file_name,\n            files.mime_type,\n            files.file_size_bytes,\n            files.sha256_hex,\n            files.uploaded_by_user_id,\n            files.created_at AS file_created_at\n        FROM asset_attachment_assignments AS assignments\n        JOIN files ON files.file_id = assignments.file_id\n        WHERE assignments.inventory_item_id = $1\n        AND ($2 OR assignments.is_public = 'true')\n        ORDER BY assignments.created_at DESC, assignments.attachment_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attachment_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "laboratory_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "file_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "asset_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "inventory_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "is_public",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "assigned_by_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "storage_backend",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "storage_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "original_file_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "mime_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "file_size_bytes",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 16,
+        "name": "sha256_hex",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "uploaded_by_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 18,
+        "name": "file_created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "5a31b92211dd3522dffd99952facc87b87f0209d9c91fe39a8c87ec41f7a303e"
+}

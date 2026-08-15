@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH deleted_assignment AS (\n            DELETE FROM asset_attachment_assignments\n            WHERE attachment_id = $1\n            RETURNING file_id\n        )\n        DELETE FROM files\n        WHERE file_id IN (SELECT file_id FROM deleted_assignment)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "23917185c82c79c2a97cd8bb51ae354d179e32f1e565df90bffb2d5d712f67af"
+}

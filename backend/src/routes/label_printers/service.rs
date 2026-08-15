@@ -83,7 +83,10 @@ fn describe_expected(media: LabelPrinterMedia) -> String {
 }
 
 /// Refuses the job unless the printer is ready and holding the right stock.
-pub(super) fn check_ready(status: &PrinterStatus, media: LabelPrinterMedia) -> Result<(), PrintError> {
+pub(super) fn check_ready(
+    status: &PrinterStatus,
+    media: LabelPrinterMedia,
+) -> Result<(), PrintError> {
     if !status.is_ready() {
         let faults: Vec<String> = status
             .faults
@@ -299,9 +302,7 @@ mod tests {
         );
 
         let error = check_ready(&status, die_cut()).unwrap_err();
-        assert!(
-            matches!(error, PrintError::NotReady(ref message)
-                if message.contains("no_media") && message.contains("cover_open"))
-        );
+        assert!(matches!(error, PrintError::NotReady(ref message)
+                if message.contains("no_media") && message.contains("cover_open")));
     }
 }

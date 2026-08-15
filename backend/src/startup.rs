@@ -2,6 +2,9 @@ use crate::authentication::{
     GuestRegistrationHasher, GuestRegistrationRateLimiter, reject_anonymous_users,
     reject_non_laboratory_users, reject_non_system_admins,
 };
+use crate::bootstrap::{
+    apply_initial_root_password, ensure_root_password_rotated, run_pending_migrations,
+};
 use crate::configuration::{
     ApplicationSettings, DatabaseSettings, FederationSettings, LabelPrintingSettings, PublicWebUrl,
     Settings,
@@ -11,25 +14,24 @@ use crate::routes::{
     accept_pairing, assign_asset_attachment, assign_inventory_item_attachment,
     batch_delete_inventory_items, batch_update_inventory_items, cancel_borrow_request,
     change_password, create_asset, create_asset_category, create_asset_parameter,
-    create_borrow_request,
-    create_guest_registration_code, create_inventory_items, create_label_printer, create_laboratory,
-    create_location, create_pairing_code, create_trust, create_unit, create_user, delete_asset,
-    delete_asset_category, delete_asset_parameter, delete_attachment, delete_file_upload,
-    delete_inventory_item, delete_label_printer, delete_laboratory, delete_location, delete_unit,
-    delete_user, download_attachment, enforce_guest_registration_rate_limit, get_asset,
-    get_asset_category, get_asset_parameter, get_attachment, get_inventory_item,
-    get_instance_identity, get_label_printer, get_label_printer_status, get_laboratory, get_location,
-    get_unit, get_user, health_check, inbound_get, inbound_post, initialize_local_node,
-    list_asset_attachments,
+    create_borrow_request, create_guest_registration_code, create_inventory_items,
+    create_label_printer, create_laboratory, create_location, create_pairing_code, create_trust,
+    create_unit, create_user, delete_asset, delete_asset_category, delete_asset_parameter,
+    delete_attachment, delete_file_upload, delete_inventory_item, delete_label_printer,
+    delete_laboratory, delete_location, delete_unit, delete_user, download_attachment,
+    enforce_guest_registration_rate_limit, get_asset, get_asset_category, get_asset_parameter,
+    get_attachment, get_instance_identity, get_inventory_item, get_label_printer,
+    get_label_printer_status, get_laboratory, get_location, get_unit, get_user, health_check,
+    inbound_get, inbound_post, initialize_local_node, list_asset_attachments,
     list_asset_categories, list_asset_parameters, list_assets, list_audit_logs,
     list_borrow_requests, list_guest_links, list_inventory_item_attachments, list_inventory_items,
     list_label_printers, list_laboratories, list_laboratory_attachments, list_locations,
-    list_my_borrow_requests,
-    list_trusts, list_units, list_users, login, logout, me, merge_guest_link, merge_inventory_items,
-    print_labels, proxy_get, proxy_post,
-    register_guest, resolve_borrow_request, revoke_trust, split_inventory_item, update_asset,
+    list_my_borrow_requests, list_trusts, list_units, list_users, login, logout, me,
+    merge_guest_link, merge_inventory_items, print_labels, proxy_get, proxy_post, register_guest,
+    resolve_borrow_request, revoke_trust, split_inventory_item, update_asset,
     update_asset_category, update_asset_parameter, update_attachment, update_inventory_item,
-    update_label_printer, update_laboratory, update_location, update_unit, update_user, upload_file,
+    update_label_printer, update_laboratory, update_location, update_unit, update_user,
+    upload_file,
 };
 use actix_cors::Cors;
 use actix_session::SessionMiddleware;
@@ -58,6 +60,8 @@ impl Application {
         let connection_pool = get_connection_pool(&configuration.database);
         let rate_limit_namespace = configuration.database.database_name.clone();
         let public_web_url = configuration.public_web_url();
+
+        prepare_database(&connection_pool, &configuration).await?;
 
         let address = format!(
             "{}:{}",
@@ -94,6 +98,26 @@ pub fn get_connection_pool(configuration: &DatabaseSettings) -> PgPool {
     PgPoolOptions::new().connect_lazy_with(configuration.connect_options())
 }
 
+/// Brings the database to a state the server is willing to serve from.
+///
+/// Runs before the listener is handed any traffic, so a deployment that fails
+/// either step never accepts a request.
+async fn prepare_database(pool: &PgPool, configuration: &Settings) -> Result<(), anyhow::Error> {
+    if configuration.database.run_migrations {
+        run_pending_migrations(pool).await?;
+    }
+    if let Some(password) = configuration.application.initial_root_password.clone() {
+        apply_initial_root_password(pool, password).await?;
+    }
+    if configuration.application.require_root_password_rotation {
+        ensure_root_password_rotated(pool).await?;
+    }
+    Ok(())
+}
+
+// The arguments are the settings sections plus the resources built from them,
+// handed straight to `build_server`.
+#[allow(clippy::too_many_arguments)]
 async fn run(
     listener: TcpListener,
     db_pool: PgPool,
@@ -141,6 +165,8 @@ async fn run(
     Ok(server)
 }
 
+// One argument per piece of application state the server closure captures.
+#[allow(clippy::too_many_arguments)]
 fn build_server(
     listener: TcpListener,
     db_pool: Data<PgPool>,
@@ -307,7 +333,10 @@ fn local_routes(cfg: &mut web::ServiceConfig) {
         )
         .route("/borrow-requests", web::get().to(list_borrow_requests))
         // Registered ahead of the parameterised routes so the literal wins.
-        .route("/borrow-requests/mine", web::get().to(list_my_borrow_requests))
+        .route(
+            "/borrow-requests/mine",
+            web::get().to(list_my_borrow_requests),
+        )
         .route(
             "/borrow-requests/{borrow_request_id}",
             web::patch().to(resolve_borrow_request),

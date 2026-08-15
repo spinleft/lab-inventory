@@ -32,8 +32,8 @@ impl From<AssetParameterId> for Uuid {
     }
 }
 
-impl Into<AssetParameterId> for Uuid {
-    fn into(self) -> AssetParameterId {
-        AssetParameterId(self)
+impl From<Uuid> for AssetParameterId {
+    fn from(val: Uuid) -> Self {
+        AssetParameterId(val)
     }
 }

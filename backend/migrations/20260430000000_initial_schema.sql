@@ -1,6 +1,12 @@
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS ltree;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- ---------------------------------------------------------------------------
+-- Laboratories and users
+-- ---------------------------------------------------------------------------
 
 CREATE TABLE laboratories (
     laboratory_id uuid PRIMARY KEY,
@@ -12,11 +18,11 @@ CREATE TABLE laboratories (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- One laboratory to start from, so a fresh install has somewhere to put the
+-- default units below. Renaming it is the first thing the deployment guide
+-- asks an administrator to do.
 INSERT INTO laboratories (laboratory_id, name, address)
-VALUES
-    ('7227c5ab-78ef-43ce-87bc-5ce2337ccfe3', '费米混合实验室', '老院区4号楼113室'),
-    ('4cbd27a3-9836-4065-88f0-fdc7de22aba6', '锂镝原子实验室', '老院区4号楼110室');
-    
+VALUES ('7227c5ab-78ef-43ce-87bc-5ce2337ccfe3', '默认实验室', '待填写');
 
 CREATE TABLE user_types (
     user_type_id uuid PRIMARY KEY,
@@ -41,22 +47,41 @@ CREATE TABLE users (
     email TEXT UNIQUE,
     phone_number VARCHAR(15) UNIQUE,
     created_at timestamptz NOT NULL DEFAULT now(),
-    last_login_at timestamptz
+    last_login_at timestamptz,
+    -- Set on the stand-in account a federated visitor acts through, so the
+    -- account can never be treated as a local login.
+    is_federation_shadow BOOLEAN NOT NULL DEFAULT false
 );
 
 CREATE INDEX idx_users_user_type_id ON users (user_type_id);
 CREATE INDEX idx_users_laboratory_id ON users (laboratory_id);
 
+-- Columns are listed rather than expanded from `users.*`: the callers of this
+-- view read a fixed set, and a column added to `users` later has to be an
+-- explicit decision here rather than something that leaks in.
 CREATE VIEW v_users AS
-SELECT users.*, user_types.name AS user_type_name
+SELECT
+    users.user_id,
+    users.username,
+    users.password_hash,
+    users.user_type_id,
+    users.laboratory_id,
+    users.email,
+    users.phone_number,
+    users.created_at,
+    users.last_login_at,
+    user_types.name AS user_type_name
 FROM users
 LEFT JOIN user_types ON users.user_type_id = user_types.user_type_id;
 
 CREATE VIEW v_actors AS
-SELECT user_id, user_types.name AS user_type_name, laboratory_id
+SELECT users.user_id, user_types.name AS user_type_name, users.laboratory_id
 FROM users
 LEFT JOIN user_types ON users.user_type_id = user_types.user_type_id;
 
+-- The password behind this hash is published in this repository, which is why
+-- production configuration refuses to start until it has been changed. See
+-- `src/bootstrap.rs` and docs/deployment.md.
 INSERT INTO users (user_id, username, password_hash, user_type_id)
 VALUES (
     'ddf8994f-d522-4659-8d02-c1d479057be6',
@@ -94,7 +119,9 @@ CREATE TABLE idempotency (
    PRIMARY KEY(user_id, idempotency_key)
 );
 
-CREATE EXTENSION IF NOT EXISTS ltree;
+-- ---------------------------------------------------------------------------
+-- Categories, locations and units
+-- ---------------------------------------------------------------------------
 
 CREATE TABLE asset_categories (
     category_id uuid PRIMARY KEY,
@@ -128,12 +155,6 @@ ON asset_categories (
 
 CREATE UNIQUE INDEX uq_asset_categories_path
 ON asset_categories(laboratory_id, path);
-
-INSERT INTO asset_categories (category_id, laboratory_id, parent_category_id, name, code, path, depth)
-VALUES
-    ('8744dc59-e2ff-41e1-9ad8-95eb84ade2e0', '7227c5ab-78ef-43ce-87bc-5ce2337ccfe3', NULL, '光学', 'optical', 'optical', 0),
-    ('71711a23-f348-4409-bb2a-04b67b3bbd80', '7227c5ab-78ef-43ce-87bc-5ce2337ccfe3', '8744dc59-e2ff-41e1-9ad8-95eb84ade2e0', '透镜', 'lens', 'optical.lens', 1);
-
 
 CREATE INDEX idx_asset_categories_path_gist
 ON asset_categories USING gist(path);
@@ -171,6 +192,8 @@ ON locations (
 CREATE UNIQUE INDEX uq_locations_path
 ON locations(laboratory_id, path);
 
+-- Paired with `laboratory_id` so inventory items can carry a foreign key that
+-- proves the location belongs to the same laboratory as the item.
 CREATE UNIQUE INDEX uq_locations_location_laboratory
 ON locations(location_id, laboratory_id);
 
@@ -205,7 +228,6 @@ VALUES
   ('force', '力'),
   ('torque', '扭矩');
 
-
 CREATE TABLE units (
     unit_id uuid PRIMARY KEY,
     laboratory_id uuid NOT NULL REFERENCES laboratories(laboratory_id),
@@ -223,6 +245,8 @@ CREATE TABLE units (
     CHECK (scale_to_base > 0)
 );
 
+-- Units are per-laboratory, so these belong to the seeded laboratory. A
+-- laboratory created later starts with none and defines its own.
 INSERT INTO units (unit_id, laboratory_id, code, name, symbol, dimension, scale_to_base, allow_decimal)
 VALUES
   (gen_random_uuid(), '7227c5ab-78ef-43ce-87bc-5ce2337ccfe3', 'm', '米', 'm', 'length', 1, true),
@@ -230,6 +254,10 @@ VALUES
   (gen_random_uuid(), '7227c5ab-78ef-43ce-87bc-5ce2337ccfe3', 'mm', '毫米', 'mm', 'length', 0.001, true),
   (gen_random_uuid(), '7227c5ab-78ef-43ce-87bc-5ce2337ccfe3', 'inch', '英寸', 'in', 'length', 0.0254, true),
   (gen_random_uuid(), '7227c5ab-78ef-43ce-87bc-5ce2337ccfe3', 'pcs', '件', 'pcs', 'count', 1, false);
+
+-- ---------------------------------------------------------------------------
+-- Assets and their parameters
+-- ---------------------------------------------------------------------------
 
 CREATE TABLE assets (
     asset_id uuid PRIMARY KEY,
@@ -252,6 +280,8 @@ CREATE UNIQUE INDEX idx_assets_unique_laboratory_name_model
     ON assets (laboratory_id, name, COALESCE(model, ''));
 CREATE UNIQUE INDEX uq_assets_asset_laboratory
     ON assets (asset_id, laboratory_id);
+-- Carries `tracking_mode` so an inventory item's foreign key can pin the mode
+-- to the asset's, making a mismatched item impossible to insert.
 CREATE UNIQUE INDEX uq_assets_asset_laboratory_tracking_mode
     ON assets (asset_id, laboratory_id, tracking_mode);
 CREATE INDEX idx_assets_laboratory_id ON assets (laboratory_id);
@@ -375,6 +405,10 @@ CREATE TABLE asset_parameter_values (
     )
 );
 
+-- ---------------------------------------------------------------------------
+-- Inventory
+-- ---------------------------------------------------------------------------
+
 CREATE TABLE asset_inventory_items (
     inventory_item_id uuid PRIMARY KEY,
     asset_id uuid NOT NULL,
@@ -400,7 +434,7 @@ CREATE TABLE asset_inventory_items (
     CHECK (quantity_on_hand >= 0),
     CHECK (quantity_allocated >= 0),
     CHECK (quantity_allocated <= quantity_on_hand),
-    CHECK (status IN ('available', 'reserved', 'retired', 'lost', 'consumed')),
+    CHECK (status IN ('available', 'reserved', 'borrowed', 'retired', 'lost', 'consumed')),
     CHECK (batch_number IS NULL OR btrim(batch_number) <> ''),
     CHECK (
         (
@@ -442,6 +476,13 @@ CREATE INDEX idx_asset_inventory_items_search_trgm
 CREATE UNIQUE INDEX uq_asset_inventory_items_item_laboratory
     ON asset_inventory_items (inventory_item_id, laboratory_id);
 
+-- ---------------------------------------------------------------------------
+-- Files and attachments
+-- ---------------------------------------------------------------------------
+
+-- A file that has been uploaded but not yet attached to anything. Unclaimed
+-- rows expire, which is what stops an abandoned upload from occupying storage
+-- forever.
 CREATE TABLE file_uploads (
     upload_id uuid PRIMARY KEY,
     laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id),
@@ -516,6 +557,7 @@ CREATE TABLE asset_attachment_assignments (
     FOREIGN KEY (inventory_item_id, laboratory_id)
         REFERENCES asset_inventory_items (inventory_item_id, laboratory_id)
         ON DELETE CASCADE,
+    -- An attachment hangs off exactly one of the two.
     CHECK ((asset_id IS NULL) <> (inventory_item_id IS NULL)),
     CHECK (display_name <> '')
 );
@@ -538,5 +580,242 @@ CREATE INDEX idx_asset_attachment_assignments_laboratory_created_active
     ON asset_attachment_assignments (laboratory_id, created_at DESC);
 CREATE INDEX idx_asset_attachment_assignments_display_name_trgm
     ON asset_attachment_assignments USING gin (display_name gin_trgm_ops);
+
+-- ---------------------------------------------------------------------------
+-- Federation
+-- ---------------------------------------------------------------------------
+
+-- This server's federation identity. Partners pin `node_id` as the primary key
+-- of their own `federation_remote_nodes` row for us, so it is minted once here
+-- and never changes. The `singleton` key is what keeps the table to one row.
+CREATE TABLE federation_local_nodes (
+    singleton BOOLEAN PRIMARY KEY DEFAULT true,
+    node_id uuid NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (singleton)
+);
+
+INSERT INTO federation_local_nodes (node_id)
+VALUES (gen_random_uuid());
+
+CREATE TABLE federation_remote_nodes (
+    remote_node_id uuid PRIMARY KEY,
+    base_url TEXT NOT NULL UNIQUE,
+    display_name TEXT,
+    shared_secret TEXT NOT NULL,
+    shared_secret_hash TEXT NOT NULL,
+    tls_certificate_sha256 TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    key_version INTEGER NOT NULL DEFAULT 1,
+    last_handshake_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (base_url <> ''),
+    CHECK (shared_secret <> ''),
+    CHECK (shared_secret_hash <> ''),
+    CHECK (status IN ('active', 'revoked')),
+    CHECK (key_version > 0),
+    CHECK (
+        tls_certificate_sha256 IS NULL
+        OR tls_certificate_sha256 ~ '^[0-9a-f]{64}$'
+    )
+);
+
+-- Pairing is between nodes; access is granted per laboratory pair, which is
+-- what this table records.
+CREATE TABLE federation_laboratory_trusts (
+    trust_id uuid PRIMARY KEY,
+    local_laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id) ON DELETE CASCADE,
+    remote_node_id uuid NOT NULL REFERENCES federation_remote_nodes (remote_node_id) ON DELETE CASCADE,
+    remote_laboratory_id uuid NOT NULL,
+    remote_laboratory_name TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_by_user_id uuid REFERENCES users (user_id) ON DELETE SET NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    revoked_at timestamptz,
+    CHECK (status IN ('active', 'revoked')),
+    UNIQUE (local_laboratory_id, remote_node_id, remote_laboratory_id)
+);
+
+CREATE INDEX idx_federation_trusts_local_laboratory
+ON federation_laboratory_trusts (local_laboratory_id, status);
+
+CREATE INDEX idx_federation_trusts_remote
+ON federation_laboratory_trusts (remote_node_id, remote_laboratory_id, status);
+
+CREATE TABLE federation_pairing_codes (
+    pairing_code_id uuid PRIMARY KEY,
+    local_laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL UNIQUE,
+    expires_at timestamptz NOT NULL,
+    consumed_at timestamptz,
+    created_by_user_id uuid REFERENCES users (user_id) ON DELETE SET NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (code_hash <> ''),
+    CHECK (expires_at > created_at)
+);
+
+CREATE INDEX idx_federation_pairing_codes_laboratory_active
+ON federation_pairing_codes (local_laboratory_id, expires_at)
+WHERE consumed_at IS NULL;
+
+-- Spent nonces, kept until the signature they belong to would have expired
+-- anyway. This is what makes a captured request unusable a second time.
+CREATE TABLE federation_request_nonces (
+    remote_node_id uuid NOT NULL REFERENCES federation_remote_nodes (remote_node_id) ON DELETE CASCADE,
+    nonce TEXT NOT NULL,
+    expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (remote_node_id, nonce),
+    CHECK (nonce <> '')
+);
+
+CREATE INDEX idx_federation_request_nonces_expires_at
+ON federation_request_nonces (expires_at);
+
+-- The local stand-in account a remote user acts through, so their activity can
+-- be attributed without them having an account here.
+CREATE TABLE federation_guest_links (
+    link_id uuid PRIMARY KEY,
+    local_laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id) ON DELETE CASCADE,
+    remote_node_id uuid NOT NULL REFERENCES federation_remote_nodes (remote_node_id) ON DELETE CASCADE,
+    remote_laboratory_id uuid NOT NULL,
+    remote_user_id uuid NOT NULL,
+    remote_username TEXT NOT NULL,
+    remote_user_type TEXT NOT NULL,
+    local_guest_user_id uuid NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
+    first_seen_at timestamptz NOT NULL DEFAULT now(),
+    last_seen_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (remote_username <> ''),
+    CHECK (remote_user_type IN ('lab_admin', 'user')),
+    UNIQUE (local_laboratory_id, remote_node_id, remote_laboratory_id, remote_user_id)
+);
+
+CREATE INDEX idx_federation_guest_links_laboratory
+ON federation_guest_links (local_laboratory_id, last_seen_at DESC);
+
+CREATE INDEX idx_federation_guest_links_local_guest
+ON federation_guest_links (local_guest_user_id);
+
+-- ---------------------------------------------------------------------------
+-- Borrowing
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE federation_borrow_requests (
+    borrow_request_id uuid PRIMARY KEY,
+    local_laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id) ON DELETE CASCADE,
+    inventory_item_id uuid NOT NULL REFERENCES asset_inventory_items (inventory_item_id) ON DELETE CASCADE,
+    requester_user_id uuid REFERENCES users (user_id) ON DELETE SET NULL,
+    requester_username TEXT NOT NULL,
+    requester_user_type TEXT NOT NULL,
+    requester_guest_link_id uuid REFERENCES federation_guest_links (link_id) ON DELETE SET NULL,
+    request_note TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    reviewed_by_user_id uuid REFERENCES users (user_id) ON DELETE SET NULL,
+    reviewed_by_username TEXT,
+    reviewed_by_user_type TEXT,
+    reviewed_at timestamptz,
+    decision_note TEXT,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (request_note IS NULL OR btrim(request_note) <> ''),
+    CHECK (reviewed_by_username IS NULL OR btrim(reviewed_by_username) <> ''),
+    CHECK (reviewed_by_user_type IS NULL OR btrim(reviewed_by_user_type) <> ''),
+    CHECK (decision_note IS NULL OR btrim(decision_note) <> ''),
+    CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled'))
+);
+
+-- Partial on `pending`, so cancelling or resolving a request frees the item to
+-- be asked for again without this index needing to know about it.
+CREATE UNIQUE INDEX uq_federation_borrow_requests_pending_item
+    ON federation_borrow_requests (inventory_item_id)
+    WHERE status = 'pending';
+
+CREATE INDEX idx_federation_borrow_requests_laboratory_status
+    ON federation_borrow_requests (local_laboratory_id, status, created_at DESC);
+
+CREATE INDEX idx_federation_borrow_requests_requester_user
+    ON federation_borrow_requests (requester_user_id, created_at DESC);
+
+-- A federated requester reads their own requests through their guest link rather
+-- than through `requester_user_id`: merging a guest link deletes the shadow
+-- account it used to point at, and the requester column is ON DELETE SET NULL, so
+-- the user id does not survive a merge but the link does.
+CREATE INDEX idx_federation_borrow_requests_requester_link
+    ON federation_borrow_requests (requester_guest_link_id, created_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- Guest registration
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE guest_registration_codes (
+    registration_code_id uuid PRIMARY KEY,
+    laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id) ON DELETE CASCADE,
+    code_hmac TEXT NOT NULL,
+    created_by_user_id uuid NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
+    consumed_at timestamptz,
+    revoked_at timestamptz,
+    CHECK (code_hmac ~ '^[0-9a-f]{64}$'),
+    CHECK (expires_at > created_at),
+    CHECK (NOT (consumed_at IS NOT NULL AND revoked_at IS NOT NULL))
+);
+
+-- At most one code outstanding per laboratory, and a code is unique while it
+-- is outstanding.
+CREATE UNIQUE INDEX uq_guest_registration_codes_laboratory_active
+ON guest_registration_codes (laboratory_id)
+WHERE consumed_at IS NULL AND revoked_at IS NULL;
+
+CREATE UNIQUE INDEX uq_guest_registration_codes_code_active
+ON guest_registration_codes (code_hmac)
+WHERE consumed_at IS NULL AND revoked_at IS NULL;
+
+CREATE INDEX idx_guest_registration_codes_expires_at
+ON guest_registration_codes (expires_at)
+WHERE consumed_at IS NULL AND revoked_at IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- Label printing
+-- ---------------------------------------------------------------------------
+
+-- Network label printers a laboratory can send QR-code labels to.
+--
+-- The host lives here rather than in the request body on purpose: a print
+-- request names a registered printer by id, so a caller can never make the
+-- server open a connection to an address of their choosing.
+CREATE TABLE label_printers (
+    printer_id uuid PRIMARY KEY,
+    laboratory_id uuid NOT NULL REFERENCES laboratories (laboratory_id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    host TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 9100,
+    model TEXT NOT NULL DEFAULT 'QL-820NWBc',
+    media_kind TEXT NOT NULL,
+    media_width_mm INTEGER NOT NULL,
+    -- Continuous stock is cut to whatever length the label needs, so it has no
+    -- fixed length; die-cut labels always do.
+    media_length_mm INTEGER,
+    auto_cut BOOLEAN NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (name <> ''),
+    CHECK (host <> ''),
+    -- Printers do not serve from privileged ports; refusing them keeps a
+    -- registration from being used to probe the printer's own host.
+    CHECK (port BETWEEN 1024 AND 65535),
+    CHECK (media_kind IN ('continuous', 'die_cut')),
+    CHECK (media_width_mm BETWEEN 1 AND 255),
+    CHECK (media_length_mm IS NULL OR media_length_mm BETWEEN 1 AND 255),
+    CHECK ((media_kind = 'continuous') = (media_length_mm IS NULL))
+);
+
+CREATE UNIQUE INDEX uq_label_printers_laboratory_name
+ON label_printers (laboratory_id, name);
+
+CREATE INDEX idx_label_printers_laboratory
+ON label_printers (laboratory_id, name);
 
 COMMIT;

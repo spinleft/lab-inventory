@@ -392,7 +392,13 @@ mod tests {
 
         let too_short = MIN_RASTER_LINES as u16 - 1;
         assert_eq!(
-            Page::new(media, 696, too_short, vec![0; stride * usize::from(too_short)]).unwrap_err(),
+            Page::new(
+                media,
+                696,
+                too_short,
+                vec![0; stride * usize::from(too_short)]
+            )
+            .unwrap_err(),
             RasterError::LengthOutOfRange { height: too_short }
         );
 
@@ -547,7 +553,8 @@ mod tests {
             let x = row % usize::from(media.printable_width_dots);
             bitmap[row * stride + x / 8] |= 0x80 >> (x % 8);
         }
-        let page = Page::new(media, media.printable_width_dots, 271, bitmap).expect("page is valid");
+        let page =
+            Page::new(media, media.printable_width_dots, 271, bitmap).expect("page is valid");
         let job = encode_job(media, true, &[page]).expect("job encodes");
 
         let mut rows = 0;
@@ -556,7 +563,11 @@ mod tests {
             if job[index] == b'g' && job[index + 1] == 0x00 {
                 let length = usize::from(job[index + 2]);
                 let decoded = unpack_bits(&job[index + 3..index + 3 + length]);
-                assert_eq!(decoded.len(), BYTES_PER_ROW, "row {rows} is the wrong width");
+                assert_eq!(
+                    decoded.len(),
+                    BYTES_PER_ROW,
+                    "row {rows} is the wrong width"
+                );
                 assert_eq!(
                     decoded.iter().filter(|b| b.count_ones() > 0).count(),
                     1,

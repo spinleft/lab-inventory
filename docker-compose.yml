@@ -1,0 +1,92 @@
+# 一体化部署:Postgres、Redis、后端、前端(nginx)全部由 Compose 拉起。
+#
+# 用法见 docs/deployment.md。所有可调项都在 .env 里,复制 .env.example 后修改。
+# 若数据库/Redis 由外部提供,改用 docker-compose.external.yml。
+
+name: lab-inventory
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab_inventory}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 必须设置}
+      POSTGRES_DB: ${POSTGRES_DB:-lab_inventory}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # 指定用户名,否则 pg_isready 会用容器内的 root 去连。
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab_inventory} -d ${POSTGRES_DB:-lab_inventory}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # 默认不暴露端口:数据库只在 Compose 网络内被访问。需要外部连接时
+    # 在 docker-compose.override.yml 里加 ports。
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    image: ghcr.io/spinleft/lab-inventory-backend:${LAB_INVENTORY_VERSION:-0.1.0}
+    # 本地构建镜像时取消注释,并把上面的 image 当作构建产物的 tag。
+    # build:
+    #   context: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENVIRONMENT: production
+      APP_DATABASE__HOST: postgres
+      APP_DATABASE__PORT: 5432
+      APP_DATABASE__USERNAME: ${POSTGRES_USER:-lab_inventory}
+      APP_DATABASE__PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 必须设置}
+      APP_DATABASE__DATABASE_NAME: ${POSTGRES_DB:-lab_inventory}
+      # 同一个 Compose 网络内部通信,不经过公网,无需 TLS。
+      APP_DATABASE__REQUIRE_SSL: "false"
+      APP_REDIS_URI: redis://redis:6379
+      APP_APPLICATION__HMAC_SECRET: ${HMAC_SECRET:?HMAC_SECRET 必须设置}
+      APP_APPLICATION__BASE_URL: ${PUBLIC_URL:?PUBLIC_URL 必须设置}
+      APP_APPLICATION__PUBLIC_WEB_URL: ${PUBLIC_URL}
+      # 首次启动时用它替换迁移脚本里的默认 root 密码;之后再改密码不受影响。
+      APP_APPLICATION__INITIAL_ROOT_PASSWORD: ${INITIAL_ROOT_PASSWORD:?INITIAL_ROOT_PASSWORD 必须设置}
+      # 浏览器同源访问,Cookie 不跨站,因此这里不需要放行任何跨域来源。
+      APP_APPLICATION__CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      # 只有走 HTTPS 时才能置 true,否则浏览器会丢弃会话 Cookie。
+      APP_APPLICATION__COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      APP_FEDERATION__ENABLED: ${FEDERATION_ENABLED:-false}
+      APP_FEDERATION__PUBLIC_BASE_URL: ${PUBLIC_URL}
+      APP_LABEL_PRINTING__ALLOW_LOOPBACK: "false"
+    volumes:
+      - attachments:/app/storage
+
+  frontend:
+    image: ghcr.io/spinleft/lab-inventory-frontend:${LAB_INVENTORY_VERSION:-0.1.0}
+    # build:
+    #   context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      # 同源:浏览器请求 /api/v1,由本容器的 nginx 转发给 backend。
+      API_BASE_URL: /api/v1
+      API_UPSTREAM: http://backend:8000
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+
+volumes:
+  postgres-data:
+  redis-data:
+  attachments:

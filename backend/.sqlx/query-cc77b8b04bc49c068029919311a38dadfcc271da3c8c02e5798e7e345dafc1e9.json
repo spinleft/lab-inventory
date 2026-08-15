@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE locations\n        SET\n            path = ($2::text::ltree || subpath(path, nlevel($3::text::ltree))),\n            depth = nlevel($2::text::ltree || subpath(path, nlevel($3::text::ltree))) - 1,\n            updated_at = now()\n        WHERE laboratory_id = $1\n          AND path <@ $3::text::ltree\n          AND location_id <> $4\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cc77b8b04bc49c068029919311a38dadfcc271da3c8c02e5798e7e345dafc1e9"
+}

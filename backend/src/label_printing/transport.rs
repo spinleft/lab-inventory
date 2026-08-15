@@ -344,7 +344,10 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("listener binds");
-        let port = listener.local_addr().expect("listener has an address").port();
+        let port = listener
+            .local_addr()
+            .expect("listener has an address")
+            .port();
 
         let handle = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.expect("connection arrives");
@@ -396,8 +399,14 @@ mod tests {
         assert_eq!(status.media_length_mm, 29);
 
         let request = printer.await.expect("printer task");
-        assert_eq!(&request[..INVALIDATE_BYTES], &vec![0u8; INVALIDATE_BYTES][..]);
-        assert_eq!(&request[INVALIDATE_BYTES..], &[0x1B, b'@', 0x1B, b'i', b'S']);
+        assert_eq!(
+            &request[..INVALIDATE_BYTES],
+            &vec![0u8; INVALIDATE_BYTES][..]
+        );
+        assert_eq!(
+            &request[INVALIDATE_BYTES..],
+            &[0x1B, b'@', 0x1B, b'i', b'S']
+        );
     }
 
     #[tokio::test]

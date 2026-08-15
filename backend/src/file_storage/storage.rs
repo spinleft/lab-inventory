@@ -17,7 +17,7 @@ impl FileStorage {
         if settings.max_file_size_bytes == 0 {
             return Err(anyhow!("file_storage.max_file_size_bytes must be positive"));
         }
-        if settings.upload_token_ttl_minutes <= 0 {
+        if settings.upload_token_ttl_minutes == 0 {
             return Err(anyhow!(
                 "file_storage.upload_token_ttl_minutes must be positive"
             ));

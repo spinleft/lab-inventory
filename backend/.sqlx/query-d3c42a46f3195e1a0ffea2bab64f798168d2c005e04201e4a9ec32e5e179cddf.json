@@ -1,0 +1,115 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO assets (\n            asset_id,\n            laboratory_id,\n            category_id,\n            tracking_mode,\n            name,\n            model,\n            manufacturer,\n            inventory_unit_id,\n            public_notes,\n            internal_notes\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n        RETURNING\n            asset_id,\n            laboratory_id,\n            category_id,\n            tracking_mode,\n            name,\n            model,\n            manufacturer,\n            inventory_unit_id,\n            public_notes,\n            internal_notes,\n            created_at,\n            updated_at,\n            0::bigint AS \"inventory_item_count!\",\n            0::double precision AS \"quantity_on_hand!\",\n            0::double precision AS \"quantity_allocated!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "asset_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "laboratory_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "category_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "tracking_mode",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "manufacturer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "inventory_unit_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "public_notes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "internal_notes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "inventory_item_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 13,
+        "name": "quantity_on_hand!",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 14,
+        "name": "quantity_allocated!",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "d3c42a46f3195e1a0ffea2bab64f798168d2c005e04201e4a9ec32e5e179cddf"
+}

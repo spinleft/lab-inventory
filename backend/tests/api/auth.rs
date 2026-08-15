@@ -49,7 +49,7 @@ async fn auth_me_unauthorized_response_includes_cors_headers() {
 
     let response = app
         .api_client
-        .get(format!("{}/api/v1/auth/me", &app.address))
+        .get(format!("{}/api/v1/auth/me", app.address))
         .header(ORIGIN, "http://127.0.0.1:5173")
         .send()
         .await

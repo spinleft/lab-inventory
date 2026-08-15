@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT printer_id, laboratory_id, name, host, port, model,\n               media_kind, media_width_mm, media_length_mm, auto_cut,\n               created_at, updated_at\n        FROM label_printers\n        WHERE printer_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "printer_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "laboratory_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "host",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "port",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "media_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "media_width_mm",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "media_length_mm",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "auto_cut",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6e8fc8ec22ef077ebb1ca52224efe11b4f20485d17410062e06beda428051f38"
+}

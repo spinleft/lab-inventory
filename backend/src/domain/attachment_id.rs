@@ -38,8 +38,8 @@ impl From<AttachmentId> for Uuid {
     }
 }
 
-impl Into<AttachmentId> for Uuid {
-    fn into(self) -> AttachmentId {
-        AttachmentId(self)
+impl From<Uuid> for AttachmentId {
+    fn from(val: Uuid) -> Self {
+        AttachmentId(val)
     }
 }

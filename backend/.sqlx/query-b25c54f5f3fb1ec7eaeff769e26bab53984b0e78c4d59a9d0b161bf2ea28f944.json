@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO users (\n            user_id,\n            username,\n            password_hash,\n            user_type_id,\n            laboratory_id,\n            is_federation_shadow\n        )\n        SELECT $1, $2, $3, user_type_id, $4, true\n        FROM user_types\n        WHERE name = 'guest'\n        RETURNING user_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b25c54f5f3fb1ec7eaeff769e26bab53984b0e78c4d59a9d0b161bf2ea28f944"
+}

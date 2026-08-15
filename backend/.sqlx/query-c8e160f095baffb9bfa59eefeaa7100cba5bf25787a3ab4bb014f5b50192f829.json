@@ -1,0 +1,136 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            asset_inventory_items.inventory_item_id,\n            asset_inventory_items.asset_id,\n            asset_inventory_items.laboratory_id,\n            asset_inventory_items.tracking_mode,\n            asset_inventory_items.serial_number,\n            asset_inventory_items.batch_number,\n            asset_inventory_items.quantity_on_hand::double precision AS \"quantity_on_hand!\",\n            asset_inventory_items.quantity_allocated::double precision AS \"quantity_allocated!\",\n            asset_inventory_items.location_id,\n            asset_inventory_items.status,\n            asset_inventory_items.public_notes,\n            asset_inventory_items.internal_notes,\n            asset_inventory_items.created_at,\n            asset_inventory_items.updated_at,\n            asset_inventory_items.last_stocktake_at,\n            assets.category_id AS asset_category_id,\n            assets.name AS asset_name,\n            assets.model AS asset_model,\n            assets.manufacturer AS asset_manufacturer,\n            assets.inventory_unit_id AS asset_inventory_unit_id\n        FROM asset_inventory_items\n        JOIN assets\n          ON assets.asset_id = asset_inventory_items.asset_id\n        WHERE asset_inventory_items.inventory_item_id = $1\n        FOR UPDATE OF asset_inventory_items\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "inventory_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "asset_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "laboratory_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "tracking_mode",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "serial_number",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "batch_number",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "quantity_on_hand!",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 7,
+        "name": "quantity_allocated!",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 8,
+        "name": "location_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "public_notes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "internal_notes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "last_stocktake_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "asset_category_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 16,
+        "name": "asset_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "asset_model",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 18,
+        "name": "asset_manufacturer",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "asset_inventory_unit_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      null,
+      null,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "c8e160f095baffb9bfa59eefeaa7100cba5bf25787a3ab4bb014f5b50192f829"
+}

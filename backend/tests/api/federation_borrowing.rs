@@ -107,13 +107,12 @@ async fn remote_requester_can_cancel_before_approval_and_ask_again() {
     // Nobody decided on it, so no reviewer was recorded.
     assert!(cancelled["reviewed_at"].is_null());
 
-    let status: String = sqlx::query_scalar(
-        "SELECT status FROM asset_inventory_items WHERE inventory_item_id = $1",
-    )
-    .bind(inventory_item_id)
-    .fetch_one(&remote.db_pool)
-    .await
-    .unwrap();
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM asset_inventory_items WHERE inventory_item_id = $1")
+            .bind(inventory_item_id)
+            .fetch_one(&remote.db_pool)
+            .await
+            .unwrap();
     assert_eq!(status, "available");
 
     // Cancelling drops the request out of the partial unique index, so the item
@@ -246,7 +245,7 @@ async fn inbound_write_requires_a_valid_signature() {
         .api_client
         .post(format!(
             "{}/api/v1/federation/inbound/laboratories/{laboratory_id}/inventory-items/{}/borrow-requests",
-            &app.address,
+            app.address,
             Uuid::new_v4()
         ))
         .json(&serde_json::json!({}))
@@ -291,7 +290,7 @@ async fn inbound_write_rejects_a_tampered_body() {
 
     let mut request = remote
         .api_client
-        .post(format!("{}{path}", &remote.address))
+        .post(format!("{}{path}", remote.address))
         .header("content-type", "application/json");
     for (name, value) in &headers {
         request = request.header(name.as_str(), value.as_str());
@@ -307,7 +306,7 @@ async fn inbound_write_rejects_a_tampered_body() {
     // what rules out the request having been rejected for some other reason.
     let mut request = remote
         .api_client
-        .post(format!("{}{path}", &remote.address))
+        .post(format!("{}{path}", remote.address))
         .header("content-type", "application/json");
     for (name, value) in &headers {
         request = request.header(name.as_str(), value.as_str());
@@ -331,8 +330,7 @@ async fn inbound_post_refuses_a_path_that_is_only_readable() {
     let local_user = TestUser::generate_with_user_type("user", Some(local_laboratory_id));
     local.store_user(&local_user).await;
 
-    let path =
-        format!("/api/v1/federation/inbound/laboratories/{remote_laboratory_id}/assets");
+    let path = format!("/api/v1/federation/inbound/laboratories/{remote_laboratory_id}/assets");
     let body = serde_json::to_vec(&serde_json::json!({})).unwrap();
     let headers = sign_federation_request(
         &local,
@@ -348,7 +346,7 @@ async fn inbound_post_refuses_a_path_that_is_only_readable() {
 
     let mut request = remote
         .api_client
-        .post(format!("{}{path}", &remote.address))
+        .post(format!("{}{path}", remote.address))
         .header("content-type", "application/json");
     for (name, value) in &headers {
         request = request.header(name.as_str(), value.as_str());

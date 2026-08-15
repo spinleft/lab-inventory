@@ -1,0 +1,184 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 同一分支上新的推送会取消还在跑的旧任务。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  backend-test:
+    name: 后端测试
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # 测试会为每个用例建一个独立的库,用的就是这里的超级用户口令,
+        # 必须和 backend/configuration/base.yaml 里的一致。
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-workspaces: backend
+      - name: 运行测试
+        run: cargo test
+        env:
+          # 编译期的 query! 校验读 .sqlx;每个用例在运行时自己建库、跑迁移,
+          # 连的就是上面这个 postgres 服务(见 backend/tests/api/helpers.rs)。
+          SQLX_OFFLINE: "true"
+
+  backend-lint:
+    name: 后端格式与 Clippy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+          cache-workspaces: backend
+      - name: 检查格式
+        run: cargo fmt --check
+      - name: Clippy
+        # 不连数据库,靠提交进仓库的 .sqlx 校验 SQL。
+        run: cargo clippy --all-targets -- -D warnings
+        env:
+          SQLX_OFFLINE: "true"
+
+  backend-sqlx:
+    name: 检查 .sqlx 是否为最新
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: lab_inventory
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgres://postgres:password@localhost:5432/lab_inventory
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-workspaces: backend
+      - name: 安装 sqlx-cli
+        # 版本必须与 Cargo.toml 里的 sqlx 对得上,否则生成的缓存格式不兼容。
+        uses: taiki-e/install-action@v2
+        with:
+          tool: sqlx-cli@0.8.6
+      - name: 建库并跑迁移
+        run: sqlx migrate run
+      - name: 校验查询缓存
+        # 改了 SQL 却忘了跑 cargo sqlx prepare,会在这里被拦下来 —— 否则
+        # 要等到 Docker 构建(没有数据库)时才炸。
+        run: cargo sqlx prepare --check -- --all-targets
+
+  frontend:
+    name: 前端检查与测试
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: 类型检查
+        run: npm run typecheck
+      - name: 单元测试
+        run: npm run test
+      - name: 构建
+        run: npm run build
+
+  frontend-e2e:
+    name: 前端端到端测试
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: 安装 Playwright 浏览器
+        run: npx playwright install --with-deps chromium
+      - name: 端到端测试
+        # 用例自己拦截 API 请求,不需要真的后端。
+        run: npm run test:e2e
+        env:
+          CI: "true"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
+
+  docker-build:
+    name: 构建镜像
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: 构建 ${{ matrix.component }}
+        # 只构建不推送:发布由 release.yml 负责。这一步是为了保证合到 main
+        # 的每个提交都是能打出镜像的。
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.component }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}

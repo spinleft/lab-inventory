@@ -87,14 +87,14 @@ pub async fn get_label_printer_status(
         ));
     }
 
-    let printer = fetch_label_printer(&pool, *printer_id)
-        .await?
-        .ok_or(LabelPrinterStatusError::NotFound(
-            "Label printer not found".into(),
-        ))?;
+    let printer =
+        fetch_label_printer(&pool, *printer_id)
+            .await?
+            .ok_or(LabelPrinterStatusError::NotFound(
+                "Label printer not found".into(),
+            ))?;
 
-    let status =
-        transport::query_status(&printer.endpoint(), address_policy(&settings)).await?;
+    let status = transport::query_status(&printer.endpoint(), address_policy(&settings)).await?;
     let media_matches_configuration = printer
         .media()
         .map(|media| status.matches(media.spec()))

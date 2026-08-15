@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            parameter_type_id,\n            data_type::text AS \"data_type!\",\n            unit_dimension,\n            default_unit_id\n        FROM asset_parameter_types\n        WHERE laboratory_id = $1\n          AND parameter_type_id = ANY($2)\n        FOR UPDATE\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "parameter_type_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "data_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "unit_dimension",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "default_unit_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      true,
+      true
+    ]
+  },
+  "hash": "2d24c0bc231f4b9c0706509a0d4ddbd67b89d988e4fbc6f3231190f58fee9e7f"
+}

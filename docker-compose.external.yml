@@ -1,0 +1,49 @@
+# 只跑应用容器,Postgres 和 Redis 由外部提供(已有数据库运维、托管数据库、
+# 或多台机器共用一套中间件的场景)。
+#
+#     docker compose -f docker-compose.external.yml up -d
+#
+# 需要在 .env 里额外配置 DATABASE_* 和 REDIS_URI,见 docs/deployment.md
+# "使用外部数据库" 一节。
+
+name: lab-inventory
+
+services:
+  backend:
+    image: ghcr.io/spinleft/lab-inventory-backend:${LAB_INVENTORY_VERSION:-0.1.0}
+    restart: unless-stopped
+    environment:
+      APP_ENVIRONMENT: production
+      APP_DATABASE__HOST: ${DATABASE_HOST:?DATABASE_HOST 必须设置}
+      APP_DATABASE__PORT: ${DATABASE_PORT:-5432}
+      APP_DATABASE__USERNAME: ${DATABASE_USERNAME:?DATABASE_USERNAME 必须设置}
+      APP_DATABASE__PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD 必须设置}
+      APP_DATABASE__DATABASE_NAME: ${DATABASE_NAME:-lab_inventory}
+      # 走网络连接外部数据库,默认要求 TLS。数据库不支持时才关掉。
+      APP_DATABASE__REQUIRE_SSL: ${DATABASE_REQUIRE_SSL:-true}
+      APP_REDIS_URI: ${REDIS_URI:?REDIS_URI 必须设置}
+      APP_APPLICATION__HMAC_SECRET: ${HMAC_SECRET:?HMAC_SECRET 必须设置}
+      APP_APPLICATION__BASE_URL: ${PUBLIC_URL:?PUBLIC_URL 必须设置}
+      APP_APPLICATION__PUBLIC_WEB_URL: ${PUBLIC_URL}
+      APP_APPLICATION__INITIAL_ROOT_PASSWORD: ${INITIAL_ROOT_PASSWORD:?INITIAL_ROOT_PASSWORD 必须设置}
+      APP_APPLICATION__CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      APP_APPLICATION__COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      APP_FEDERATION__ENABLED: ${FEDERATION_ENABLED:-false}
+      APP_FEDERATION__PUBLIC_BASE_URL: ${PUBLIC_URL}
+      APP_LABEL_PRINTING__ALLOW_LOOPBACK: "false"
+    volumes:
+      - attachments:/app/storage
+
+  frontend:
+    image: ghcr.io/spinleft/lab-inventory-frontend:${LAB_INVENTORY_VERSION:-0.1.0}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      API_BASE_URL: /api/v1
+      API_UPSTREAM: http://backend:8000
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+
+volumes:
+  attachments:

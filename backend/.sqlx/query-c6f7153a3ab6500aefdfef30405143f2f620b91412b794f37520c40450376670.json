@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO federation_guest_links (\n            link_id,\n            local_laboratory_id,\n            remote_node_id,\n            remote_laboratory_id,\n            remote_user_id,\n            remote_username,\n            remote_user_type,\n            local_guest_user_id\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n        ON CONFLICT (local_laboratory_id, remote_node_id, remote_laboratory_id, remote_user_id)\n        DO UPDATE SET\n            remote_username = EXCLUDED.remote_username,\n            remote_user_type = EXCLUDED.remote_user_type,\n            last_seen_at = now()\n        RETURNING link_id, local_guest_user_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "link_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "local_guest_user_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "c6f7153a3ab6500aefdfef30405143f2f620b91412b794f37520c40450376670"
+}

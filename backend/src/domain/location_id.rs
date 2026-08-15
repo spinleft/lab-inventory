@@ -32,8 +32,8 @@ impl From<LocationId> for Uuid {
     }
 }
 
-impl Into<LocationId> for Uuid {
-    fn into(self) -> LocationId {
-        LocationId(self)
+impl From<Uuid> for LocationId {
+    fn from(val: Uuid) -> Self {
+        LocationId(val)
     }
 }

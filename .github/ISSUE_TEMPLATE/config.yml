@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/spinleft/lab-inventory/security/advisories/new
+    about: 安全问题请私下报告,不要开公开 Issue
+  - name: 部署和使用问题
+    url: https://github.com/spinleft/lab-inventory/blob/main/docs/operations.md#排障
+    about: 先看看排障文档里有没有现成的答案

@@ -115,9 +115,7 @@ pub async fn update_location(
     )
     .await?
     {
-        return Err(UpdateLocationError::NotFound(
-            "Location not found".into(),
-        ));
+        return Err(UpdateLocationError::NotFound("Location not found".into()));
     }
 
     let update_location = UpdateLocation::try_from(payload.into_inner())

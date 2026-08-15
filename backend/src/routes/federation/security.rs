@@ -300,6 +300,9 @@ pub(super) fn verify_tls_pin(
     }
 }
 
+// Every argument is a distinct field of the canonical string the signature
+// covers. Grouping them into a struct would only move the list.
+#[allow(clippy::too_many_arguments)]
 fn sign_canonical(
     shared_secret: &str,
     method: &str,

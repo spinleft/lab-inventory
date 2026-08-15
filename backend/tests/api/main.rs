@@ -3,6 +3,7 @@ mod asset_parameters;
 mod assets;
 mod attachments;
 mod auth;
+mod bootstrap;
 mod borrow_requests;
 mod federation;
 mod federation_borrowing;

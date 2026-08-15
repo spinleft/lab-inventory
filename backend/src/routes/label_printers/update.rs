@@ -140,8 +140,8 @@ pub async fn update_label_printer(
         .ok_or(UpdateLabelPrinterError::NotFound(
             "Label printer not found".into(),
         ))?;
-    let printer = update_label_printer_in_database(&mut transaction, existing.printer_id, &update)
-        .await?;
+    let printer =
+        update_label_printer_in_database(&mut transaction, existing.printer_id, &update).await?;
 
     record_audit(
         &mut transaction,

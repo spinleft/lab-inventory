@@ -3,6 +3,12 @@ name = "lab-inventory"
 version = "0.1.0"
 authors = ["spinleft <spinleftgit@gmail.com>"]
 edition = "2024"
+rust-version = "1.85"
+description = "Inventory management system for laboratories"
+homepage = "https://github.com/spinleft/lab-inventory"
+repository = "https://github.com/spinleft/lab-inventory"
+license = "MIT"
+readme = "../README.md"
 
 [lib]
 path = "src/lib.rs"
@@ -10,6 +16,10 @@ path = "src/lib.rs"
 [[bin]]
 path = "src/main.rs"
 name = "lab-inventory"
+
+[[bin]]
+path = "src/bin/admin.rs"
+name = "lab-inventory-admin"
 
 [dependencies]
 actix-cors = "0.7"

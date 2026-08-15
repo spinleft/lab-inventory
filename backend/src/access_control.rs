@@ -238,11 +238,7 @@ impl Actor {
         }
         // Super admin cannot manage root users
         if self.is_super_admin() {
-            if target_user.user_type == UserType::Root {
-                return false;
-            } else {
-                return true;
-            }
+            return target_user.user_type != UserType::Root;
         }
         // Root can manage all users
         if self.is_root() {
@@ -832,8 +828,7 @@ impl Actor {
     /// host is an address this server will connect to — so only the
     /// laboratory's administrator may register or change one.
     pub fn can_manage_label_printers(&self, laboratory_id: LaboratoryId) -> bool {
-        self.is_system_admin()
-            || (self.is_lab_admin() && self.laboratory_id == Some(laboratory_id))
+        self.is_system_admin() || (self.is_lab_admin() && self.laboratory_id == Some(laboratory_id))
     }
 
     /// Anyone who works in the laboratory may print a label; guests may not.
@@ -908,10 +903,8 @@ pub async fn get_actor(pool: &PgPool, user_id: UserId) -> Result<Option<Actor>, 
                 .ok_or(anyhow!("Actor user_type_name is NULL"))?,
         )
         .map_err(|e| anyhow!("{e}"))?;
-        let laboratory_id: Option<LaboratoryId> = match row.laboratory_id {
-            Some(laboratory_id) => Some(laboratory_id.into()),
-            None => None,
-        };
+        let laboratory_id: Option<LaboratoryId> =
+            row.laboratory_id.map(|laboratory_id| laboratory_id.into());
         Ok(Some(Actor {
             user_id,
             user_type,

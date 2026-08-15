@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM file_uploads\n        WHERE upload_id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6bf906f6b380f40b2e5adadb35b2ff913c98e2888f69b3ccbc8f5734e8baccf5"
+}

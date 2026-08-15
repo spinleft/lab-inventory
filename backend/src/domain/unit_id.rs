@@ -24,9 +24,9 @@ impl From<UnitId> for Uuid {
     }
 }
 
-impl Into<UnitId> for Uuid {
-    fn into(self) -> UnitId {
-        UnitId(self)
+impl From<Uuid> for UnitId {
+    fn from(val: Uuid) -> Self {
+        UnitId(val)
     }
 }
 

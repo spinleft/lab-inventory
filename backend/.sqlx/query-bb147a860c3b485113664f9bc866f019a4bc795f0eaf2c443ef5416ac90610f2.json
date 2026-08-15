@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO federation_remote_nodes (\n            remote_node_id,\n            base_url,\n            display_name,\n            shared_secret,\n            shared_secret_hash,\n            tls_certificate_sha256,\n            key_version,\n            last_handshake_at\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7, now())\n        ON CONFLICT (remote_node_id)\n        DO UPDATE SET\n            base_url = EXCLUDED.base_url,\n            display_name = EXCLUDED.display_name,\n            shared_secret = EXCLUDED.shared_secret,\n            shared_secret_hash = EXCLUDED.shared_secret_hash,\n            tls_certificate_sha256 = EXCLUDED.tls_certificate_sha256,\n            key_version = EXCLUDED.key_version,\n            status = 'active',\n            last_handshake_at = now(),\n            updated_at = now()\n        RETURNING\n            remote_node_id,\n            base_url,\n            display_name,\n            shared_secret,\n            shared_secret_hash,\n            tls_certificate_sha256,\n            status,\n            key_version,\n            last_handshake_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "remote_node_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "base_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "shared_secret",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "shared_secret_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "tls_certificate_sha256",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "key_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "last_handshake_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "bb147a860c3b485113664f9bc866f019a4bc795f0eaf2c443ef5416ac90610f2"
+}

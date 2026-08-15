@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT DISTINCT ON (assignments.parameter_type_id)\n            assignments.parameter_type_id\n        FROM asset_categories AS current_category\n        JOIN asset_categories AS ancestor_category\n          ON ancestor_category.laboratory_id = current_category.laboratory_id\n         AND ancestor_category.path @> current_category.path\n        JOIN asset_parameter_assignments AS assignments\n          ON assignments.category_id = ancestor_category.category_id\n        WHERE current_category.laboratory_id = $1\n          AND current_category.category_id = $2\n          AND assignments.is_required = true\n          AND (\n              ancestor_category.category_id = current_category.category_id\n              OR assignments.applies_to_descendants = true\n          )\n        ORDER BY assignments.parameter_type_id, ancestor_category.depth DESC, assignments.sort_order\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "parameter_type_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "45e506768795e456b87c858c58fe1c2b3c94b9ad01b0ba1de6805965241b0d62"
+}

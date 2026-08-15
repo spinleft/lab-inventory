@@ -45,9 +45,7 @@ fn is_valid_hostname(host: &str) -> bool {
         label.len() <= 63
             && !label.starts_with('-')
             && !label.ends_with('-')
-            && label
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+            && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
     })
 }
 
@@ -122,7 +120,13 @@ mod tests {
 
     #[test]
     fn malformed_hostnames_are_rejected() {
-        for host in ["-printer", "printer-", "printer..lab", ".printer", "printer."] {
+        for host in [
+            "-printer",
+            "printer-",
+            "printer..lab",
+            ".printer",
+            "printer.",
+        ] {
             assert_err!(LabelPrinterHost::parse(host.into()));
         }
     }

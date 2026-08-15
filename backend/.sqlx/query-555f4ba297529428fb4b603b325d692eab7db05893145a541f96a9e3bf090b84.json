@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            links.link_id,\n            links.local_laboratory_id,\n            links.remote_node_id,\n            links.remote_laboratory_id,\n            links.remote_user_id,\n            links.remote_username,\n            links.remote_user_type,\n            links.local_guest_user_id,\n            links.first_seen_at,\n            links.last_seen_at,\n            users.username AS local_guest_username,\n            nodes.base_url AS remote_base_url\n        FROM federation_guest_links AS links\n        JOIN users ON users.user_id = links.local_guest_user_id\n        JOIN federation_remote_nodes AS nodes ON nodes.remote_node_id = links.remote_node_id\n        WHERE links.local_laboratory_id = $1\n        ORDER BY links.last_seen_at DESC, links.link_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "link_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "local_laboratory_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "remote_node_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "remote_laboratory_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "remote_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "remote_username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "remote_user_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "local_guest_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "first_seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "local_guest_username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "remote_base_url",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "555f4ba297529428fb4b603b325d692eab7db05893145a541f96a9e3bf090b84"
+}

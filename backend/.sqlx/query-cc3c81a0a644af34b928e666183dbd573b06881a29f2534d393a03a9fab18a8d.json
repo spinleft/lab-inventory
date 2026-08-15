@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE file_uploads\n        SET consumed_at = now()\n        WHERE upload_id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cc3c81a0a644af34b928e666183dbd573b06881a29f2534d393a03a9fab18a8d"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM asset_parameter_values\n        WHERE asset_id = $1\n          AND parameter_type_id = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3e08e21f89984b10b1aaaecdd19e561f1f0259d36e6a01a1abe771cd03092cf4"
+}

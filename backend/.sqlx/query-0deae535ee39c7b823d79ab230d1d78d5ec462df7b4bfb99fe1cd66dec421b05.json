@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE federation_borrow_requests\n        SET status = 'cancelled',\n            updated_at = now()\n        WHERE borrow_request_id = $1\n          AND local_laboratory_id = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0deae535ee39c7b823d79ab230d1d78d5ec462df7b4bfb99fe1cd66dec421b05"
+}

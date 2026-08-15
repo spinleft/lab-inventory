@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT laboratory_id, uploaded_by_user_id\n            FROM file_uploads\n            WHERE upload_id = $1\n              AND consumed_at IS NULL\n              AND expires_at > now()\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "laboratory_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "uploaded_by_user_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "bcfa248fbf9dc0463620be6f4b13dd9decdeff6533ba8b7d51d7f2cbe06b59a7"
+}

@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO asset_parameter_values (\n            value_id,\n            laboratory_id,\n            asset_id,\n            parameter_type_id,\n            data_type,\n            value_text,\n            value_number,\n            value_number_in_base,\n            value_range_start,\n            value_range_end,\n            value_range_start_in_base,\n            value_range_end_in_base,\n            unit_id,\n            value_boolean,\n            value_date,\n            value_option_id\n        )\n        VALUES ($1, $2, $3, $4, $5::text::asset_parameter_data_type, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)\n        ON CONFLICT (asset_id, parameter_type_id)\n        DO UPDATE SET\n            data_type = EXCLUDED.data_type,\n            value_text = EXCLUDED.value_text,\n            value_number = EXCLUDED.value_number,\n            value_number_in_base = EXCLUDED.value_number_in_base,\n            value_range_start = EXCLUDED.value_range_start,\n            value_range_end = EXCLUDED.value_range_end,\n            value_range_start_in_base = EXCLUDED.value_range_start_in_base,\n            value_range_end_in_base = EXCLUDED.value_range_end_in_base,\n            unit_id = EXCLUDED.unit_id,\n            value_boolean = EXCLUDED.value_boolean,\n            value_date = EXCLUDED.value_date,\n            value_option_id = EXCLUDED.value_option_id,\n            updated_at = now()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Float8",
+        "Float8",
+        "Float8",
+        "Float8",
+        "Float8",
+        "Float8",
+        "Uuid",
+        "Bool",
+        "Date",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8e64738de42d7bc1adb6e7416bc51eee8044b8d4b927fcfbade70f4bacebf201"
+}

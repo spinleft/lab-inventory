@@ -1,0 +1,379 @@
+name: 发布
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的 tag,例如 v0.1.0"
+        required: true
+
+# 产物先传进草稿 Release,全部就绪后最后一步才发布出去。
+# 中途失败时草稿会留在那里,修好后重跑即可。
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  prepare:
+    name: 创建草稿 Release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 解析版本号
+        id: resolve
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          # 镜像 tag 和文件名都不带 v 前缀。
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+      - name: 核对版本号与清单一致
+        run: |
+          VERSION="${{ steps.resolve.outputs.version }}"
+          BACKEND=$(grep -m1 '^version' backend/Cargo.toml | cut -d'"' -f2)
+          FRONTEND=$(node -p "require('./frontend/package.json').version")
+          TAURI=$(node -p "require('./frontend/src-tauri/tauri.conf.json').version")
+          FAILED=0
+          for pair in "backend/Cargo.toml:${BACKEND}" \
+                      "frontend/package.json:${FRONTEND}" \
+                      "frontend/src-tauri/tauri.conf.json:${TAURI}"; do
+            FILE="${pair%%:*}"
+            FOUND="${pair##*:}"
+            if [ "${FOUND}" != "${VERSION}" ]; then
+              echo "::error::${FILE} 的版本是 ${FOUND},与 tag ${VERSION} 不一致"
+              FAILED=1
+            fi
+          done
+          exit $FAILED
+      - name: 建立草稿 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.resolve.outputs.tag }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在,复用它。"
+            exit 0
+          fi
+          # 正文取 CHANGELOG 里该版本那一节。标题用字面量前缀匹配而不是正则:
+          # awk 的 -v 会先处理一遍转义,写成正则的话方括号会被吃掉,匹配不上。
+          awk -v header="## [${{ steps.resolve.outputs.version }}]" '
+            index($0, header) == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found && /^\[[^]]+\]: / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::CHANGELOG.md 里没有 '## [${{ steps.resolve.outputs.version }}]' 这一节"
+            exit 1
+          fi
+          gh release create "$TAG" \
+            --draft \
+            --title "$TAG" \
+            --notes-file release-notes.md
+
+  images:
+    name: 镜像 (${{ matrix.component }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 构建并推送
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.component }}
+          push: true
+          # 只出 amd64。arm64 的 Rust 交叉构建在 CI 上要跑一个多小时,
+          # 需要的话见 docs/deployment.md 的本地构建说明。
+          platforms: linux/amd64
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/lab-inventory-${{ matrix.component }}:${{ needs.prepare.outputs.version }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/lab-inventory-${{ matrix.component }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha,scope=release-${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.component }}
+
+  server-artifacts:
+    name: 服务端产物
+    needs: prepare
+    # 用较老的发行版编译,产出的二进制才能在 glibc 版本更低的机器上跑。
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-workspaces: backend
+      - name: 编译二进制
+        run: cargo build --release --bin lab-inventory --bin lab-inventory-admin
+        env:
+          SQLX_OFFLINE: "true"
+      - name: 打包
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          STAGE="lab-inventory-server-${VERSION}-x86_64-linux"
+          mkdir -p "$STAGE"
+          cp target/release/lab-inventory target/release/lab-inventory-admin "$STAGE/"
+          # 配置和迁移脚本一起带上:二进制在启动时读 ./configuration。
+          cp -r configuration migrations "$STAGE/"
+          cp ../LICENSE "$STAGE/"
+          tar -czf "../${STAGE}.tar.gz" "$STAGE"
+      - name: 上传
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd ..
+          gh release upload "${{ needs.prepare.outputs.tag }}" \
+            lab-inventory-server-*.tar.gz --clobber
+
+  web-artifacts:
+    name: Web 静态包
+    needs: prepare
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: 构建
+        # 不写死后端地址:部署时由 dist/config.js 提供,见 docs/deployment.md。
+        run: npm run build
+      - name: 打包
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          tar -czf "../lab-inventory-web-${VERSION}.tar.gz" -C dist .
+      - name: 上传
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd ..
+          gh release upload "${{ needs.prepare.outputs.tag }}" \
+            lab-inventory-web-*.tar.gz --clobber
+
+  desktop:
+    name: 桌面端 (${{ matrix.label }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows-x86_64
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            label: macos-aarch64
+            target: aarch64-apple-darwin
+          - os: macos-13
+            label: macos-x86_64
+            target: x86_64-apple-darwin
+          - os: ubuntu-22.04
+            label: linux-x86_64
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+          cache-workspaces: frontend/src-tauri
+      - name: 安装 Linux 依赖
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libxdo-dev \
+            build-essential \
+            file
+      - run: npm ci
+        working-directory: frontend
+      - name: 构建桌面端
+        working-directory: frontend
+        run: npx tauri build --target ${{ matrix.target }}
+      - name: 收集安装包
+        shell: bash
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          LABEL="${{ matrix.label }}"
+          BUNDLE="frontend/src-tauri/target/${{ matrix.target }}/release/bundle"
+          mkdir -p dist-desktop
+          # 每个平台的包格式不同,按扩展名捞一遍即可。文件名统一成
+          # lab-inventory-<版本>-<平台>.<扩展名>,和 docs/clients.md 里写的一致。
+          found=0
+          while IFS= read -r -d '' file; do
+            cp "$file" "dist-desktop/lab-inventory-${VERSION}-${LABEL}.${file##*.}"
+            found=$((found + 1))
+          done < <(find "$BUNDLE" -type f \
+            \( -name "*.msi" -o -name "*.exe" -o -name "*.dmg" \
+               -o -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" \) -print0)
+          if [ "$found" -eq 0 ]; then
+            echo "::error::$BUNDLE 下没有找到任何安装包"
+            exit 1
+          fi
+          ls -la dist-desktop
+      - name: 上传
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.prepare.outputs.tag }}" \
+            dist-desktop/* --clobber
+
+  android:
+    name: 安卓 APK
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+        with:
+          # build-tools 里带 zipalign 和 apksigner,签名那一步要用。
+          packages: >-
+            platform-tools
+            platforms;android-34
+            build-tools;34.0.0
+      - name: 安装 NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          cache-workspaces: frontend/src-tauri
+      - run: npm ci
+        working-directory: frontend
+      - name: 初始化安卓工程
+        # gen/ 不进版本库,每次构建现生成。
+        working-directory: frontend
+        run: npx tauri android init
+        env:
+          NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+      - name: 构建 APK
+        working-directory: frontend
+        run: npx tauri android build --apk
+        env:
+          NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+      - name: 签名 APK
+        # Gradle 那边不配签名,构建出来的一定是 -unsigned,这里再用 apksigner
+        # 签一遍。这么做是因为 `tauri android init` 生成的 build.gradle.kts
+        # 本身没有 signingConfigs,而 gen/ 每次构建都重新生成 —— 往里塞
+        # keystore.properties 或者改 Gradle 都留不住。
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "${KEYSTORE_BASE64}" ]; then
+            echo "::warning::未配置 ANDROID_KEYSTORE_BASE64,产出的是未签名 APK,装不上。配置方法见 docs/releasing.md。"
+            exit 0
+          fi
+
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)
+          echo "使用 build-tools: $BUILD_TOOLS"
+
+          KEYSTORE="$RUNNER_TEMP/release.jks"
+          echo "${KEYSTORE_BASE64}" | base64 -d > "$KEYSTORE"
+
+          OUT="frontend/src-tauri/gen/android/app/build/outputs/apk"
+          while IFS= read -r -d '' unsigned; do
+            aligned="${unsigned%.apk}-aligned.apk"
+            signed="${unsigned%-unsigned.apk}.apk"
+            # 先对齐再签名:apksigner 会保留对齐,反过来则会破坏签名。
+            "${BUILD_TOOLS}zipalign" -p -f 4 "$unsigned" "$aligned"
+            "${BUILD_TOOLS}apksigner" sign \
+              --ks "$KEYSTORE" \
+              --ks-pass "env:KEYSTORE_PASSWORD" \
+              --ks-key-alias "$KEY_ALIAS" \
+              --key-pass "env:KEY_PASSWORD" \
+              --out "$signed" \
+              "$aligned"
+            "${BUILD_TOOLS}apksigner" verify --print-certs "$signed"
+            rm -f "$aligned" "$unsigned"
+          done < <(find "$OUT" -name "*-unsigned.apk" -print0)
+
+          rm -f "$KEYSTORE"
+      - name: 收集 APK
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          OUT="frontend/src-tauri/gen/android/app/build/outputs/apk"
+          mkdir -p dist-android
+          # 构建产物叫 app-universal-release.apk 之类,去掉 app- 和 -release
+          # 之后剩下的就是要放进文件名的那部分。没签名时 Gradle 自己会在名字里
+          # 留下 -unsigned,正好保留着 —— 免得有人拿去装却装不上。
+          found=0
+          while IFS= read -r -d '' file; do
+            variant=$(basename "$file" .apk | sed 's/^app-//; s/-release//')
+            name="lab-inventory-${VERSION}-android"
+            [ -n "$variant" ] && name="${name}-${variant}"
+            cp "$file" "dist-android/${name}.apk"
+            found=$((found + 1))
+          done < <(find "$OUT" -name "*.apk" -print0)
+          if [ "$found" -eq 0 ]; then
+            echo "::error::$OUT 下没有找到 APK"
+            exit 1
+          fi
+          ls -la dist-android
+      - name: 上传
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.prepare.outputs.tag }}" \
+            dist-android/* --clobber
+
+  publish:
+    name: 发布 Release
+    needs: [prepare, images, server-artifacts, web-artifacts, desktop, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 取消草稿状态
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "${{ needs.prepare.outputs.tag }}" --draft=false --latest

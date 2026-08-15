@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT asset_id\n        FROM assets\n        WHERE laboratory_id = $1\n          AND category_id IN (\n              SELECT category_id\n              FROM asset_categories\n              WHERE laboratory_id = $1\n                AND path <@ $2::text::ltree\n          )\n        ORDER BY asset_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "asset_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "67939a1a9c6f610f3d1c740796799e0cf3170a6126c4c771b7a52257dff33157"
+}

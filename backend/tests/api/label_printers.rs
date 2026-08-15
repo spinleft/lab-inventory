@@ -5,8 +5,6 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
-/// Raster rows are 90 bytes wide on every QL-800 family printer.
-const BYTES_PER_ROW: usize = 90;
 const DIE_CUT_62X29_WIDTH_DOTS: u16 = 696;
 const DIE_CUT_62X29_LENGTH_DOTS: u16 = 271;
 
@@ -26,7 +24,10 @@ impl FakePrinter {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("fake printer binds");
-        let port = listener.local_addr().expect("fake printer has a port").port();
+        let port = listener
+            .local_addr()
+            .expect("fake printer has a port")
+            .port();
 
         let mut block = [0u8; 32];
         block[0] = 0x80;
@@ -142,10 +143,19 @@ async fn label_printer_crud_is_laboratory_scoped_and_admin_only() {
     assert_eq!(printers.as_array().unwrap().len(), 1);
 
     assert_eq!(
-        app.get_label_printer(other_printer_id).await.status().as_u16(),
+        app.get_label_printer(other_printer_id)
+            .await
+            .status()
+            .as_u16(),
         404
     );
-    assert_eq!(app.get_label_printer(Uuid::new_v4()).await.status().as_u16(), 404);
+    assert_eq!(
+        app.get_label_printer(Uuid::new_v4())
+            .await
+            .status()
+            .as_u16(),
+        404
+    );
 
     // A regular user may look at printers but not reconfigure them.
     let regular_user = TestUser::generate_with_user_type("user", Some(own_laboratory_id));
@@ -153,10 +163,19 @@ async fn label_printer_crud_is_laboratory_scoped_and_admin_only() {
     regular_user.login(&app).await;
 
     assert_eq!(
-        app.get_label_printers(own_laboratory_id).await.status().as_u16(),
+        app.get_label_printers(own_laboratory_id)
+            .await
+            .status()
+            .as_u16(),
         200
     );
-    assert_eq!(app.get_label_printer(own_printer_id).await.status().as_u16(), 200);
+    assert_eq!(
+        app.get_label_printer(own_printer_id)
+            .await
+            .status()
+            .as_u16(),
+        200
+    );
     assert_eq!(
         app.post_label_printer(own_laboratory_id, &printer_body(9100))
             .await
@@ -172,7 +191,10 @@ async fn label_printer_crud_is_laboratory_scoped_and_admin_only() {
         403
     );
     assert_eq!(
-        app.delete_label_printer(own_printer_id).await.status().as_u16(),
+        app.delete_label_printer(own_printer_id)
+            .await
+            .status()
+            .as_u16(),
         403
     );
 
@@ -182,10 +204,19 @@ async fn label_printer_crud_is_laboratory_scoped_and_admin_only() {
     guest.login(&app).await;
 
     assert_eq!(
-        app.get_label_printers(own_laboratory_id).await.status().as_u16(),
+        app.get_label_printers(own_laboratory_id)
+            .await
+            .status()
+            .as_u16(),
         403
     );
-    assert_eq!(app.get_label_printer(own_printer_id).await.status().as_u16(), 404);
+    assert_eq!(
+        app.get_label_printer(own_printer_id)
+            .await
+            .status()
+            .as_u16(),
+        404
+    );
     assert_eq!(
         app.post_label_printer_print(own_printer_id, &single_page())
             .await
@@ -239,8 +270,14 @@ async fn label_printer_updates_and_deletes_are_recorded() {
     .expect("Failed to read audit log.");
     assert_eq!(actions, vec!["create", "update"]);
 
-    assert_eq!(app.delete_label_printer(printer_id).await.status().as_u16(), 204);
-    assert_eq!(app.get_label_printer(printer_id).await.status().as_u16(), 404);
+    assert_eq!(
+        app.delete_label_printer(printer_id).await.status().as_u16(),
+        204
+    );
+    assert_eq!(
+        app.get_label_printer(printer_id).await.status().as_u16(),
+        404
+    );
 }
 
 #[tokio::test]
@@ -274,11 +311,17 @@ async fn label_printer_registration_validates_the_address_and_media() {
     // Two printers in one laboratory cannot share a name.
     let body = printer_body(9100);
     assert_eq!(
-        app.post_label_printer(laboratory_id, &body).await.status().as_u16(),
+        app.post_label_printer(laboratory_id, &body)
+            .await
+            .status()
+            .as_u16(),
         201
     );
     assert_eq!(
-        app.post_label_printer(laboratory_id, &body).await.status().as_u16(),
+        app.post_label_printer(laboratory_id, &body)
+            .await
+            .status()
+            .as_u16(),
         409
     );
 }
@@ -313,7 +356,10 @@ async fn printing_sends_a_single_job_and_records_an_audit_entry() {
 
     // The job resets the printer and switches it into raster mode.
     assert_eq!(&job[..400], &vec![0u8; 400][..]);
-    assert_eq!(&job[400..409], &[0x1B, b'@', 0x1B, b'i', b'a', 0x01, 0x1B, b'i', b'S']);
+    assert_eq!(
+        &job[400..409],
+        &[0x1B, b'@', 0x1B, b'i', b'a', 0x01, 0x1B, b'i', b'S']
+    );
 
     // Print information describes the loaded stock and the page length.
     let print_info = job
@@ -399,7 +445,10 @@ async fn printing_is_refused_when_the_printer_reports_a_fault() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("fake printer binds");
-    let port = listener.local_addr().expect("fake printer has a port").port();
+    let port = listener
+        .local_addr()
+        .expect("fake printer has a port")
+        .port();
     tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.expect("a connection arrives");
         let mut block = [0u8; 32];

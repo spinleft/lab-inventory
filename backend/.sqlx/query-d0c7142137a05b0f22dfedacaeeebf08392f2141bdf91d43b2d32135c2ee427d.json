@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH deleted_assignments AS (\n            DELETE FROM asset_attachment_assignments\n            WHERE inventory_item_id = $1\n            RETURNING attachment_id, file_id\n        ),\n        deleted_files AS (\n            DELETE FROM files\n            WHERE file_id IN (SELECT file_id FROM deleted_assignments)\n            RETURNING file_id, storage_key\n        )\n        SELECT deleted_assignments.attachment_id, deleted_files.storage_key\n        FROM deleted_assignments\n        JOIN deleted_files ON deleted_files.file_id = deleted_assignments.file_id\n        ORDER BY deleted_assignments.attachment_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attachment_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "storage_key",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "d0c7142137a05b0f22dfedacaeeebf08392f2141bdf91d43b2d32135c2ee427d"
+}

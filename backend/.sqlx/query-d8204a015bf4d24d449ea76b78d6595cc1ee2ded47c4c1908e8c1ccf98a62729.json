@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE asset_attachment_assignments\n        SET inventory_item_id = $2,\n            updated_at = now()\n        WHERE inventory_item_id = ANY($1)\n        RETURNING attachment_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attachment_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d8204a015bf4d24d449ea76b78d6595cc1ee2ded47c4c1908e8c1ccf98a62729"
+}

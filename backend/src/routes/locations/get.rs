@@ -52,9 +52,7 @@ pub async fn get_location(
     )
     .await?
     {
-        return Err(GetLocationError::NotFound(
-            "Location not found".into(),
-        ));
+        return Err(GetLocationError::NotFound("Location not found".into()));
     }
 
     let location = fetch_location(&pool, location_id)

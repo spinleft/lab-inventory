@@ -36,8 +36,8 @@ impl From<LaboratoryId> for Uuid {
     }
 }
 
-impl Into<LaboratoryId> for Uuid {
-    fn into(self) -> LaboratoryId {
-        LaboratoryId(self)
+impl From<Uuid> for LaboratoryId {
+    fn from(val: Uuid) -> Self {
+        LaboratoryId(val)
     }
 }

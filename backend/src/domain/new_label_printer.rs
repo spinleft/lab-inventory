@@ -98,7 +98,10 @@ mod tests {
 
     #[test]
     fn models_are_trimmed_and_bounded() {
-        assert_eq!(validate_model("  QL-820NWBc  ".into()), Ok("QL-820NWBc".into()));
+        assert_eq!(
+            validate_model("  QL-820NWBc  ".into()),
+            Ok("QL-820NWBc".into())
+        );
         assert_err!(validate_model(String::new()));
         assert_err!(validate_model("   ".into()));
         assert_ok!(validate_model("a".repeat(64)));

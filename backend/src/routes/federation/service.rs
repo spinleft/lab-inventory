@@ -3,12 +3,12 @@
 //!
 //! Anything here orchestrates `queries.rs`. Single-statement work belongs in
 //! `queries.rs`; HTTP concerns belong in the handler modules.
+use super::model::GuestLinkIdentity;
 use super::queries::{
     FederationDatabaseError, delete_expired_nonces, delete_shadow_guest, fetch_local_node_id,
     fetch_user_role, guest_link_exists_for_user, insert_guest_link, insert_nonce,
     insert_shadow_guest, touch_guest_link, update_guest_link_user,
 };
-use super::model::GuestLinkIdentity;
 use super::security::{FederationSecurityError, InboundFederationContext};
 use crate::authentication::hash_password;
 use crate::domain::UserType;

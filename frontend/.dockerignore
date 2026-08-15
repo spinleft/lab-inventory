@@ -1,0 +1,8 @@
+node_modules
+dist
+coverage
+src-tauri
+playwright-report
+test-results
+*.tsbuildinfo
+*.md

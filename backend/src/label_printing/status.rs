@@ -208,8 +208,7 @@ mod tests {
             media::lookup(MediaKind::DieCut, 62, Some(100)).expect("62x100 is supported");
         assert!(!status.matches(wrong_length));
 
-        let wrong_kind =
-            media::lookup(MediaKind::Continuous, 62, None).expect("62mm is supported");
+        let wrong_kind = media::lookup(MediaKind::Continuous, 62, None).expect("62mm is supported");
         assert!(!status.matches(wrong_kind));
     }
 

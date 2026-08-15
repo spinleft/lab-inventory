@@ -65,8 +65,15 @@ test("user logs in with backend credentials", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "概览" })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
-  await page.getByRole("button", { name: /root/ }).click();
-  await page.getByText("登出").click();
+  // Narrow viewports keep the sidebar — and with it the user menu — behind a
+  // drawer, so it has to be opened before the menu is reachable.
+  const openNavigation = page.getByRole("button", { name: "打开导航" });
+  if (await openNavigation.isVisible()) {
+    await openNavigation.click();
+  }
+
+  await page.getByRole("button", { name: /用户菜单 root/ }).click();
+  await page.getByText("退出登录").click();
   await expect(
     page.getByRole("heading", { exact: true, name: "登录" }),
   ).toBeVisible();

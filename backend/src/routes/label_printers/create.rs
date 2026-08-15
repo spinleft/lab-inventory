@@ -2,9 +2,7 @@ use super::model::{LabelPrinterResponse, create_label_printer_rollback_details};
 use super::queries::{LabelPrinterDatabaseError, insert_label_printer};
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{
-    LabelPrinterHost, LabelPrinterMedia, LabelPrinterName, NewLabelPrinter,
-};
+use crate::domain::{LabelPrinterHost, LabelPrinterMedia, LabelPrinterName, NewLabelPrinter};
 use crate::label_printing::DEFAULT_PRINTER_PORT;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;

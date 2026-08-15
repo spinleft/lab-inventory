@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE federation_borrow_requests\n        SET status = $3,\n            reviewed_by_user_id = $4,\n            reviewed_by_username = $5,\n            reviewed_by_user_type = $6,\n            reviewed_at = now(),\n            decision_note = $7,\n            updated_at = now()\n        WHERE borrow_request_id = $1\n          AND local_laboratory_id = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "765cbc4773a3c3028c6d8c6799e520c16a1faa1c553dd0c3f26c13535c9f3bd3"
+}

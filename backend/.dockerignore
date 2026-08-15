@@ -1,0 +1,6 @@
+target
+storage
+scripts
+tests
+.env
+*.md

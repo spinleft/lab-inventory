@@ -1,8 +1,10 @@
 application:
   host: "0.0.0.0"
-  cookie_secure: true
+  cookie_secure: false
+  require_root_password_rotation: true
 database:
-  require_ssl: true
+  require_ssl: false
+  run_migrations: true
 federation:
   require_https: true
   allow_insecure_private_network: false

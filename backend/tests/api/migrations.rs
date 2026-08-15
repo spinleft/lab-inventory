@@ -84,7 +84,9 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
         "federation_pairing_codes",
         "federation_request_nonces",
         "federation_guest_links",
+        "federation_borrow_requests",
         "guest_registration_codes",
+        "label_printers",
     ];
     for table_name in required_tables {
         let exists: Option<i32> = sqlx::query_scalar(
@@ -700,22 +702,12 @@ async fn borrow_request_status_check_accepts_cancelled_and_nothing_else() {
     let laboratory_id = app.create_laboratory("Borrow Status Constraint Lab").await;
     let unit_id = app.unit_id("pcs").await;
     let asset_id = insert_test_asset(&app, laboratory_id, unit_id).await;
-    let inventory_item_id = insert_quantity_inventory_item(
-        &app,
-        asset_id,
-        laboratory_id,
-        Some("STATUS-CHECK"),
-    )
-    .await;
+    let inventory_item_id =
+        insert_quantity_inventory_item(&app, asset_id, laboratory_id, Some("STATUS-CHECK")).await;
 
     for status in ["pending", "approved", "rejected", "cancelled"] {
-        let result = insert_borrow_request_with_status(
-            &app,
-            laboratory_id,
-            inventory_item_id,
-            status,
-        )
-        .await;
+        let result =
+            insert_borrow_request_with_status(&app, laboratory_id, inventory_item_id, status).await;
         assert!(
             result.is_ok(),
             "the database refused the valid status {status}"
@@ -723,7 +715,8 @@ async fn borrow_request_status_check_accepts_cancelled_and_nothing_else() {
     }
 
     let result =
-        insert_borrow_request_with_status(&app, laboratory_id, inventory_item_id, "withdrawn").await;
+        insert_borrow_request_with_status(&app, laboratory_id, inventory_item_id, "withdrawn")
+            .await;
     assert!(result.is_err());
 }
 

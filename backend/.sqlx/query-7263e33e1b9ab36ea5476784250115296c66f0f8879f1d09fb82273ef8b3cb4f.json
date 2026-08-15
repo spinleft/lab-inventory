@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM asset_categories\n        WHERE laboratory_id = $1\n          AND path <@ $2::text::ltree\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7263e33e1b9ab36ea5476784250115296c66f0f8879f1d09fb82273ef8b3cb4f"
+}

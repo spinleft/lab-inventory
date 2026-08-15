@@ -1,0 +1,64 @@
+name: Bug 报告
+description: 报告一个问题
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈!
+
+        **安全漏洞请不要在这里提**,按 [SECURITY.md](https://github.com/spinleft/lab-inventory/blob/main/SECURITY.md) 私下报告。
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: "`docker compose exec backend lab-inventory-admin version` 的输出"
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: 部署方式
+      options:
+        - Docker Compose(一体化)
+        - Docker Compose(外部数据库)
+        - 二进制 / systemd
+        - 开发环境
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 出了什么问题
+      description: 期望是什么,实际是什么
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开 ...
+        2. 点击 ...
+        3. 看到 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      description: "`docker compose logs backend` 里相关的部分。**记得把密钥、口令、内部地址打码。**"
+      render: shell
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 其他信息
+      description: 浏览器、操作系统、截图等

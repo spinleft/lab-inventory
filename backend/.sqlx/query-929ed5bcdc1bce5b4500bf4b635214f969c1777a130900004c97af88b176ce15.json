@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH previous_user AS (\n            SELECT user_id, password_hash AS previous_password_hash\n            FROM users\n            WHERE user_id = $1\n            FOR UPDATE\n        ),\n        updated_user AS (\n            UPDATE users\n            SET password_hash = $2\n            FROM previous_user\n            WHERE users.user_id = previous_user.user_id\n            RETURNING users.user_id\n        )\n        SELECT\n            previous_user.user_id,\n            previous_user.previous_password_hash\n        FROM previous_user\n        INNER JOIN updated_user USING (user_id)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "previous_password_hash",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "929ed5bcdc1bce5b4500bf4b635214f969c1777a130900004c97af88b176ce15"
+}

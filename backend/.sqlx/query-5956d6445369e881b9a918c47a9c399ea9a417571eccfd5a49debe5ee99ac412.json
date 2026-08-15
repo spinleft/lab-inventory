@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT parameter_type_id\n        FROM asset_parameter_values\n        WHERE laboratory_id = $1\n          AND asset_id = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "parameter_type_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5956d6445369e881b9a918c47a9c399ea9a417571eccfd5a49debe5ee99ac412"
+}

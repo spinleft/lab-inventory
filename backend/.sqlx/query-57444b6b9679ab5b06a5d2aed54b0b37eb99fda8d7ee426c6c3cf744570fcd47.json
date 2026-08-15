@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE asset_inventory_items\n        SET status = 'borrowed',\n            updated_at = now()\n        WHERE inventory_item_id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "57444b6b9679ab5b06a5d2aed54b0b37eb99fda8d7ee426c6c3cf744570fcd47"
+}

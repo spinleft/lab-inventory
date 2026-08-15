@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO asset_inventory_items (\n            inventory_item_id,\n            asset_id,\n            laboratory_id,\n            tracking_mode,\n            serial_number,\n            batch_number,\n            quantity_on_hand,\n            quantity_allocated,\n            location_id,\n            status,\n            public_notes,\n            internal_notes\n        )\n        VALUES (\n            $1, $2, $3, $4, $5, $6,\n            $7::double precision::numeric,\n            $8::double precision::numeric,\n            $9, $10, $11, $12\n        )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Float8",
+        "Float8",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "56856c56c31b1cdd00e552a5591c7b16a52038015a113f42dc4291d3d04e22b2"
+}

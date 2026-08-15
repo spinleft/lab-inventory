@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO federation_request_nonces (remote_node_id, nonce, expires_at)\n        VALUES ($1, $2, now() + ($3::BIGINT * INTERVAL '1 second'))\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "92c6b262c25520e1f9f63d49a79cbb89f10e4e89c2bee4f804adb2de4cd74bcc"
+}

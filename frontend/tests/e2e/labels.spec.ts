@@ -74,6 +74,18 @@ const federationTrust = {
 
 /** Wires up the routes every test here needs, plus the configured API origin. */
 async function stubBackend(page: Page) {
+  // Registered first, because Playwright tries the most recently added route
+  // first: anything specific has to come after this catch-all to win against
+  // it. `*` stops at a path separator, so this only answers the one-segment
+  // collections the shell and the detail page fetch alongside the asset.
+  await page.route("**/api/v1/local/*", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({ json: [] });
+  });
+
   await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: currentUser }));
   await page.route("**/api/v1/instance-identity", (route) =>
     route.fulfill({
@@ -98,17 +110,11 @@ async function stubBackend(page: Page) {
       },
     }),
   );
-  await page.route(`**/api/v1/local/assets/${assetId}`, (route) =>
+  // A regex rather than a glob: the detail page asks for `?include=parameters`,
+  // and a glob would stop matching the moment a query string is appended.
+  await page.route(new RegExp(`/api/v1/local/assets/${assetId}(\\?|$)`), (route) =>
     route.fulfill({ json: asset }),
   );
-  // Collections the shell and detail page fetch alongside the asset.
-  await page.route("**/api/v1/local/*", async (route) => {
-    if (route.request().method() !== "GET") {
-      await route.fallback();
-      return;
-    }
-    await route.fulfill({ json: [] });
-  });
 
   await page.addInitScript((url) => {
     window.localStorage.setItem("labInventory.apiBaseUrl", url);
@@ -165,7 +171,11 @@ test("printing a label sends a packed bitmap to the chosen printer", async ({ pa
   await dialog.getByLabel("每项份数").fill("2");
   await dialog.getByRole("button", { name: /打印 2 张/ }).click();
 
-  await expect(page.getByText("已发送打印")).toBeVisible();
+  // Matched exactly: the toast's screen-reader announcement repeats the title
+  // inside a longer string, and a substring match would find both and trip
+  // strict mode — intermittently, since the announcer is filled in a moment
+  // after the toast itself.
+  await expect(page.getByText("已发送打印", { exact: true })).toBeVisible();
 
   expect(printRequest).toBeDefined();
   expect(printRequest?.copies).toBe(2);

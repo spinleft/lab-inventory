@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE assets\n        SET\n            category_id = $2,\n            tracking_mode = $3,\n            name = $4,\n            model = $5,\n            manufacturer = $6,\n            inventory_unit_id = $7,\n            public_notes = $8,\n            internal_notes = $9,\n            updated_at = now()\n        WHERE asset_id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6b9987e96180c629664c941d7c3c1138c94fd2074e11a8fc65610d05783979cb"
+}

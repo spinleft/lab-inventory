@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE asset_inventory_items\n        SET\n            serial_number = $2,\n            batch_number = $3,\n            quantity_on_hand = $4::double precision::numeric,\n            quantity_allocated = $5::double precision::numeric,\n            location_id = $6,\n            status = $7,\n            public_notes = $8,\n            internal_notes = $9,\n            updated_at = now()\n        WHERE inventory_item_id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Float8",
+        "Float8",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a9b111aedb3be528639ffcf35967e4b5764d4c452c2164f826831738523f1587"
+}

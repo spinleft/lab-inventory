@@ -1,0 +1,75 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO federation_laboratory_trusts (\n            trust_id,\n            local_laboratory_id,\n            remote_node_id,\n            remote_laboratory_id,\n            remote_laboratory_name,\n            created_by_user_id\n        )\n        VALUES ($1, $2, $3, $4, $5, $6)\n        ON CONFLICT (local_laboratory_id, remote_node_id, remote_laboratory_id)\n        DO UPDATE SET\n            remote_laboratory_name = EXCLUDED.remote_laboratory_name,\n            status = 'active',\n            revoked_at = NULL,\n            updated_at = now()\n        RETURNING\n            trust_id,\n            local_laboratory_id,\n            remote_node_id,\n            remote_laboratory_id,\n            remote_laboratory_name,\n            status,\n            created_at,\n            updated_at,\n            revoked_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "trust_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "local_laboratory_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "remote_node_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "remote_laboratory_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "remote_laboratory_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "revoked_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "e95df1186e0622a947300f58dd17682076665d52b196cb48147d9b790633adb3"
+}

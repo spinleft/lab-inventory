@@ -1,3 +1,5 @@
+import { apiFetch } from "./apiFetch";
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -33,7 +35,7 @@ export function createApiClient(apiBaseUrl: string) {
     } else {
       body = JSON.stringify(options.body);
     }
-    const response = await fetch(url, {
+    const response = await apiFetch(url, {
       body,
       credentials: "include",
       headers:
@@ -57,7 +59,7 @@ export function createApiClient(apiBaseUrl: string) {
     path: string,
     query?: RequestOptions["query"],
   ): Promise<BlobDownload> {
-    const response = await fetch(buildUrl(baseUrl, path, query), {
+    const response = await apiFetch(buildUrl(baseUrl, path, query), {
       credentials: "include",
       method: "GET",
     });

@@ -123,9 +123,7 @@ pub async fn print_labels(
     )
     .await?
     {
-        return Err(PrintLabelsError::NotFound(
-            "Label printer not found".into(),
-        ));
+        return Err(PrintLabelsError::NotFound("Label printer not found".into()));
     }
 
     let printer = fetch_label_printer(&pool, *printer_id)
@@ -190,9 +188,11 @@ fn decode_page(page: PageJsonData, limit: usize) -> Result<RequestedPage, PrintL
         ));
     }
 
-    let bitmap = STANDARD.decode(page.bitmap_base64.as_bytes()).map_err(|_| {
-        PrintLabelsError::ValidationError("Label bitmap is not valid base64.".into())
-    })?;
+    let bitmap = STANDARD
+        .decode(page.bitmap_base64.as_bytes())
+        .map_err(|_| {
+            PrintLabelsError::ValidationError("Label bitmap is not valid base64.".into())
+        })?;
 
     Ok(RequestedPage {
         width_dots: page.width_dots,

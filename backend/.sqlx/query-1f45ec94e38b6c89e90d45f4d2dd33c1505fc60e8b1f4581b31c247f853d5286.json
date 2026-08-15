@@ -1,0 +1,160 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            asset_parameter_values.value_id,\n            asset_parameter_values.laboratory_id,\n            asset_parameter_values.asset_id,\n            asset_parameter_values.parameter_type_id,\n            asset_parameter_types.code,\n            asset_parameter_types.name,\n            asset_parameter_values.data_type::text AS \"data_type!\",\n            asset_parameter_types.unit_dimension,\n            asset_parameter_types.default_unit_id,\n            asset_parameter_values.value_text,\n            asset_parameter_values.value_number,\n            asset_parameter_values.value_number_in_base,\n            asset_parameter_values.value_range_start,\n            asset_parameter_values.value_range_end,\n            asset_parameter_values.value_range_start_in_base,\n            asset_parameter_values.value_range_end_in_base,\n            asset_parameter_values.unit_id,\n            asset_parameter_values.value_boolean,\n            asset_parameter_values.value_date,\n            asset_parameter_values.value_option_id,\n            asset_parameter_options.code AS \"option_code?\",\n            asset_parameter_options.label AS \"option_label?\",\n            asset_parameter_values.created_at,\n            asset_parameter_values.updated_at\n        FROM asset_parameter_values\n        JOIN asset_parameter_types\n          ON asset_parameter_types.parameter_type_id = asset_parameter_values.parameter_type_id\n        LEFT JOIN asset_parameter_options\n          ON asset_parameter_options.option_id = asset_parameter_values.value_option_id\n        WHERE asset_parameter_values.asset_id = $1\n        ORDER BY asset_parameter_types.name, asset_parameter_types.code\n        FOR UPDATE OF asset_parameter_values\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "laboratory_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "asset_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "parameter_type_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "data_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "unit_dimension",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "default_unit_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "value_text",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "value_number",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 11,
+        "name": "value_number_in_base",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 12,
+        "name": "value_range_start",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 13,
+        "name": "value_range_end",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 14,
+        "name": "value_range_start_in_base",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 15,
+        "name": "value_range_end_in_base",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 16,
+        "name": "unit_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 17,
+        "name": "value_boolean",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 18,
+        "name": "value_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 19,
+        "name": "value_option_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 20,
+        "name": "option_code?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "option_label?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 22,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 23,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1f45ec94e38b6c89e90d45f4d2dd33c1505fc60e8b1f4581b31c247f853d5286"
+}

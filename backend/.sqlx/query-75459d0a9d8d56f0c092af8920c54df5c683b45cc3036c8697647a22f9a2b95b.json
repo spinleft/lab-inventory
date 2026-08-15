@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM asset_inventory_items\n        WHERE inventory_item_id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "75459d0a9d8d56f0c092af8920c54df5c683b45cc3036c8697647a22f9a2b95b"
+}

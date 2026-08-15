@@ -1,0 +1,54 @@
+name: 依赖安全审计
+
+on:
+  schedule:
+    # 每天 UTC 01:00。新披露的漏洞不会等到下次提交才出现。
+    - cron: "0 1 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "backend/Cargo.toml"
+      - "backend/Cargo.lock"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "deny.toml"
+      - ".github/workflows/audit.yml"
+  pull_request:
+    paths:
+      - "backend/Cargo.toml"
+      - "backend/Cargo.lock"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - "deny.toml"
+  workflow_dispatch:
+
+jobs:
+  cargo-deny:
+    name: Rust 依赖
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: backend/Cargo.toml
+          # licenses 和 bans 由 deny.toml 配置,单独列出是为了让失败原因
+          # 直接体现在任务名里。
+          command: check advisories licenses bans sources
+
+  npm-audit:
+    name: 前端依赖
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: npm audit
+        # 只对 high 及以上失败:构建期依赖里的低危告警拦不住,也不该拦。
+        run: npm audit --audit-level=high

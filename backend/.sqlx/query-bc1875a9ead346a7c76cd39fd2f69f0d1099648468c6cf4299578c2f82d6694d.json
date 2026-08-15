@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COALESCE(MAX(substring(serial_number from 2)::integer), 0) AS \"max_serial!\"\n        FROM asset_inventory_items\n        WHERE asset_id = $1\n          AND serial_number ~ '^#[0-9]+$'\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "max_serial!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "bc1875a9ead346a7c76cd39fd2f69f0d1099648468c6cf4299578c2f82d6694d"
+}

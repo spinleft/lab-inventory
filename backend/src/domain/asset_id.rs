@@ -38,8 +38,8 @@ impl From<AssetId> for Uuid {
     }
 }
 
-impl Into<AssetId> for Uuid {
-    fn into(self) -> AssetId {
-        AssetId(self)
+impl From<Uuid> for AssetId {
+    fn from(val: Uuid) -> Self {
+        AssetId(val)
     }
 }

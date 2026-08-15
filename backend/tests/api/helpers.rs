@@ -39,7 +39,6 @@ pub struct TestApp {
     pub db_pool: PgPool,
     pub test_user: TestUser,
     pub api_client: reqwest::Client,
-    pub local_node_id: Option<Uuid>,
     database_settings: DatabaseSettings,
 }
 
@@ -110,7 +109,6 @@ pub async fn spawn_app() -> TestApp {
         db_pool: get_connection_pool(&configuration.database),
         test_user: TestUser::generate_with_user_type("super_admin", None),
         api_client: client,
-        local_node_id: Some(Uuid::new_v4()),
         database_settings: configuration.database.clone(),
     };
 
@@ -169,6 +167,7 @@ pub async fn pair_laboratories(
 /// It reproduces `sign_canonical` rather than calling it — that function is
 /// private to the crate's federation module. Signing here over a *different*
 /// body than the one sent is how the body-tampering test is written.
+#[allow(clippy::too_many_arguments)]
 pub async fn sign_federation_request(
     sender: &TestApp,
     receiver: &TestApp,
@@ -250,7 +249,7 @@ pub async fn sign_federation_request(
 impl TestApp {
     pub async fn get_health_check(&self) -> reqwest::Response {
         self.api_client
-            .get(format!("{}/api/v1/health_check", &self.address))
+            .get(format!("{}/api/v1/health_check", self.address))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -261,7 +260,7 @@ impl TestApp {
         Body: serde::Serialize,
     {
         self.api_client
-            .post(format!("{}/api/v1/auth/login", &self.address))
+            .post(format!("{}/api/v1/auth/login", self.address))
             .json(body)
             .send()
             .await
@@ -270,7 +269,7 @@ impl TestApp {
 
     pub async fn post_logout(&self) -> reqwest::Response {
         self.api_client
-            .post(format!("{}/api/v1/auth/logout", &self.address))
+            .post(format!("{}/api/v1/auth/logout", self.address))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -281,7 +280,7 @@ impl TestApp {
         Body: serde::Serialize,
     {
         self.api_client
-            .patch(format!("{}/api/v1/auth/password", &self.address))
+            .patch(format!("{}/api/v1/auth/password", self.address))
             .json(body)
             .send()
             .await
@@ -292,7 +291,7 @@ impl TestApp {
         self.api_client
             .post(format!(
                 "{}/api/v1/local/guest-registration-codes",
-                &self.address
+                self.address
             ))
             .send()
             .await
@@ -304,7 +303,7 @@ impl TestApp {
         Body: serde::Serialize,
     {
         self.api_client
-            .post(format!("{}/api/v1/auth/guest-registration", &self.address))
+            .post(format!("{}/api/v1/auth/guest-registration", self.address))
             .json(body)
             .send()
             .await
@@ -313,7 +312,7 @@ impl TestApp {
 
     pub async fn get_me(&self) -> reqwest::Response {
         self.api_client
-            .get(format!("{}/api/v1/auth/me", &self.address))
+            .get(format!("{}/api/v1/auth/me", self.address))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -321,7 +320,7 @@ impl TestApp {
 
     pub async fn get_api_path(&self, path_and_query: &str) -> reqwest::Response {
         self.api_client
-            .get(format!("{}/api/v1{path_and_query}", &self.address))
+            .get(format!("{}/api/v1{path_and_query}", self.address))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -330,7 +329,7 @@ impl TestApp {
     async fn current_session_is_system_admin(&self) -> bool {
         let response = self
             .api_client
-            .get(format!("{}/api/v1/auth/me", &self.address))
+            .get(format!("{}/api/v1/auth/me", self.address))
             .send()
             .await
             .expect("Failed to inspect the current test session.");
@@ -408,7 +407,7 @@ impl TestApp {
         Body: serde::Serialize,
     {
         self.api_client
-            .post(format!("{}/api/v1/admin/laboratories", &self.address))
+            .post(format!("{}/api/v1/admin/laboratories", self.address))
             .json(body)
             .send()
             .await
@@ -417,7 +416,7 @@ impl TestApp {
 
     pub async fn get_laboratories(&self) -> reqwest::Response {
         self.api_client
-            .get(format!("{}/api/v1/admin/laboratories", &self.address))
+            .get(format!("{}/api/v1/admin/laboratories", self.address))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -426,7 +425,7 @@ impl TestApp {
     pub async fn get_laboratory(&self, laboratory_id: Uuid) -> reqwest::Response {
         let path = self.laboratory_api_path(laboratory_id, "").await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -442,7 +441,7 @@ impl TestApp {
     {
         let path = self.laboratory_api_path(laboratory_id, "").await;
         self.api_client
-            .patch(format!("{}{}", &self.address, path))
+            .patch(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -453,7 +452,7 @@ impl TestApp {
         self.api_client
             .delete(format!(
                 "{}/api/v1/admin/laboratories/{laboratory_id}",
-                &self.address
+                self.address
             ))
             .send()
             .await
@@ -464,7 +463,7 @@ impl TestApp {
         self.api_client
             .post(format!(
                 "{}/api/v1/local/federation/pairing-codes",
-                &self.address
+                self.address
             ))
             .send()
             .await
@@ -480,7 +479,7 @@ impl TestApp {
         Body: serde::Serialize,
     {
         self.api_client
-            .post(format!("{}/api/v1/local/federation/trusts", &self.address))
+            .post(format!("{}/api/v1/local/federation/trusts", self.address))
             .json(body)
             .send()
             .await
@@ -489,7 +488,7 @@ impl TestApp {
 
     pub async fn get_federation_trusts(&self, _laboratory_id: Uuid) -> reqwest::Response {
         self.api_client
-            .get(format!("{}/api/v1/local/federation/trusts", &self.address))
+            .get(format!("{}/api/v1/local/federation/trusts", self.address))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -499,7 +498,7 @@ impl TestApp {
         self.api_client
             .get(format!(
                 "{}/api/v1/local/federation/guest-links",
-                &self.address
+                self.address
             ))
             .send()
             .await
@@ -518,7 +517,7 @@ impl TestApp {
         self.api_client
             .post(format!(
                 "{}/api/v1/local/federation/guest-links/{link_id}/merge",
-                &self.address
+                self.address
             ))
             .json(body)
             .send()
@@ -534,7 +533,7 @@ impl TestApp {
         self.api_client
             .get(format!(
                 "{}/api/v1/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}/assets",
-                &self.address
+                self.address
             ))
             .send()
             .await
@@ -550,7 +549,7 @@ impl TestApp {
         self.api_client
             .get(format!(
                 "{}/api/v1/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}/attachments/{attachment_id}",
-                &self.address
+                self.address
             ))
             .send()
             .await
@@ -569,7 +568,7 @@ impl TestApp {
             .laboratory_api_path(laboratory_id, "asset-categories")
             .await;
         self.api_client
-            .post(format!("{}{}", &self.address, path))
+            .post(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -581,7 +580,7 @@ impl TestApp {
             .laboratory_api_path(laboratory_id, "asset-categories")
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -599,7 +598,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -615,7 +614,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -638,7 +637,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .patch(format!("{}{}", &self.address, path))
+            .patch(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -655,7 +654,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .delete(format!("{}{}", &self.address, path))
+            .delete(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -673,7 +672,7 @@ impl TestApp {
             .laboratory_api_path(laboratory_id, "asset-parameters")
             .await;
         self.api_client
-            .post(format!("{}{}", &self.address, path))
+            .post(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -685,7 +684,7 @@ impl TestApp {
             .laboratory_api_path(laboratory_id, "asset-parameters")
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -701,7 +700,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -724,7 +723,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .patch(format!("{}{}", &self.address, path))
+            .patch(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -741,7 +740,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .delete(format!("{}{}", &self.address, path))
+            .delete(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -753,7 +752,7 @@ impl TestApp {
     {
         let path = self.laboratory_api_path(laboratory_id, "assets").await;
         self.api_client
-            .post(format!("{}{}", &self.address, path))
+            .post(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -776,7 +775,7 @@ impl TestApp {
             .laboratory_api_path(laboratory_id, "file-uploads")
             .await;
         self.api_client
-            .post(format!("{}{}", &self.address, path))
+            .post(format!("{}{}", self.address, path))
             .multipart(form)
             .send()
             .await
@@ -793,7 +792,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .delete(format!("{}{}", &self.address, path))
+            .delete(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -816,7 +815,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .post(format!("{}{}", &self.address, path))
+            .post(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -840,7 +839,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .post(format!("{}{}", &self.address, path))
+            .post(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -857,7 +856,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -876,7 +875,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -885,7 +884,7 @@ impl TestApp {
     pub async fn get_laboratory_attachments(&self, laboratory_id: Uuid) -> reqwest::Response {
         let path = self.laboratory_api_path(laboratory_id, "attachments").await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -901,7 +900,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -924,7 +923,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .patch(format!("{}{}", &self.address, path))
+            .patch(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -941,7 +940,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .delete(format!("{}{}", &self.address, path))
+            .delete(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -957,7 +956,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -966,7 +965,7 @@ impl TestApp {
     pub async fn get_assets(&self, laboratory_id: Uuid) -> reqwest::Response {
         let path = self.laboratory_api_path(laboratory_id, "assets").await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -981,7 +980,7 @@ impl TestApp {
             .laboratory_api_path(laboratory_id, &format!("assets?{query}"))
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -997,7 +996,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1013,7 +1012,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1032,7 +1031,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .patch(format!("{}{}", &self.address, path))
+            .patch(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -1049,7 +1048,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .delete(format!("{}{}", &self.address, path))
+            .delete(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1068,7 +1067,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .post(format!("{}{}", &self.address, path))
+            .post(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -1080,7 +1079,7 @@ impl TestApp {
             .laboratory_api_path(laboratory_id, "inventory-items")
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1095,7 +1094,7 @@ impl TestApp {
             .laboratory_api_path(laboratory_id, &format!("inventory-items?{query}"))
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1111,7 +1110,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1128,7 +1127,7 @@ impl TestApp {
         self.api_client
             .post(format!(
                 "{}/api/v1/local/inventory-items/{inventory_item_id}/borrow-requests",
-                &self.address
+                self.address
             ))
             .json(body)
             .send()
@@ -1138,7 +1137,7 @@ impl TestApp {
 
     pub async fn get_borrow_requests(&self, _laboratory_id: Uuid) -> reqwest::Response {
         self.api_client
-            .get(format!("{}/api/v1/local/borrow-requests", &self.address))
+            .get(format!("{}/api/v1/local/borrow-requests", self.address))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1148,7 +1147,7 @@ impl TestApp {
         self.api_client
             .get(format!(
                 "{}/api/v1/local/borrow-requests/mine",
-                &self.address
+                self.address
             ))
             .send()
             .await
@@ -1159,7 +1158,7 @@ impl TestApp {
         self.api_client
             .post(format!(
                 "{}/api/v1/local/borrow-requests/{borrow_request_id}/cancel",
-                &self.address
+                self.address
             ))
             .send()
             .await
@@ -1179,7 +1178,7 @@ impl TestApp {
         self.api_client
             .post(format!(
                 "{}/api/v1/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}/inventory-items/{inventory_item_id}/borrow-requests",
-                &self.address
+                self.address
             ))
             .json(body)
             .send()
@@ -1195,7 +1194,7 @@ impl TestApp {
         self.api_client
             .get(format!(
                 "{}/api/v1/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}/borrow-requests",
-                &self.address
+                self.address
             ))
             .send()
             .await
@@ -1211,7 +1210,7 @@ impl TestApp {
         self.api_client
             .post(format!(
                 "{}/api/v1/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}/borrow-requests/{borrow_request_id}/cancel",
-                &self.address
+                self.address
             ))
             .send()
             .await
@@ -1230,7 +1229,7 @@ impl TestApp {
         self.api_client
             .patch(format!(
                 "{}/api/v1/local/borrow-requests/{borrow_request_id}",
-                &self.address
+                self.address
             ))
             .json(body)
             .send()
@@ -1255,7 +1254,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .patch(format!("{}{}", &self.address, path))
+            .patch(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -1274,7 +1273,7 @@ impl TestApp {
             .laboratory_api_path(laboratory_id, "inventory-items/batch")
             .await;
         self.api_client
-            .patch(format!("{}{}", &self.address, path))
+            .patch(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -1298,7 +1297,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .post(format!("{}{}", &self.address, path))
+            .post(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -1317,7 +1316,7 @@ impl TestApp {
             .laboratory_api_path(laboratory_id, "inventory-items/merge")
             .await;
         self.api_client
-            .post(format!("{}{}", &self.address, path))
+            .post(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -1334,7 +1333,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .delete(format!("{}{}", &self.address, path))
+            .delete(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1352,7 +1351,7 @@ impl TestApp {
             .laboratory_api_path(laboratory_id, "inventory-items/batch-delete")
             .await;
         self.api_client
-            .post(format!("{}{}", &self.address, path))
+            .post(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -1365,7 +1364,7 @@ impl TestApp {
     {
         let path = self.laboratory_api_path(laboratory_id, "units").await;
         self.api_client
-            .post(format!("{}{}", &self.address, path))
+            .post(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -1375,7 +1374,7 @@ impl TestApp {
     pub async fn get_units(&self, laboratory_id: Uuid) -> reqwest::Response {
         let path = self.laboratory_api_path(laboratory_id, "units").await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1386,7 +1385,7 @@ impl TestApp {
             .resource_api_path("units", "unit_id", unit_id, &format!("units/{unit_id}"))
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1400,7 +1399,7 @@ impl TestApp {
             .resource_api_path("units", "unit_id", unit_id, &format!("units/{unit_id}"))
             .await;
         self.api_client
-            .patch(format!("{}{}", &self.address, path))
+            .patch(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -1412,7 +1411,7 @@ impl TestApp {
             .resource_api_path("units", "unit_id", unit_id, &format!("units/{unit_id}"))
             .await;
         self.api_client
-            .delete(format!("{}{}", &self.address, path))
+            .delete(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1424,7 +1423,7 @@ impl TestApp {
     {
         let path = self.laboratory_api_path(laboratory_id, "locations").await;
         self.api_client
-            .post(format!("{}{}", &self.address, path))
+            .post(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -1434,7 +1433,7 @@ impl TestApp {
     pub async fn get_locations(&self, laboratory_id: Uuid) -> reqwest::Response {
         let path = self.laboratory_api_path(laboratory_id, "locations").await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1452,7 +1451,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1468,7 +1467,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1487,7 +1486,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .patch(format!("{}{}", &self.address, path))
+            .patch(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -1504,7 +1503,7 @@ impl TestApp {
             )
             .await;
         self.api_client
-            .delete(format!("{}{}", &self.address, path))
+            .delete(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1516,7 +1515,7 @@ impl TestApp {
     {
         let path = self.users_api_path("").await;
         self.api_client
-            .post(format!("{}{}", &self.address, path))
+            .post(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -1529,7 +1528,7 @@ impl TestApp {
     {
         let path = self.users_api_path(&user_id.to_string()).await;
         self.api_client
-            .patch(format!("{}{}", &self.address, path))
+            .patch(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -1539,7 +1538,7 @@ impl TestApp {
     pub async fn delete_user(&self, user_id: Uuid) -> reqwest::Response {
         let path = self.users_api_path(&user_id.to_string()).await;
         self.api_client
-            .delete(format!("{}{}", &self.address, path))
+            .delete(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1557,7 +1556,7 @@ impl TestApp {
             .laboratory_api_path(laboratory_id, "label-printers")
             .await;
         self.api_client
-            .post(format!("{}{}", &self.address, path))
+            .post(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -1569,7 +1568,7 @@ impl TestApp {
             .laboratory_api_path(laboratory_id, "label-printers")
             .await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1588,7 +1587,7 @@ impl TestApp {
     pub async fn get_label_printer(&self, printer_id: Uuid) -> reqwest::Response {
         let path = self.label_printer_path(printer_id, "").await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1604,7 +1603,7 @@ impl TestApp {
     {
         let path = self.label_printer_path(printer_id, "").await;
         self.api_client
-            .patch(format!("{}{}", &self.address, path))
+            .patch(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -1614,7 +1613,7 @@ impl TestApp {
     pub async fn delete_label_printer(&self, printer_id: Uuid) -> reqwest::Response {
         let path = self.label_printer_path(printer_id, "").await;
         self.api_client
-            .delete(format!("{}{}", &self.address, path))
+            .delete(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1623,7 +1622,7 @@ impl TestApp {
     pub async fn get_label_printer_status(&self, printer_id: Uuid) -> reqwest::Response {
         let path = self.label_printer_path(printer_id, "/status").await;
         self.api_client
-            .get(format!("{}{}", &self.address, path))
+            .get(format!("{}{}", self.address, path))
             .send()
             .await
             .expect("Failed to execute request.")
@@ -1639,7 +1638,7 @@ impl TestApp {
     {
         let path = self.label_printer_path(printer_id, "/print").await;
         self.api_client
-            .post(format!("{}{}", &self.address, path))
+            .post(format!("{}{}", self.address, path))
             .json(body)
             .send()
             .await
@@ -1648,7 +1647,7 @@ impl TestApp {
 
     pub async fn get_instance_identity(&self) -> reqwest::Response {
         self.api_client
-            .get(format!("{}/api/v1/instance-identity", &self.address))
+            .get(format!("{}/api/v1/instance-identity", self.address))
             .send()
             .await
             .expect("Failed to execute request.")

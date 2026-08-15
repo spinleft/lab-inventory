@@ -41,7 +41,9 @@ pub(crate) fn parse_borrow_target(method: &Method, tail: &str) -> Option<Federat
             Some(FederationBorrowTarget::ListMine)
         }
         (&Method::POST, Some("inventory-items"), Some(item_id), Some("borrow-requests")) => {
-            Uuid::parse_str(item_id).ok().map(FederationBorrowTarget::Create)
+            Uuid::parse_str(item_id)
+                .ok()
+                .map(FederationBorrowTarget::Create)
         }
         (&Method::POST, Some("borrow-requests"), Some(request_id), Some("cancel")) => {
             Uuid::parse_str(request_id)
@@ -141,13 +143,11 @@ async fn federated_actor(
     caller: &GuestLinkIdentity,
 ) -> Result<Actor, BorrowRequestError> {
     let user_id: UserId = caller.local_guest_user_id.into();
-    get_actor(pool, user_id)
-        .await?
-        .ok_or_else(|| {
-            BorrowRequestError::UnexpectedError(anyhow::anyhow!(
-                "Federation guest link points at a user that does not exist"
-            ))
-        })
+    get_actor(pool, user_id).await?.ok_or_else(|| {
+        BorrowRequestError::UnexpectedError(anyhow::anyhow!(
+            "Federation guest link points at a user that does not exist"
+        ))
+    })
 }
 
 /// The only filter this surface takes. It arrives unparsed because the tail
