@@ -2,7 +2,13 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover lets the shell paint under the notch and the gesture
+         bar; the layout pays it back with env(safe-area-inset-*) padding.
+         maximum-scale is deliberately absent: pinch-zoom stays available. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
     <meta name="color-scheme" content="light dark" />
     <title>Lab Inventory</title>
     <!-- Rewritten by the container at start-up; see public/config.js. -->

@@ -1,6 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
   ChevronDown,
@@ -16,15 +15,17 @@ import {
   X,
 } from "lucide-react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useLogout } from "../modules/auth/api";
 import { describeRole, describeScope } from "../modules/auth/permissions";
 import { federationTrustLabel } from "../modules/federation/api";
 import { laboratoryScopeKey, remoteLaboratoryScope } from "../modules/federation/scope";
+import { useIsMobile } from "../shared/lib/useIsMobile";
 import { useTheme, type ThemePreference } from "../shared/theme/ThemeProvider";
 import { Button } from "../shared/ui/Button";
 import { Select } from "../shared/ui/Select";
 import { useAuth } from "./auth-context";
 import { CommandMenu, useCommandMenuState } from "./CommandMenu";
+import { MobileShell } from "./MobileShell";
+import { useLogoutAction } from "./useLogoutAction";
 import {
   LaboratorySelectionProvider,
   useLaboratorySelection,
@@ -39,23 +40,22 @@ const groupLabels: Record<ModuleNavItem["group"], string> = {
 
 export function AppShell() {
   const location = useLocation();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const { currentUser } = useAuth();
-  const logout = useLogout();
+  const { isPending: isLogoutPending, logout: handleLogout } = useLogoutAction();
+  const isMobile = useIsMobile();
   const [commandOpen, setCommandOpen] = useCommandMenuState();
   const visibleNavItems = moduleNavItems.filter(
     (item) => !item.canAccess || item.canAccess(currentUser),
   );
   const currentRoute = findRoute(location.pathname);
 
-  function handleLogout() {
-    logout.mutate(undefined, {
-      onSettled: () => {
-        queryClient.clear();
-        navigate("/login", { replace: true });
-      },
-    });
+  if (isMobile) {
+    return (
+      <LaboratorySelectionProvider>
+        <MobileShell items={visibleNavItems} />
+        <CommandMenu open={commandOpen} onOpenChange={setCommandOpen} />
+      </LaboratorySelectionProvider>
+    );
   }
 
   return (
@@ -63,7 +63,7 @@ export function AppShell() {
       <div className="app-shell">
         <Sidebar
           items={visibleNavItems}
-          isLogoutPending={logout.isPending}
+          isLogoutPending={isLogoutPending}
           onCommandOpen={() => setCommandOpen(true)}
           onLogout={handleLogout}
         />
@@ -72,7 +72,7 @@ export function AppShell() {
             <div className="topbar-left">
               <MobileNavigation
                 items={visibleNavItems}
-                isLogoutPending={logout.isPending}
+                isLogoutPending={isLogoutPending}
                 onLogout={handleLogout}
               />
               <span className="breadcrumb">{currentRoute?.title ?? "工作台"}</span>

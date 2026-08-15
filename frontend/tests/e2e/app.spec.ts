@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { openNavItem, setTheme, signOut } from "./shell";
 
 const apiBaseUrl = "http://127.0.0.1:8000/api/v1";
 const currentUser = {
@@ -81,31 +82,16 @@ test("login, navigate, theme, audit, and logout", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "概览" })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
-  await page.getByRole("button", { name: "切换主题" }).click();
-  await page.getByText("深色").click();
+  await setTheme(page, "深色");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
-  await page.getByRole("link", { name: "审计日志" }).first().click();
+  await openNavItem(page, "审计日志");
   await expect(page.getByRole("heading", { name: "审计日志" })).toBeVisible();
   await expect(page.getByText("laboratory")).toBeVisible();
 
-  await openUserMenu(page);
-  await page.getByText("退出登录").click();
+  await signOut(page);
   await expect(page.getByRole("heading", { name: "登录" })).toBeVisible();
 });
-
-async function openUserMenu(page: Page) {
-  const userMenuButton = page.getByRole("button", { name: /用户菜单 root/ });
-  if (await userMenuButton.isVisible().catch(() => false)) {
-    await userMenuButton.click();
-    return;
-  }
-
-  const mobileNavigationButton = page.getByRole("button", { name: "打开导航" });
-  await mobileNavigationButton.click();
-  await expect(userMenuButton).toBeVisible();
-  await userMenuButton.click();
-}
 
 async function expectNoHorizontalOverflow(page: Page) {
   await expect

@@ -4,6 +4,7 @@ import { ServerSettingsPage } from "../modules/server-settings/ServerSettingsPag
 import { AppShell } from "./AppShell";
 import { RequireAuth, RootRoute } from "./AuthGate";
 import { moduleRoutes } from "./modules";
+import { MorePage } from "./MorePage";
 import { ProtectedModuleRoute } from "./ProtectedModuleRoute";
 
 export function App() {
@@ -19,6 +20,8 @@ export function App() {
           </RequireAuth>
         }
       >
+        {/* Shell furniture rather than a module: the phone tab bar's overflow. */}
+        <Route path="/more" element={<MorePage />} />
         {moduleRoutes.map((route) => (
           <Route
             key={route.id}
