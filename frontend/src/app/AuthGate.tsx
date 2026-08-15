@@ -1,6 +1,6 @@
 import { AlertCircle, Loader2, Server } from "lucide-react";
 import { type PropsWithChildren, type ReactNode } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useLocation } from "react-router-dom";
 import { useCurrentUser } from "../modules/auth/api";
 import { useBackendConfig } from "../shared/api/backendConfig";
 import { ApiError } from "../shared/api/httpClient";
@@ -10,6 +10,7 @@ import { AuthProvider } from "./auth-context";
 export function RequireAuth({ children }: PropsWithChildren) {
   const { hasConfiguredApiBaseUrl } = useBackendConfig();
   const currentUser = useCurrentUser({ enabled: hasConfiguredApiBaseUrl });
+  const location = useLocation();
 
   if (!hasConfiguredApiBaseUrl) {
     return <Navigate to="/server-settings" replace />;
@@ -26,7 +27,10 @@ export function RequireAuth({ children }: PropsWithChildren) {
   }
 
   if (currentUser.error instanceof ApiError && currentUser.error.status === 401) {
-    return <Navigate to="/login" replace />;
+    // Carry the intended destination through the login round trip. A scanned
+    // label lands on /scan?... with the code in the query string, and dropping
+    // it here would make every scan by a logged-out user a dead end.
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   if (currentUser.isError || !currentUser.data) {

@@ -84,6 +84,9 @@ pub async fn spawn_app() -> TestApp {
             .join(format!("lab-inventory-test-{}", Uuid::new_v4()))
             .to_string_lossy()
             .to_string();
+        // Label printer tests stand a fake printer up on loopback, which the
+        // address guard refuses by default.
+        c.label_printing.allow_loopback = true;
         c
     };
 
@@ -1537,6 +1540,115 @@ impl TestApp {
         let path = self.users_api_path(&user_id.to_string()).await;
         self.api_client
             .delete(format!("{}{}", &self.address, path))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn post_label_printer<Body>(
+        &self,
+        laboratory_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        let path = self
+            .laboratory_api_path(laboratory_id, "label-printers")
+            .await;
+        self.api_client
+            .post(format!("{}{}", &self.address, path))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_label_printers(&self, laboratory_id: Uuid) -> reqwest::Response {
+        let path = self
+            .laboratory_api_path(laboratory_id, "label-printers")
+            .await;
+        self.api_client
+            .get(format!("{}{}", &self.address, path))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    async fn label_printer_path(&self, printer_id: Uuid, tail: &str) -> String {
+        self.resource_api_path(
+            "label_printers",
+            "printer_id",
+            printer_id,
+            &format!("label-printers/{printer_id}{tail}"),
+        )
+        .await
+    }
+
+    pub async fn get_label_printer(&self, printer_id: Uuid) -> reqwest::Response {
+        let path = self.label_printer_path(printer_id, "").await;
+        self.api_client
+            .get(format!("{}{}", &self.address, path))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn patch_label_printer<Body>(
+        &self,
+        printer_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        let path = self.label_printer_path(printer_id, "").await;
+        self.api_client
+            .patch(format!("{}{}", &self.address, path))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn delete_label_printer(&self, printer_id: Uuid) -> reqwest::Response {
+        let path = self.label_printer_path(printer_id, "").await;
+        self.api_client
+            .delete(format!("{}{}", &self.address, path))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_label_printer_status(&self, printer_id: Uuid) -> reqwest::Response {
+        let path = self.label_printer_path(printer_id, "/status").await;
+        self.api_client
+            .get(format!("{}{}", &self.address, path))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn post_label_printer_print<Body>(
+        &self,
+        printer_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        let path = self.label_printer_path(printer_id, "/print").await;
+        self.api_client
+            .post(format!("{}{}", &self.address, path))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_instance_identity(&self) -> reqwest::Response {
+        self.api_client
+            .get(format!("{}/api/v1/instance-identity", &self.address))
             .send()
             .await
             .expect("Failed to execute request.")

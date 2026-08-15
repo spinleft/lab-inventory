@@ -45,7 +45,14 @@ sqlx = { version = "0.8", default-features = false, features = [
     "json",
 ] }
 thiserror = "2"
-tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread"] }
+tokio = { version = "1", features = [
+    "fs",
+    "io-util",
+    "macros",
+    "net",
+    "rt-multi-thread",
+    "time",
+] }
 tracing = "0.1"
 tracing-actix-web = "0.7"
 tracing-bunyan-formatter = "0.3"

@@ -2,29 +2,34 @@ use crate::authentication::{
     GuestRegistrationHasher, GuestRegistrationRateLimiter, reject_anonymous_users,
     reject_non_laboratory_users, reject_non_system_admins,
 };
-use crate::configuration::{ApplicationSettings, DatabaseSettings, FederationSettings, Settings};
+use crate::configuration::{
+    ApplicationSettings, DatabaseSettings, FederationSettings, LabelPrintingSettings, PublicWebUrl,
+    Settings,
+};
 use crate::file_storage::FileStorage;
 use crate::routes::{
     accept_pairing, assign_asset_attachment, assign_inventory_item_attachment,
     batch_delete_inventory_items, batch_update_inventory_items, cancel_borrow_request,
     change_password, create_asset, create_asset_category, create_asset_parameter,
     create_borrow_request,
-    create_guest_registration_code, create_inventory_items, create_laboratory, create_location,
-    create_pairing_code, create_trust, create_unit, create_user, delete_asset,
+    create_guest_registration_code, create_inventory_items, create_label_printer, create_laboratory,
+    create_location, create_pairing_code, create_trust, create_unit, create_user, delete_asset,
     delete_asset_category, delete_asset_parameter, delete_attachment, delete_file_upload,
-    delete_inventory_item, delete_laboratory, delete_location, delete_unit, delete_user,
-    download_attachment, enforce_guest_registration_rate_limit, get_asset, get_asset_category,
-    get_asset_parameter, get_attachment, get_inventory_item, get_laboratory, get_location,
+    delete_inventory_item, delete_label_printer, delete_laboratory, delete_location, delete_unit,
+    delete_user, download_attachment, enforce_guest_registration_rate_limit, get_asset,
+    get_asset_category, get_asset_parameter, get_attachment, get_inventory_item,
+    get_instance_identity, get_label_printer, get_label_printer_status, get_laboratory, get_location,
     get_unit, get_user, health_check, inbound_get, inbound_post, initialize_local_node,
     list_asset_attachments,
     list_asset_categories, list_asset_parameters, list_assets, list_audit_logs,
     list_borrow_requests, list_guest_links, list_inventory_item_attachments, list_inventory_items,
-    list_laboratories, list_laboratory_attachments, list_locations, list_my_borrow_requests,
+    list_label_printers, list_laboratories, list_laboratory_attachments, list_locations,
+    list_my_borrow_requests,
     list_trusts, list_units, list_users, login, logout, me, merge_guest_link, merge_inventory_items,
-    proxy_get, proxy_post,
+    print_labels, proxy_get, proxy_post,
     register_guest, resolve_borrow_request, revoke_trust, split_inventory_item, update_asset,
     update_asset_category, update_asset_parameter, update_attachment, update_inventory_item,
-    update_laboratory, update_location, update_unit, update_user, upload_file,
+    update_label_printer, update_laboratory, update_location, update_unit, update_user, upload_file,
 };
 use actix_cors::Cors;
 use actix_session::SessionMiddleware;
@@ -52,6 +57,7 @@ impl Application {
     pub async fn build(configuration: Settings) -> Result<Self, anyhow::Error> {
         let connection_pool = get_connection_pool(&configuration.database);
         let rate_limit_namespace = configuration.database.database_name.clone();
+        let public_web_url = configuration.public_web_url();
 
         let address = format!(
             "{}:{}",
@@ -65,6 +71,8 @@ impl Application {
             configuration.application,
             configuration.file_storage,
             configuration.federation,
+            configuration.label_printing,
+            public_web_url,
             configuration.redis_uri,
             rate_limit_namespace,
         )
@@ -92,6 +100,8 @@ async fn run(
     application: ApplicationSettings,
     file_storage: crate::configuration::FileStorageSettings,
     federation: FederationSettings,
+    label_printing: LabelPrintingSettings,
+    public_web_url: PublicWebUrl,
     redis_uri: Secret<String>,
     rate_limit_namespace: String,
 ) -> Result<Server, anyhow::Error> {
@@ -99,6 +109,8 @@ async fn run(
     let db_pool = Data::new(db_pool);
     let file_storage = Data::new(FileStorage::new(file_storage)?);
     let federation = Data::new(federation);
+    let label_printing = Data::new(label_printing);
+    let public_web_url = Data::new(public_web_url);
     let federation_client = Data::new(reqwest::Client::builder().tls_info(true).build()?);
     let registration_hasher = GuestRegistrationHasher::new(application.hmac_secret.clone());
     let registration_rate_limiter = GuestRegistrationRateLimiter::new(
@@ -116,6 +128,8 @@ async fn run(
         file_storage,
         federation,
         federation_client,
+        label_printing,
+        public_web_url,
         Data::new(registration_hasher),
         Data::new(registration_rate_limiter),
         secret_key,
@@ -133,6 +147,8 @@ fn build_server(
     file_storage: Data<FileStorage>,
     federation: Data<FederationSettings>,
     federation_client: Data<reqwest::Client>,
+    label_printing: Data<LabelPrintingSettings>,
+    public_web_url: Data<PublicWebUrl>,
     registration_hasher: Data<GuestRegistrationHasher>,
     registration_rate_limiter: Data<GuestRegistrationRateLimiter>,
     secret_key: Key,
@@ -154,6 +170,8 @@ fn build_server(
             .app_data(file_storage.clone())
             .app_data(federation.clone())
             .app_data(federation_client.clone())
+            .app_data(label_printing.clone())
+            .app_data(public_web_url.clone())
             .app_data(registration_hasher.clone())
             .app_data(registration_rate_limiter.clone())
     })
@@ -233,6 +251,9 @@ fn protected_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/auth/me", web::get().to(me))
         .route("/auth/password", web::patch().to(change_password))
         .route("/audit-logs", web::get().to(list_audit_logs))
+        // Not under /local: system admins browse assets too, and that scope
+        // rejects them.
+        .route("/instance-identity", web::get().to(get_instance_identity))
         .route(
             "/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}",
             web::get().to(proxy_get),
@@ -364,6 +385,28 @@ fn laboratory_resource_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/assets/{asset_id}/inventory-items",
             web::post().to(create_inventory_items),
+        )
+        .route("/label-printers", web::get().to(list_label_printers))
+        .route("/label-printers", web::post().to(create_label_printer))
+        .route(
+            "/label-printers/{printer_id}",
+            web::get().to(get_label_printer),
+        )
+        .route(
+            "/label-printers/{printer_id}",
+            web::patch().to(update_label_printer),
+        )
+        .route(
+            "/label-printers/{printer_id}",
+            web::delete().to(delete_label_printer),
+        )
+        .route(
+            "/label-printers/{printer_id}/status",
+            web::get().to(get_label_printer_status),
+        )
+        .route(
+            "/label-printers/{printer_id}/print",
+            web::post().to(print_labels),
         )
         .route("/inventory-items", web::get().to(list_inventory_items))
         .route(

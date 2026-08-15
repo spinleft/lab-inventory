@@ -1,6 +1,6 @@
 use crate::domain::{
     AssetCategoryId, AssetId, AssetParameterId, AttachmentId, BorrowRequestId, FileUploadId,
-    InventoryItemId, LaboratoryId, LocationId, UnitId, UserId, UserRole, UserType,
+    InventoryItemId, LabelPrinterId, LaboratoryId, LocationId, UnitId, UserId, UserRole, UserType,
 };
 use actix_web::dev::Payload;
 use actix_web::error::InternalError;
@@ -154,6 +154,7 @@ route_uuid!(AttachmentId, "attachment_id");
 route_uuid!(BorrowRequestId, "borrow_request_id");
 route_uuid!(FileUploadId, "upload_id");
 route_uuid!(InventoryItemId, "inventory_item_id");
+route_uuid!(LabelPrinterId, "printer_id");
 route_uuid!(LocationId, "location_id");
 route_uuid!(UnitId, "unit_id");
 
@@ -170,6 +171,7 @@ pub enum ResourceType {
     AttachmentAssignment,
     FileUpload,
     Federation,
+    LabelPrinter,
 }
 
 pub enum Action<'a> {
@@ -825,6 +827,65 @@ impl Actor {
     pub fn can_read_federation(&self, laboratory_id: LaboratoryId) -> bool {
         (self.is_lab_admin() || self.is_regular_user()) && self.laboratory_id == Some(laboratory_id)
     }
+
+    /// A registered printer is laboratory equipment configuration — and its
+    /// host is an address this server will connect to — so only the
+    /// laboratory's administrator may register or change one.
+    pub fn can_manage_label_printers(&self, laboratory_id: LaboratoryId) -> bool {
+        self.is_system_admin()
+            || (self.is_lab_admin() && self.laboratory_id == Some(laboratory_id))
+    }
+
+    /// Anyone who works in the laboratory may print a label; guests may not.
+    pub fn can_use_label_printers(&self, laboratory_id: LaboratoryId) -> bool {
+        self.can_browse_laboratory_internal_resource(laboratory_id)
+    }
+
+    pub async fn can_manage_label_printer(
+        &self,
+        pool: &PgPool,
+        printer_id: LabelPrinterId,
+    ) -> Result<bool, anyhow::Error> {
+        Ok(fetch_label_printer_laboratory(pool, printer_id)
+            .await?
+            .map(|laboratory_id| self.can_manage_label_printers(laboratory_id))
+            .unwrap_or(false))
+    }
+
+    pub async fn can_use_label_printer(
+        &self,
+        pool: &PgPool,
+        printer_id: LabelPrinterId,
+    ) -> Result<bool, anyhow::Error> {
+        Ok(fetch_label_printer_laboratory(pool, printer_id)
+            .await?
+            .map(|laboratory_id| self.can_use_label_printers(laboratory_id))
+            .unwrap_or(false))
+    }
+}
+
+async fn fetch_label_printer_laboratory(
+    pool: &PgPool,
+    printer_id: LabelPrinterId,
+) -> Result<Option<LaboratoryId>, anyhow::Error> {
+    #[derive(sqlx::FromRow)]
+    struct PrinterLaboratory {
+        laboratory_id: LaboratoryId,
+    }
+
+    Ok(sqlx::query_as!(
+        PrinterLaboratory,
+        r#"
+        SELECT laboratory_id
+        FROM label_printers
+        WHERE printer_id = $1
+        "#,
+        Uuid::from(printer_id),
+    )
+    .fetch_optional(pool)
+    .await
+    .context("Failed to fetch label printer")?
+    .map(|printer| printer.laboratory_id))
 }
 
 pub async fn get_actor(pool: &PgPool, user_id: UserId) -> Result<Option<Actor>, anyhow::Error> {
@@ -907,6 +968,22 @@ pub async fn validate_permission(
                 Ok(actor.can_browse_laboratory_resource(laboratory_id.into()))
             }
             Action::Update(unit_id) => Ok(actor.can_manage_unit(pool, unit_id.into()).await?),
+            _ => Ok(false),
+        },
+        // Registering a printer writes an address this server will dial, so it
+        // is administrator-only; printing to an already-registered one is
+        // ordinary laboratory work.
+        ResourceType::LabelPrinter => match action {
+            Action::Create(laboratory_id) => {
+                Ok(actor.can_manage_label_printers(laboratory_id.into()))
+            }
+            Action::Update(printer_id) | Action::Delete(printer_id) => Ok(actor
+                .can_manage_label_printer(pool, printer_id.into())
+                .await?),
+            Action::Browse(laboratory_id) => Ok(actor.can_use_label_printers(laboratory_id.into())),
+            Action::Read(printer_id) => {
+                Ok(actor.can_use_label_printer(pool, printer_id.into()).await?)
+            }
             _ => Ok(false),
         },
         ResourceType::Location => match action {

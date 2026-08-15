@@ -1,5 +1,5 @@
 import { http, HttpResponse } from "msw";
-import { testLaboratories } from "./fixtures";
+import { LOCAL_NODE_ID, LOCAL_WEB_ORIGIN, testLaboratories } from "./fixtures";
 
 /**
  * Collections the backend returns inside a pagination envelope. Everything else
@@ -94,5 +94,10 @@ export const handlers = [
 
   http.get("*/api/v1/audit-logs", () =>
     HttpResponse.json({ items: [], limit: 20, offset: 0, total: 0 }),
+  ),
+
+  // What QR payloads are built from and resolved against.
+  http.get("*/api/v1/instance-identity", () =>
+    HttpResponse.json({ node_id: LOCAL_NODE_ID, public_web_url: LOCAL_WEB_ORIGIN }),
   ),
 ];

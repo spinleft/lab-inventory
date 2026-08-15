@@ -10,6 +10,7 @@ mod guests;
 mod health_check;
 mod helpers;
 mod inventory_items;
+mod label_printers;
 mod laboratories;
 mod locations;
 mod migrations;

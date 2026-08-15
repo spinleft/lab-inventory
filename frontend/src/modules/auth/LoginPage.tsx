@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Server } from "lucide-react";
 import { type FormEvent, useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useBackendConfig } from "../../shared/api/backendConfig";
 import { Button } from "../../shared/ui/Button";
 import { FormField } from "../../shared/ui/FormField";
@@ -14,17 +14,27 @@ export function LoginPage() {
   const currentUser = useCurrentUser({ enabled: hasConfiguredApiBaseUrl });
   const login = useLogin();
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const toast = useToast();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+
+  // Where RequireAuth bounced the user from, so a scanned label survives the
+  // login it triggered. Only in-app paths are honoured.
+  const from = (location.state as { from?: { pathname?: string; search?: string } } | null)
+    ?.from;
+  const destination =
+    from?.pathname && from.pathname.startsWith("/")
+      ? `${from.pathname}${from.search ?? ""}`
+      : "/dashboard";
 
   if (!hasConfiguredApiBaseUrl) {
     return <Navigate to="/server-settings" replace />;
   }
 
   if (currentUser.data) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={destination} replace />;
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -37,7 +47,7 @@ export function LoginPage() {
         },
         onSuccess: async () => {
           await queryClient.invalidateQueries({ queryKey: authQueryKeys.me(apiBaseUrl) });
-          navigate("/dashboard", { replace: true });
+          navigate(destination, { replace: true });
         },
       },
     );

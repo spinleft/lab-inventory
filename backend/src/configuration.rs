@@ -9,6 +9,8 @@ pub struct Settings {
     pub application: ApplicationSettings,
     pub file_storage: FileStorageSettings,
     pub federation: FederationSettings,
+    #[serde(default)]
+    pub label_printing: LabelPrintingSettings,
     pub redis_uri: Secret<String>,
 }
 
@@ -18,10 +20,45 @@ pub struct ApplicationSettings {
     pub port: u16,
     pub host: String,
     pub base_url: String,
+    /// Origin the browser app is served from.
+    ///
+    /// This is what QR codes point at, so it has to be the SPA's origin rather
+    /// than the API's. When unset it falls back to the federation public base
+    /// URL, which is correct for deployments that serve both from one host.
+    #[serde(default)]
+    pub public_web_url: Option<String>,
     pub hmac_secret: Secret<String>,
     pub cookie_secure: bool,
     pub enable_federation: bool,
     pub cors_allowed_origins: Vec<String>,
+}
+
+#[derive(serde::Deserialize, Clone, Default)]
+pub struct LabelPrintingSettings {
+    /// Whether a printer may be registered on a loopback address.
+    ///
+    /// Off in production, where loopback would let a printer registration point
+    /// back at this server. Tests and local development turn it on so a fake
+    /// printer can listen on 127.0.0.1.
+    #[serde(default)]
+    pub allow_loopback: bool,
+}
+
+/// The resolved origin QR codes link to, worked out once at startup.
+#[derive(Clone, Debug)]
+pub struct PublicWebUrl(pub String);
+
+impl Settings {
+    /// The SPA origin, falling back to the federation public base URL.
+    pub fn public_web_url(&self) -> PublicWebUrl {
+        let url = self
+            .application
+            .public_web_url
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(&self.federation.public_base_url);
+        PublicWebUrl(url.trim_end_matches('/').to_string())
+    }
 }
 
 #[derive(serde::Deserialize, Clone)]

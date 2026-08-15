@@ -91,6 +91,24 @@ export function canManageFederation(user: CurrentUser) {
   return isLabAdmin(user) && Boolean(user.laboratory);
 }
 
+/**
+ * Registering a printer writes an address the server will dial, so it is
+ * restricted the same way federation configuration is.
+ */
+export function canManageLabelPrinters(user: CurrentUser) {
+  return isRoot(user) || isSuperAdmin(user) || (isLabAdmin(user) && Boolean(user.laboratory));
+}
+
+/** Anyone who works in a laboratory may print a label; guests may not. */
+export function canPrintLabels(user: CurrentUser) {
+  const typeName = getUserTypeName(user);
+  return (
+    isRoot(user) ||
+    isSuperAdmin(user) ||
+    ((typeName === "lab_admin" || typeName === "user") && Boolean(user.laboratory))
+  );
+}
+
 export function canAccessBorrowRequests(user: CurrentUser) {
   return (isLabAdmin(user) || getUserTypeName(user) === "user") && Boolean(user.laboratory);
 }

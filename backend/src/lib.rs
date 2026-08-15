@@ -5,6 +5,7 @@ pub mod configuration;
 pub mod domain;
 pub mod file_storage;
 pub mod idempotency;
+pub mod label_printing;
 pub mod routes;
 pub mod session_state;
 pub mod startup;

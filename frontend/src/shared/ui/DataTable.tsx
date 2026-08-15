@@ -16,6 +16,12 @@ type DataTableProps<T> = {
   items: T[];
   loading?: boolean;
   onRowClick?: (item: T) => void;
+  /** Called with the full next selection whenever a checkbox changes. */
+  onSelectionChange?: (keys: string[]) => void;
+  /** Adds a leading checkbox column. Requires `onSelectionChange`. */
+  selectable?: boolean;
+  /** Row keys currently selected. */
+  selectedKeys?: string[];
 };
 
 export function DataTable<T>({
@@ -26,7 +32,37 @@ export function DataTable<T>({
   items,
   loading = false,
   onRowClick,
+  onSelectionChange,
+  selectable = false,
+  selectedKeys,
 }: DataTableProps<T>) {
+  const selection = new Set(selectedKeys ?? []);
+  const pageKeys = items.map(getRowKey);
+  const allSelected = pageKeys.length > 0 && pageKeys.every((key) => selection.has(key));
+  const someSelected = pageKeys.some((key) => selection.has(key));
+
+  function toggleRow(key: string, checked: boolean) {
+    const next = new Set(selection);
+    if (checked) {
+      next.add(key);
+    } else {
+      next.delete(key);
+    }
+    onSelectionChange?.([...next]);
+  }
+
+  function toggleAll(checked: boolean) {
+    const next = new Set(selection);
+    for (const key of pageKeys) {
+      if (checked) {
+        next.add(key);
+      } else {
+        next.delete(key);
+      }
+    }
+    onSelectionChange?.([...next]);
+  }
+
   if (loading) {
     return (
       <div className="panel-body">
@@ -44,6 +80,21 @@ export function DataTable<T>({
       <table className="data-table">
         <thead>
           <tr>
+            {selectable ? (
+              <th className="data-table-select">
+                <input
+                  aria-label="全选本页"
+                  checked={allSelected}
+                  ref={(node) => {
+                    if (node) {
+                      node.indeterminate = someSelected && !allSelected;
+                    }
+                  }}
+                  type="checkbox"
+                  onChange={(event) => toggleAll(event.target.checked)}
+                />
+              </th>
+            ) : null}
             {columns.map((column) => (
               <th
                 key={column.key}
@@ -69,6 +120,21 @@ export function DataTable<T>({
                   : undefined
               }
             >
+              {selectable ? (
+                // Clicking a row navigates, so the checkbox has to keep its
+                // click to itself.
+                <td
+                  className="data-table-select"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <input
+                    aria-label="选择此行"
+                    checked={selection.has(getRowKey(item))}
+                    type="checkbox"
+                    onChange={(event) => toggleRow(getRowKey(item), event.target.checked)}
+                  />
+                </td>
+              ) : null}
               {columns.map((column) => (
                 <td
                   key={column.key}

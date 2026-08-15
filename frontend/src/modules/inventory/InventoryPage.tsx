@@ -11,6 +11,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  QrCode,
   RotateCcw,
   Search,
   Settings2,
@@ -82,7 +83,13 @@ import {
   useInventoryItems,
   useUpdateInventoryItem,
 } from "./api";
-import { canRequestBorrow, canRequestRemoteBorrow, isSystemAdmin } from "../auth/permissions";
+import {
+  canPrintLabels,
+  canRequestBorrow,
+  canRequestRemoteBorrow,
+  isSystemAdmin,
+} from "../auth/permissions";
+import { PrintLabelDialog } from "../labels/PrintLabelDialog";
 import {
   categoryLabel,
   formatNumber,
@@ -229,6 +236,9 @@ export function InventoryPage() {
       : canRequestBorrow(currentUser) &&
         (currentUser.user_type.name === "guest" ||
           selectedLaboratoryId !== currentUser.laboratory?.laboratory_id);
+  // Labels belong to the laboratory that owns the item, so selection is not
+  // offered while browsing a federated one.
+  const canPrint = canPrintLabels(currentUser) && selectedDataScope.kind === "local";
   const categoryFromUrl = searchParams.get("category_id") ?? "";
   const exactCategoryFromUrl = searchParams.get("exact_category") === "true";
   const locationFromUrl = searchParams.get("location_id") ?? "";
@@ -252,6 +262,10 @@ export function InventoryPage() {
   );
   const [editor, setEditor] = useState<InventoryEditorState>(null);
   const [deletingItem, setDeletingItem] = useState<InventoryItem | null>(null);
+  // Selected items rather than ids: a selection can span pages, and the ones
+  // scrolled past still need their serial number to build a label.
+  const [selectedItems, setSelectedItems] = useState<InventoryItem[]>([]);
+  const [printing, setPrinting] = useState(false);
   const [borrowItem, setBorrowItem] = useState<InventoryItem | null>(null);
   const [borrowNote, setBorrowNote] = useState("");
 
@@ -305,6 +319,9 @@ export function InventoryPage() {
 
   useEffect(() => {
     setOffset(0);
+    // A selection carried across laboratories would print labels for items the
+    // user is no longer looking at.
+    setSelectedItems([]);
   }, [selectedDataScope]);
 
   useEffect(() => {
@@ -410,6 +427,23 @@ export function InventoryPage() {
       ),
     [assetDetailsById, categoryById, locationById, response?.items, sort, unitsById],
   );
+  const selectedItemIds = useMemo(
+    () => selectedItems.map((item) => item.inventory_item_id),
+    [selectedItems],
+  );
+
+  function handleSelectionChange(ids: string[]) {
+    const known = new Map(selectedItems.map((item) => [item.inventory_item_id, item]));
+    for (const item of visibleItems) {
+      known.set(item.inventory_item_id, item);
+    }
+    setSelectedItems(
+      ids
+        .map((id) => known.get(id))
+        .filter((item): item is InventoryItem => Boolean(item)),
+    );
+  }
+
   const locationBreadcrumbs = useMemo(
     () => buildLocationBreadcrumbs(filters.location_id, locations),
     [filters.location_id, locations],
@@ -545,14 +579,22 @@ export function InventoryPage() {
   }
 
   const pageActions = (
-    <Button
-      disabled={!canManage || !selectedLaboratoryId}
-      onClick={() => setEditor({ mode: "create" })}
-      variant="primary"
-    >
-      <Plus size={15} />
-      添加库存
-    </Button>
+    <>
+      {canPrint && selectedItems.length > 0 ? (
+        <Button onClick={() => setPrinting(true)}>
+          <QrCode size={15} />
+          打印 {selectedItems.length} 张标签
+        </Button>
+      ) : null}
+      <Button
+        disabled={!canManage || !selectedLaboratoryId}
+        onClick={() => setEditor({ mode: "create" })}
+        variant="primary"
+      >
+        <Plus size={15} />
+        添加库存
+      </Button>
+    </>
   );
 
   return (
@@ -671,11 +713,14 @@ export function InventoryPage() {
             unitsQuery.isLoading ||
             assetDetailsLoading
           }
+          selectable={canPrint}
+          selectedIds={selectedItemIds}
           sort={sort}
           onDelete={setDeletingItem}
           onEdit={(item) => setEditor({ item, mode: "edit" })}
           onBorrow={setBorrowItem}
           onRowClick={(item) => navigate(`/inventory/${item.inventory_item_id}`)}
+          onSelectionChange={handleSelectionChange}
           onSort={handleSort}
         />
       </section>
@@ -722,6 +767,20 @@ export function InventoryPage() {
         }}
         onConfirm={submitBorrowRequest}
       />
+      {printing ? (
+        <PrintLabelDialog
+          laboratoryId={selectedLaboratoryId}
+          open={printing}
+          subjects={selectedItems.map((item) => ({
+            code: item.serial_number ?? item.batch_number,
+            resourceId: item.inventory_item_id,
+            subtitle: item.asset.model ?? item.asset.name,
+            title: item.asset.name,
+            type: "item" as const,
+          }))}
+          onOpenChange={setPrinting}
+        />
+      ) : null}
     </main>
   );
 }
@@ -1280,7 +1339,10 @@ function InventoryTable({
   onDelete,
   onEdit,
   onRowClick,
+  onSelectionChange,
   onSort,
+  selectable,
+  selectedIds,
   sort,
 }: {
   canBorrow: boolean;
@@ -1292,9 +1354,39 @@ function InventoryTable({
   onDelete: (item: InventoryItem) => void;
   onEdit: (item: InventoryItem) => void;
   onRowClick: (item: InventoryItem) => void;
+  onSelectionChange: (ids: string[]) => void;
   onSort: (key: string) => void;
+  selectable: boolean;
+  selectedIds: string[];
   sort: SortState;
 }) {
+  const selection = new Set(selectedIds);
+  const pageIds = items.map((item) => item.inventory_item_id);
+  const allSelected = pageIds.length > 0 && pageIds.every((id) => selection.has(id));
+  const someSelected = pageIds.some((id) => selection.has(id));
+
+  function toggle(id: string, checked: boolean) {
+    const next = new Set(selection);
+    if (checked) {
+      next.add(id);
+    } else {
+      next.delete(id);
+    }
+    onSelectionChange([...next]);
+  }
+
+  function toggleAll(checked: boolean) {
+    const next = new Set(selection);
+    for (const id of pageIds) {
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+    }
+    onSelectionChange([...next]);
+  }
+
   if (loading) {
     return (
       <div className="panel-body">
@@ -1317,6 +1409,21 @@ function InventoryTable({
       <table className="data-table asset-table">
         <thead>
           <tr>
+            {selectable ? (
+              <th className="data-table-select">
+                <input
+                  aria-label="全选本页"
+                  checked={allSelected}
+                  ref={(node) => {
+                    if (node) {
+                      node.indeterminate = someSelected && !allSelected;
+                    }
+                  }}
+                  type="checkbox"
+                  onChange={(event) => toggleAll(event.target.checked)}
+                />
+              </th>
+            ) : null}
             {columns.map((column) => (
               <th
                 key={column.key}
@@ -1358,6 +1465,22 @@ function InventoryTable({
                 if (event.key === "Enter") onRowClick(item);
               }}
             >
+              {selectable ? (
+                // The row itself navigates, so the checkbox keeps its click.
+                <td
+                  className="data-table-select"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <input
+                    aria-label="选择此库存项"
+                    checked={selection.has(item.inventory_item_id)}
+                    type="checkbox"
+                    onChange={(event) =>
+                      toggle(item.inventory_item_id, event.target.checked)
+                    }
+                  />
+                </td>
+              ) : null}
               {columns.map((column) => (
                 <td
                   key={column.key}

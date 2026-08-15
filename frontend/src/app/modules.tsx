@@ -10,7 +10,9 @@ import {
   MapPin,
   Network,
   PackageSearch,
+  Printer,
   Ruler,
+  ScanLine,
   ScrollText,
   Settings,
   SlidersHorizontal,
@@ -39,6 +41,7 @@ import {
   canManageAssetCategories,
   canManageAssetParameters,
   canManageFederation,
+  canManageLabelPrinters,
   canManageLocations,
   canManageUnits,
 } from "../modules/auth/permissions";
@@ -47,6 +50,8 @@ import { DashboardPage } from "../modules/dashboard/DashboardPage";
 import { FederationPage } from "../modules/federation/FederationPage";
 import { InventoryDetailPage } from "../modules/inventory/InventoryDetailPage";
 import { InventoryPage } from "../modules/inventory/InventoryPage";
+import { LabelPrintersPage } from "../modules/labels/LabelPrintersPage";
+import { ScanPage } from "../modules/scan/ScanPage";
 import { PasswordPage, ProfilePage, PreferencesPage } from "../modules/profile/ProfilePages";
 
 export type ModuleRoute = {
@@ -270,6 +275,13 @@ export const appModules: FrontendModule[] = [
         path: "/admin/units",
         title: "单位",
       },
+      {
+        canAccess: canManageLabelPrinters,
+        group: "admin",
+        icon: Printer,
+        path: "/admin/label-printers",
+        title: "标签打印机",
+      },
     ],
     commands: [
       {
@@ -313,6 +325,13 @@ export const appModules: FrontendModule[] = [
         icon: Ruler,
         path: "/admin/units",
         title: "管理单位",
+      },
+      {
+        canAccess: canManageLabelPrinters,
+        icon: Printer,
+        path: "/admin/label-printers",
+        title: "管理标签打印机",
+        keywords: ["printer", "label", "qr"],
       },
     ],
     routes: [
@@ -371,6 +390,43 @@ export const appModules: FrontendModule[] = [
         id: "admin.units",
         path: "/admin/units",
         title: "单位",
+      },
+      {
+        canAccess: canManageLabelPrinters,
+        element: <LabelPrintersPage />,
+        id: "admin.label-printers",
+        path: "/admin/label-printers",
+        title: "标签打印机",
+      },
+    ],
+  },
+  {
+    id: "scan",
+    navItems: [
+      {
+        canAccess: canAccessAssets,
+        group: "workspace",
+        icon: ScanLine,
+        path: "/scan",
+        title: "扫码",
+      },
+    ],
+    commands: [
+      {
+        canAccess: canAccessAssets,
+        icon: ScanLine,
+        path: "/scan",
+        title: "扫码查找",
+        keywords: ["scan", "qr", "saoma"],
+      },
+    ],
+    routes: [
+      {
+        canAccess: canAccessAssets,
+        element: <ScanPage />,
+        id: "scan.index",
+        path: "/scan",
+        title: "扫码",
       },
     ],
   },

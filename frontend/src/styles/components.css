@@ -1136,3 +1136,84 @@
   background: var(--surface-active);
   color: var(--text);
 }
+
+/* Row selection ---------------------------------------------------------- */
+
+.data-table-select {
+  width: 36px;
+  padding-right: 0;
+  text-align: center;
+}
+
+.data-table-select input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+/* Label printing --------------------------------------------------------- */
+
+.label-print-form {
+  display: grid;
+  gap: 14px;
+}
+
+.label-preview {
+  display: flex;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  padding: 12px;
+  overflow-x: auto;
+}
+
+/*
+ * The canvas is sized in printer dots; only its display size is scaled, so the
+ * bitmap that gets packed is never resampled.
+ */
+.label-preview-canvas {
+  width: 100%;
+  max-width: 340px;
+  height: auto;
+  image-rendering: pixelated;
+}
+
+/* Scanning --------------------------------------------------------------- */
+
+.scan-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.scan-camera {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+.scan-video {
+  width: 100%;
+  max-width: 420px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: #000;
+}
+
+.scan-manual {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.scan-manual .field {
+  flex: 1 1 260px;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+}

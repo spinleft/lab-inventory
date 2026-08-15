@@ -1,4 +1,4 @@
-import { ArrowLeft, PackageSearch, Pencil } from "lucide-react";
+import { ArrowLeft, PackageSearch, Pencil, QrCode } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../app/auth-context";
@@ -25,9 +25,11 @@ import {
 import { AttachmentSection } from "../attachments/AttachmentPanel";
 import {
   canManageLaboratoryAssets,
+  canPrintLabels,
   canRequestBorrow,
   canRequestRemoteBorrow,
 } from "../auth/permissions";
+import { PrintLabelDialog } from "../labels/PrintLabelDialog";
 import { type AssetParameterValue, useAsset } from "../assets/api";
 import { useCreateBorrowRequest } from "../borrow-requests/api";
 import {
@@ -63,6 +65,8 @@ export function InventoryDetailPage() {
   const [editing, setEditing] = useState(false);
   const [borrowDialogOpen, setBorrowDialogOpen] = useState(false);
   const [borrowNote, setBorrowNote] = useState("");
+  const [printing, setPrinting] = useState(false);
+  const canPrint = canPrintLabels(currentUser);
   const inventoryQuery = useInventoryItem({ inventoryItemId, scope: selectedDataScope });
   const item = inventoryQuery.data;
   const canManage =
@@ -195,6 +199,14 @@ export function InventoryDetailPage() {
             {canRequestBorrowItem ? (
               <Button onClick={() => setBorrowDialogOpen(true)} variant="primary">
                 申请借用
+              </Button>
+            ) : null}
+            {/* Labels belong to the laboratory that owns the item, so this is
+                hidden while browsing a federated one. */}
+            {canPrint && !isRemoteLaboratory ? (
+              <Button onClick={() => setPrinting(true)}>
+                <QrCode size={15} />
+                打印标签
               </Button>
             ) : null}
           </>
@@ -345,6 +357,22 @@ export function InventoryDetailPage() {
           />
         </FormField>
       </Dialog>
+      {printing ? (
+        <PrintLabelDialog
+          laboratoryId={item.laboratory_id}
+          open={printing}
+          subjects={[
+            {
+              code: item.serial_number ?? item.batch_number,
+              resourceId: item.inventory_item_id,
+              subtitle: item.asset.model ?? item.asset.name,
+              title: item.asset.name,
+              type: "item",
+            },
+          ]}
+          onOpenChange={setPrinting}
+        />
+      ) : null}
     </main>
   );
 }

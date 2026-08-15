@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Pencil, Plus } from "lucide-react";
+import { ArrowLeft, Pencil, Plus, QrCode } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../app/auth-context";
@@ -20,7 +20,8 @@ import {
   useUnits,
 } from "../admin/api";
 import { AttachmentSection } from "../attachments/AttachmentPanel";
-import { canManageLaboratoryAssets } from "../auth/permissions";
+import { canManageLaboratoryAssets, canPrintLabels } from "../auth/permissions";
+import { PrintLabelDialog } from "../labels/PrintLabelDialog";
 import {
   type Asset,
   type AssetInventoryItem,
@@ -47,6 +48,8 @@ export function AssetDetailPage() {
   const { assetId = "" } = useParams();
   const [editing, setEditing] = useState(false);
   const [creatingInventory, setCreatingInventory] = useState(false);
+  const [printing, setPrinting] = useState(false);
+  const canPrint = canPrintLabels(currentUser);
   const assetQuery = useAsset({ assetId, includeParameters: true, scope: selectedDataScope });
   const asset = assetQuery.data;
   const canManage =
@@ -201,6 +204,14 @@ export function AssetDetailPage() {
               <Plus size={15} />
               添加库存项
             </Button>
+            {/* Labels belong to the laboratory that owns the asset, so this is
+                hidden while browsing a federated one. */}
+            {canPrint && !isRemoteLaboratory ? (
+              <Button onClick={() => setPrinting(true)}>
+                <QrCode size={15} />
+                打印标签
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -314,6 +325,21 @@ export function AssetDetailPage() {
           queryClient.invalidateQueries({ queryKey: assetQueryKeys.root(apiBaseUrl) });
         }}
       />
+      {printing ? (
+        <PrintLabelDialog
+          laboratoryId={asset.laboratory_id}
+          open={printing}
+          subjects={[
+            {
+              resourceId: asset.asset_id,
+              subtitle: asset.model ?? asset.manufacturer,
+              title: asset.name,
+              type: "asset",
+            },
+          ]}
+          onOpenChange={setPrinting}
+        />
+      ) : null}
     </main>
   );
 }

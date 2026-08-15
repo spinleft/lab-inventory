@@ -35,6 +35,7 @@ pub enum AuditAction {
     Stocktake,
     Allocate,
     ReleaseAllocation,
+    Print,
 }
 
 impl AuditAction {
@@ -48,6 +49,7 @@ impl AuditAction {
             Self::Stocktake => "stocktake",
             Self::Allocate => "allocate",
             Self::ReleaseAllocation => "release_allocation",
+            Self::Print => "print",
         }
     }
 }
@@ -66,6 +68,7 @@ pub enum AuditResource {
     Unit,
     FederationTrust,
     FederationGuestLink,
+    LabelPrinter,
 }
 
 impl AuditResource {
@@ -84,6 +87,7 @@ impl AuditResource {
             Self::Unit => "unit",
             Self::FederationTrust => "federation_trust",
             Self::FederationGuestLink => "federation_guest_link",
+            Self::LabelPrinter => "label_printer",
         }
     }
 }

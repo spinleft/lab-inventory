@@ -8,6 +8,9 @@ export const LAB_CHEMISTRY_ID = "00000000-0000-4000-8000-0000000000a1";
 export const LAB_MATERIALS_ID = "00000000-0000-4000-8000-0000000000a2";
 export const REMOTE_NODE_ID = "00000000-0000-4000-8000-0000000000b1";
 export const REMOTE_LAB_ID = "00000000-0000-4000-8000-0000000000b2";
+/** This deployment's own federation node id, as `/instance-identity` reports it. */
+export const LOCAL_NODE_ID = "00000000-0000-4000-8000-0000000000d1";
+export const LOCAL_WEB_ORIGIN = "http://127.0.0.1:5173";
 
 function user(overrides: {
   laboratory?: CurrentUser["laboratory"];

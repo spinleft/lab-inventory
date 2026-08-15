@@ -2,6 +2,9 @@ application:
   port: 8000
   host: 0.0.0.0
   base_url: http://127.0.0.1:8000
+  # Origin the browser app is served from. QR codes link here, so a phone
+  # scanning a label lands on the SPA rather than on the API.
+  public_web_url: http://127.0.0.1:5173
   hmac_secret: super-long-and-secret-random-key-needed-to-verify-message-integrity
   cookie_secure: false
   enable_federation: true
@@ -31,3 +34,7 @@ federation:
   allow_insecure_private_network: false
   request_ttl_seconds: 300
   allowed_remote_hosts: []
+label_printing:
+  # Printers live on the LAN, so private addresses are allowed. Loopback is not,
+  # unless this is turned on for local development against a fake printer.
+  allow_loopback: false

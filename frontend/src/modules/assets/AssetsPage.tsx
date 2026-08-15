@@ -10,6 +10,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  QrCode,
   RotateCcw,
   Search,
   Settings2,
@@ -24,6 +25,7 @@ import {
   useState,
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useAuth } from "../../app/auth-context";
 import { useLaboratorySelection } from "../../app/laboratory-selection-context";
 import { useBackendConfig } from "../../shared/api/backendConfig";
 import { formatDate } from "../../shared/lib/date";
@@ -53,6 +55,8 @@ import {
   PendingAttachmentUploader,
   attachmentClaimsFromPending,
 } from "../attachments/AttachmentPanel";
+import { canPrintLabels } from "../auth/permissions";
+import { PrintLabelDialog } from "../labels/PrintLabelDialog";
 import {
   type Asset,
   type AssetParameterPayloadValue,
@@ -186,6 +190,7 @@ export function AssetsPage() {
     selectedDataScope,
     selectedLaboratoryId,
   } = useLaboratorySelection();
+  const { currentUser } = useAuth();
   const { apiBaseUrl } = useBackendConfig();
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -215,6 +220,13 @@ export function AssetsPage() {
   );
   const [editing, setEditing] = useState<AssetEditorMode>(null);
   const [deletingAsset, setDeletingAsset] = useState<Asset | null>(null);
+  // Selected assets rather than ids: a selection can span pages, and the ones
+  // scrolled past still need their name and model to build a label.
+  const [selectedAssets, setSelectedAssets] = useState<Asset[]>([]);
+  const [printing, setPrinting] = useState(false);
+  // Labels belong to the laboratory that owns the asset, so selection is not
+  // offered while browsing a federated one.
+  const canPrint = canPrintLabels(currentUser) && selectedDataScope.kind === "local";
 
   const categoriesQuery = useAssetCategories({
     enabled: Boolean(selectedLaboratoryId),
@@ -264,6 +276,9 @@ export function AssetsPage() {
 
   useEffect(() => {
     setOffset(0);
+    // A selection carried across laboratories would print labels for assets the
+    // user is no longer looking at.
+    setSelectedAssets([]);
   }, [selectedDataScope]);
 
   useEffect(() => {
@@ -317,6 +332,20 @@ export function AssetsPage() {
     () => sortAssets(response?.items ?? [], sort, categoryById, unitsById),
     [categoryById, response?.items, sort, unitsById],
   );
+  const selectedAssetIds = useMemo(
+    () => selectedAssets.map((asset) => asset.asset_id),
+    [selectedAssets],
+  );
+
+  function handleSelectionChange(ids: string[]) {
+    const known = new Map(selectedAssets.map((asset) => [asset.asset_id, asset]));
+    for (const asset of visibleAssets) {
+      known.set(asset.asset_id, asset);
+    }
+    setSelectedAssets(
+      ids.map((id) => known.get(id)).filter((asset): asset is Asset => Boolean(asset)),
+    );
+  }
   const parameterFilterActive = filters.parameter_filters.length > 0;
   const categoryBreadcrumbs = useMemo(
     () => buildCategoryBreadcrumbs(filters.category_id, categories),
@@ -458,14 +487,22 @@ export function AssetsPage() {
   }
 
   const pageActions = (
-    <Button
-      disabled={!canManage || !selectedLaboratoryId}
-      onClick={() => setEditing("new")}
-      variant="primary"
-    >
-      <Plus size={15} />
-      添加资产
-    </Button>
+    <>
+      {canPrint && selectedAssetIds.length > 0 ? (
+        <Button onClick={() => setPrinting(true)}>
+          <QrCode size={15} />
+          打印 {selectedAssetIds.length} 张标签
+        </Button>
+      ) : null}
+      <Button
+        disabled={!canManage || !selectedLaboratoryId}
+        onClick={() => setEditing("new")}
+        variant="primary"
+      >
+        <Plus size={15} />
+        添加资产
+      </Button>
+    </>
   );
 
   return (
@@ -581,10 +618,13 @@ export function AssetsPage() {
             parametersQuery.isLoading ||
             unitsQuery.isLoading
           }
+          selectable={canPrint}
+          selectedIds={selectedAssetIds}
           sort={sort}
           onDelete={setDeletingAsset}
           onEdit={setEditing}
           onRowClick={(asset) => navigate(`/assets/${asset.asset_id}`)}
+          onSelectionChange={handleSelectionChange}
           onSort={handleSort}
         />
       </section>
@@ -625,6 +665,19 @@ export function AssetsPage() {
         onClose={() => setDeletingAsset(null)}
         onConfirm={confirmDelete}
       />
+      {printing ? (
+        <PrintLabelDialog
+          laboratoryId={selectedLaboratoryId}
+          open={printing}
+          subjects={selectedAssets.map((asset) => ({
+            resourceId: asset.asset_id,
+            subtitle: asset.model ?? asset.manufacturer,
+            title: asset.name,
+            type: "asset" as const,
+          }))}
+          onOpenChange={setPrinting}
+        />
+      ) : null}
     </main>
   );
 }
@@ -1202,7 +1255,10 @@ function AssetsTable({
   onDelete,
   onEdit,
   onRowClick,
+  onSelectionChange,
   onSort,
+  selectable,
+  selectedIds,
   sort,
 }: {
   canManage: boolean;
@@ -1212,9 +1268,39 @@ function AssetsTable({
   onDelete: (asset: Asset) => void;
   onEdit: (asset: Asset) => void;
   onRowClick: (asset: Asset) => void;
+  onSelectionChange: (ids: string[]) => void;
   onSort: (key: string) => void;
+  selectable: boolean;
+  selectedIds: string[];
   sort: SortState;
 }) {
+  const selection = new Set(selectedIds);
+  const pageIds = items.map((asset) => asset.asset_id);
+  const allSelected = pageIds.length > 0 && pageIds.every((id) => selection.has(id));
+  const someSelected = pageIds.some((id) => selection.has(id));
+
+  function toggle(id: string, checked: boolean) {
+    const next = new Set(selection);
+    if (checked) {
+      next.add(id);
+    } else {
+      next.delete(id);
+    }
+    onSelectionChange([...next]);
+  }
+
+  function toggleAll(checked: boolean) {
+    const next = new Set(selection);
+    for (const id of pageIds) {
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+    }
+    onSelectionChange([...next]);
+  }
+
   if (loading) {
     return (
       <div className="panel-body">
@@ -1237,6 +1323,21 @@ function AssetsTable({
       <table className="data-table asset-table">
         <thead>
           <tr>
+            {selectable ? (
+              <th className="data-table-select">
+                <input
+                  aria-label="全选本页"
+                  checked={allSelected}
+                  ref={(node) => {
+                    if (node) {
+                      node.indeterminate = someSelected && !allSelected;
+                    }
+                  }}
+                  type="checkbox"
+                  onChange={(event) => toggleAll(event.target.checked)}
+                />
+              </th>
+            ) : null}
             {columns.map((column) => (
               <th
                 key={column.key}
@@ -1278,6 +1379,20 @@ function AssetsTable({
                 if (event.key === "Enter") onRowClick(asset);
               }}
             >
+              {selectable ? (
+                // The row itself navigates, so the checkbox keeps its click.
+                <td
+                  className="data-table-select"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <input
+                    aria-label={`选择资产 ${asset.name}`}
+                    checked={selection.has(asset.asset_id)}
+                    type="checkbox"
+                    onChange={(event) => toggle(asset.asset_id, event.target.checked)}
+                  />
+                </td>
+              ) : null}
               {columns.map((column) => (
                 <td
                   key={column.key}
