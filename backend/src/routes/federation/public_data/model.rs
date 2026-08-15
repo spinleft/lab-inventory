@@ -1,7 +1,29 @@
+use crate::utils::error_chain_fmt;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Serialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
+
+/// What can go wrong answering a federated read.
+///
+/// The public API is reached through one tail path rather than a set of typed
+/// routes, so an unknown path and a row that does not exist are the same
+/// outcome here, and the route that serves it maps them onto its own error.
+#[derive(thiserror::Error)]
+pub(crate) enum PublicDataError {
+    #[error("{0}")]
+    Validation(String),
+    #[error("{0}")]
+    NotFound(String),
+    #[error(transparent)]
+    Unexpected(#[from] anyhow::Error),
+}
+
+impl std::fmt::Debug for PublicDataError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub(crate) enum FederationReadTarget {

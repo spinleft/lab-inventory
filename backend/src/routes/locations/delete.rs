@@ -3,9 +3,9 @@ use super::queries::{
     LocationDatabaseError, fetch_location_for_update, fetch_location_tree_for_update,
 };
 use super::service::delete_location_subtree;
-use crate::access_control::LocationPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
+use crate::domain::LocationId;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
@@ -62,10 +62,10 @@ impl From<LocationDatabaseError> for DeleteLocationError {
 pub async fn delete_location(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    location_id: LocationPathId,
+    location_id: LocationId,
 ) -> Result<HttpResponse, DeleteLocationError> {
     let actor = laboratory_context.authorization_actor();
-    let location_id = location_id.into_inner();
+    let location_id = *location_id;
     if !validate_permission(
         &pool,
         &actor,

@@ -128,9 +128,13 @@ Each laboratory runs its own server instance with its own database. An instance 
 
 ### Federation API Design
 
-The federation routes (`/federation/*`) return **desensitized** data — no `internal_notes`, `serial_number`, `batch_number`, or other sensitive fields. Federation responses are trimmed to public fields only: name, model, status, laboratory info, quantity available, public notes.
+Reads under `/federation/inbound/*` are served by `routes/federation/public_data/`, which is **desensitized by construction**: it is a separate API from the local routes rather than a filter over them, so `internal_notes` is omitted from every projection and attachments are gated on `is_public`. Identifying fields like `serial_number` and `batch_number` *are* shared — a partner has to be able to tell one item from another. Nothing in that module takes an `Actor`; visibility is a property of its SQL.
 
-Proxy routes (`/remote-laboratories/{id}/assets`, `/remote-laboratories/{id}/inventory-items`) are behind session auth. They call the remote federation API using signed requests and return the response to the local user.
+Writes under `/federation/inbound/*` are served by `routes/federation/borrowing/`, a deliberate sibling of `public_data` rather than part of it, because every operation there is scoped to one caller's guest link. Only three are reachable: file a borrow request, list your own, cancel one of yours.
+
+Proxy routes (`/federation/nodes/{node}/laboratories/{lab}/{tail}`, GET and POST) are behind session auth. They call the remote federation API using signed requests and relay the response — including its status code — to the local user.
+
+**Federated identity:** an inbound signed request is resolved to a local *shadow guest* account (`users.is_federation_shadow`) through `federation_guest_links`, and that account becomes a real `Actor`. Federated callers are therefore authorized by the same rules as local ones, not a parallel set. The signature covers the request body, so `verify_inbound_request` must always receive the bytes exactly as received.
 
 ### Frontend Architecture
 
@@ -149,9 +153,9 @@ Proxy routes (`/remote-laboratories/{id}/assets`, `/remote-laboratories/{id}/inv
 
 ### Current Feature Status
 
-- **Complete:** Auth (login/logout/password change), Admin management (local labs, users, remote labs), Dashboard, Backend API (inventory, exports, audit)
+- **Complete:** Auth (login/logout/password change/guest registration), Admin management (local labs, users, federation pairing and trusts), Dashboard, Assets and inventory (backend + UI), Borrowing — request, approve/reject, cancel — both locally and across federated laboratories (backend + UI), Audit
 - **Partial:** User settings (profile/password working, preferences is placeholder)
-- **Not implemented:** Frontend UI for inventory management, borrow requests, maintenance, alerts (sidebar items are disabled)
+- **Not implemented:** Maintenance records, alerts
 
 ## Key Conventions
 

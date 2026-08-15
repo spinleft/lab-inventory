@@ -174,10 +174,10 @@ async fn manage_download_delete_and_filter_attachments_by_laboratory_permissions
     assert_eq!(response.status().as_u16(), 404);
 
     let response = app.get_attachment(internal_attachment_id).await;
-    assert_eq!(response.status().as_u16(), 404);
+    assert_eq!(response.status().as_u16(), 403);
 
     let response = app.download_attachment(public_attachment_id).await;
-    assert_eq!(response.status().as_u16(), 404);
+    assert_eq!(response.status().as_u16(), 403);
 
     let response = app
         .post_asset_attachment(
@@ -193,7 +193,7 @@ async fn manage_download_delete_and_filter_attachments_by_laboratory_permissions
     let response = app.delete_attachment(internal_attachment_id).await;
     assert_eq!(response.status().as_u16(), 204);
     let response = app.get_attachment(internal_attachment_id).await;
-    assert_eq!(response.status().as_u16(), 404);
+    assert_eq!(response.status().as_u16(), 403);
 }
 
 #[tokio::test]
@@ -236,7 +236,7 @@ async fn delete_unconsumed_file_uploads_only_for_upload_owner() {
     regular_user.login(&app).await;
 
     let response = app.delete_file_upload(owned_by_super_admin_id).await;
-    assert_eq!(response.status().as_u16(), 404);
+    assert_eq!(response.status().as_u16(), 403);
 
     app.test_user.login(&app).await;
     let response = app

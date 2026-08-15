@@ -123,7 +123,7 @@ async fn list_and_get_asset_categories_are_laboratory_scoped() {
     );
 
     let response = app.get_asset_category(category_id(&other_root)).await;
-    assert_eq!(response.status().as_u16(), 404);
+    assert_eq!(response.status().as_u16(), 403);
 }
 
 #[tokio::test]

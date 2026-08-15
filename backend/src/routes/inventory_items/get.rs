@@ -1,6 +1,5 @@
 use super::model::InventoryItemResponse;
 use super::queries::fetch_inventory_item;
-use crate::access_control::InventoryItemPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::domain::InventoryItemId;
 use crate::utils::error_chain_fmt;
@@ -42,10 +41,9 @@ impl ResponseError for GetInventoryItemError {
 pub async fn get_inventory_item(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    inventory_item_id: InventoryItemPathId,
+    inventory_item_id: InventoryItemId,
 ) -> Result<HttpResponse, GetInventoryItemError> {
     let actor = laboratory_context.authorization_actor();
-    let inventory_item_id: InventoryItemId = inventory_item_id.into_inner().into();
     if !validate_permission(
         &pool,
         &actor,

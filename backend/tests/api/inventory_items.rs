@@ -545,7 +545,7 @@ async fn inventory_item_permissions_follow_laboratory_scope() {
     );
 
     let response = app.get_inventory_item(other_item_id).await;
-    assert_eq!(response.status().as_u16(), 404);
+    assert_eq!(response.status().as_u16(), 403);
 
     let response = app
         .post_inventory_items(
@@ -561,7 +561,7 @@ async fn inventory_item_permissions_follow_laboratory_scope() {
     let response = app
         .patch_inventory_item(own_item_id, &serde_json::json!({ "status": "retired" }))
         .await;
-    assert_eq!(response.status().as_u16(), 404);
+    assert_eq!(response.status().as_u16(), 403);
 }
 
 #[tokio::test]
@@ -593,7 +593,7 @@ async fn local_and_admin_routes_enforce_the_laboratory_in_the_route_scope() {
             "/admin/laboratories/{first_laboratory_id}/inventory-items/{second_item_id}"
         ))
         .await;
-    assert_eq!(response.status().as_u16(), 404);
+    assert_eq!(response.status().as_u16(), 403);
 
     let first_user = TestUser::generate_with_user_type("user", Some(first_laboratory_id));
     app.store_user(&first_user).await;
@@ -601,7 +601,7 @@ async fn local_and_admin_routes_enforce_the_laboratory_in_the_route_scope() {
     let response = app
         .get_api_path(&format!("/local/inventory-items/{second_item_id}"))
         .await;
-    assert_eq!(response.status().as_u16(), 404);
+    assert_eq!(response.status().as_u16(), 403);
 
     let response = app
         .get_api_path(&format!(

@@ -101,6 +101,24 @@ export function canRequestBorrow(user: CurrentUser) {
     && Boolean(user.laboratory);
 }
 
+/**
+ * Borrowing from a remote laboratory goes out through the federation proxy,
+ * which only laboratory administrators and users may use. A guest would be
+ * refused by the backend, so they are not offered the action.
+ */
+export function canRequestRemoteBorrow(user: CurrentUser) {
+  return (isLabAdmin(user) || getUserTypeName(user) === "user") && Boolean(user.laboratory);
+}
+
+/**
+ * Anyone who can file a borrow request can see the ones they filed. That is a
+ * wider audience than the review queue: guests are included, system admins are
+ * not, because the routes behind it are laboratory-scoped.
+ */
+export function canViewMyBorrowRequests(user: CurrentUser) {
+  return canRequestBorrow(user);
+}
+
 export function canManageUnits(user: CurrentUser) {
   return isRoot(user) || isSuperAdmin(user);
 }

@@ -8,6 +8,9 @@ const locationId = "50000000-0000-4000-8000-000000000301";
 const assetId = "50000000-0000-4000-8000-000000000401";
 const inventoryItemId = "50000000-0000-4000-8000-000000000501";
 const borrowRequestId = "50000000-0000-4000-8000-000000000601";
+const remoteNodeId = "50000000-0000-4000-8000-000000000901";
+const remoteLaboratoryId = "50000000-0000-4000-8000-000000000902";
+const remoteBorrowRequestId = "50000000-0000-4000-8000-000000000903";
 
 test("guest can request borrow from inventory detail", async ({ page }) => {
   const currentUser = {
@@ -53,7 +56,7 @@ test("guest can request borrow from inventory detail", async ({ page }) => {
     postedBorrowRequest = route.request().postDataJSON() as Record<string, unknown>;
     await route.fulfill({
       status: 201,
-      json: borrowRequestFixture({
+      json: myBorrowRequestFixture({
         request_note: postedBorrowRequest?.request_note as string | null,
       }),
     });
@@ -163,6 +166,217 @@ test("lab users can approve borrow requests", async ({ page }) => {
   await expect(page.getByText("当前没有待审批的借用申请。")).toBeVisible();
   await expect.poll(() => borrowedItems[0]?.status).toBe("borrowed");
 });
+
+test("lab user can request borrow from a remote laboratory", async ({ page }) => {
+  const currentUser = labUser();
+  let postedPath: string | null = null;
+  let postedBody: Record<string, unknown> | null = null;
+
+  await routeCommonLookups(page, currentUser);
+  await page.route("**/api/v1/local/federation/trusts", async (route) => {
+    await route.fulfill({ json: [trustFixture()] });
+  });
+  await routeRemoteInventoryDetail(page);
+  await page.route(
+    `**/api/v1/federation/nodes/${remoteNodeId}/laboratories/${remoteLaboratoryId}/inventory-items/${inventoryItemId}/borrow-requests`,
+    async (route) => {
+      postedPath = new URL(route.request().url()).pathname;
+      postedBody = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({ status: 201, json: myBorrowRequestFixture() });
+    },
+  );
+  await selectRemoteLaboratory(page);
+
+  await page.goto(`/inventory/${inventoryItemId}`);
+  await expect(page.getByRole("heading", { name: "SN-BORROW" })).toBeVisible();
+
+  await page.getByRole("button", { name: "申请借用" }).click();
+  const dialog = page.getByRole("dialog", { name: "申请借用" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("备注").fill("联合实验需要");
+  await dialog.getByRole("button", { name: "提交申请" }).click();
+
+  await expect.poll(() => postedBody?.request_note).toBe("联合实验需要");
+  // The request has to leave through the federation proxy, not the local route.
+  expect(postedPath).toContain(`/federation/nodes/${remoteNodeId}/`);
+});
+
+test("requester can cancel a pending request from any laboratory", async ({ page }) => {
+  const currentUser = labUser();
+  let localRequests = [myBorrowRequestFixture()];
+  let remoteRequests = [
+    myBorrowRequestFixture({
+      asset_name: "Remote Spectrometer",
+      borrow_request_id: remoteBorrowRequestId,
+      laboratory_id: remoteLaboratoryId,
+    }),
+  ];
+  let cancelledPath: string | null = null;
+
+  await routeCommonLookups(page, currentUser);
+  await page.route("**/api/v1/local/federation/trusts", async (route) => {
+    await route.fulfill({ json: [trustFixture()] });
+  });
+  await page.route("**/api/v1/local/borrow-requests/mine", async (route) => {
+    await route.fulfill({ json: localRequests });
+  });
+  await page.route(
+    `**/api/v1/federation/nodes/${remoteNodeId}/laboratories/${remoteLaboratoryId}/borrow-requests`,
+    async (route) => {
+      await route.fulfill({ json: remoteRequests });
+    },
+  );
+  await page.route(
+    `**/api/v1/federation/nodes/${remoteNodeId}/laboratories/${remoteLaboratoryId}/borrow-requests/${remoteBorrowRequestId}/cancel`,
+    async (route) => {
+      cancelledPath = new URL(route.request().url()).pathname;
+      remoteRequests = [];
+      await route.fulfill({
+        json: myBorrowRequestFixture({
+          borrow_request_id: remoteBorrowRequestId,
+          status: "cancelled",
+        }),
+      });
+    },
+  );
+  await page.route("**/api/v1/local/borrow-requests/*/cancel", async (route) => {
+    localRequests = [];
+    await route.fulfill({ json: myBorrowRequestFixture({ status: "cancelled" }) });
+  });
+
+  await page.goto("/borrow-requests/mine");
+  await expect(page.getByRole("heading", { name: "我的借用" })).toBeVisible();
+  await expect(page.getByText("Remote Spectrometer")).toBeVisible();
+
+  await page
+    .getByRole("row", { name: /Remote Spectrometer/ })
+    .getByRole("button", { name: "撤销" })
+    .click();
+  const dialog = page.getByRole("alertdialog", { name: "撤销借用申请" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "撤销" }).click();
+
+  await expect.poll(() => remoteRequests.length).toBe(0);
+  // The cancellation has to reach the laboratory that holds the request.
+  expect(cancelledPath).toContain(`/federation/nodes/${remoteNodeId}/`);
+});
+
+function labUser() {
+  return {
+    email: "user@example.com",
+    laboratory: { laboratory_id: laboratoryId, name: "中心实验室" },
+    user_id: "50000000-0000-4000-8000-000000000021",
+    user_type: {
+      name: "user",
+      user_type_id: "50000000-0000-4000-8000-000000000022",
+    },
+    username: "lab-user",
+  };
+}
+
+function trustFixture() {
+  return {
+    created_at: "2026-06-24T08:00:00Z",
+    local_laboratory_id: laboratoryId,
+    remote_base_url: "https://10.0.0.12:8000",
+    remote_laboratory_id: remoteLaboratoryId,
+    remote_laboratory_name: "协作实验室",
+    remote_node_id: remoteNodeId,
+    revoked_at: null,
+    status: "active",
+    trust_id: "50000000-0000-4000-8000-000000000801",
+    updated_at: "2026-06-24T08:00:00Z",
+  };
+}
+
+/** Points the laboratory selector at the paired remote laboratory. */
+async function selectRemoteLaboratory(page: Page) {
+  await page.addInitScript(
+    ({ node, laboratory }) => {
+      window.localStorage.setItem(
+        "labInventory.selectedLaboratoryScope",
+        `remote:${node}:${laboratory}`,
+      );
+    },
+    { laboratory: remoteLaboratoryId, node: remoteNodeId },
+  );
+}
+
+async function routeCommonLookups(page: Page, currentUser: Record<string, unknown>) {
+  await page.route("**/api/v1/auth/me", async (route) => {
+    await route.fulfill({ json: currentUser });
+  });
+  await page.route("**/api/v1/admin/laboratories", async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          address: "Building A",
+          contact: null,
+          created_at: "2026-06-24T08:00:00Z",
+          description: null,
+          laboratory_id: laboratoryId,
+          name: "中心实验室",
+          updated_at: "2026-06-24T08:00:00Z",
+        },
+      ],
+    });
+  });
+  await page.addInitScript((url) => {
+    window.localStorage.setItem("labInventory.apiBaseUrl", url);
+  }, apiBaseUrl);
+}
+
+async function routeRemoteInventoryDetail(page: Page) {
+  const prefix = `**/api/v1/federation/nodes/${remoteNodeId}/laboratories/${remoteLaboratoryId}`;
+  await page.route(`${prefix}/inventory-items/${inventoryItemId}`, async (route) => {
+    await route.fulfill({ json: inventoryItem({ laboratory_id: remoteLaboratoryId }) });
+  });
+  await page.route(`${prefix}/assets/${assetId}**`, async (route) => {
+    await route.fulfill({ json: assetDetail() });
+  });
+  await page.route(`${prefix}/asset-categories`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route(`${prefix}/asset-parameters`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route(`${prefix}/locations`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route(`${prefix}/units`, async (route) => {
+    await route.fulfill({ json: [unitFixture()] });
+  });
+  await page.route(`${prefix}/assets/${assetId}/attachments`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route(`${prefix}/inventory-items/${inventoryItemId}/attachments`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+}
+
+/**
+ * What a requester is told about their own request. Narrower than
+ * {@link borrowRequestFixture}, which is the reviewer's queue shape: no
+ * reviewer identity, no requester columns, and `laboratory_id` rather than
+ * `local_laboratory_id`.
+ */
+function myBorrowRequestFixture(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    asset_model: "BX53",
+    asset_name: "Borrowable Reagent",
+    borrow_request_id: borrowRequestId,
+    created_at: "2026-06-24T09:10:00Z",
+    decision_note: null,
+    inventory_item_id: inventoryItemId,
+    inventory_status: "available",
+    laboratory_id: laboratoryId,
+    request_note: "需要做实验",
+    reviewed_at: null,
+    status: "pending",
+    updated_at: "2026-06-24T09:10:00Z",
+    ...overrides,
+  };
+}
 
 function borrowRequestFixture(overrides: Partial<Record<string, unknown>> = {}) {
   return {

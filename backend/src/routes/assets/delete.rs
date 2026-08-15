@@ -4,7 +4,6 @@ use super::queries::{
     fetch_asset_for_update, fetch_inventory_items_for_asset_for_update,
     fetch_parameter_values_for_asset_for_update,
 };
-use crate::access_control::AssetPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{AssetId, FileStorageKey};
@@ -63,10 +62,9 @@ pub async fn delete_asset(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
     storage: web::Data<FileStorage>,
-    asset_id: AssetPathId,
+    asset_id: AssetId,
 ) -> Result<HttpResponse, DeleteAssetError> {
     let actor = laboratory_context.authorization_actor();
-    let asset_id: AssetId = asset_id.into_inner().into();
     if !validate_permission(
         &pool,
         &actor,

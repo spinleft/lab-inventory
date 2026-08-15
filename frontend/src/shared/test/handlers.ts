@@ -6,7 +6,7 @@ import { testLaboratories } from "./fixtures";
  * is a bare array, and Zod rejects the wrong shape, so this split has to match
  * the schemas in `src/modules/*\/api.ts`.
  */
-const PAGINATED_COLLECTIONS = new Set(["assets", "inventory-items", "borrow-requests"]);
+const PAGINATED_COLLECTIONS = new Set(["assets", "inventory-items"]);
 
 export function emptyCollection(collection: string) {
   return PAGINATED_COLLECTIONS.has(collection)
@@ -16,6 +16,24 @@ export function emptyCollection(collection: string) {
 
 function collectionResponse({ params }: { params: Record<string, unknown> }) {
   return HttpResponse.json(emptyCollection(String(params.collection ?? "")));
+}
+
+/** The narrow shape both the local and the federated borrow writes answer with. */
+function borrowRequestStub() {
+  return {
+    asset_model: null,
+    asset_name: "Test Asset",
+    borrow_request_id: "00000000-0000-4000-8000-0000000000b1",
+    created_at: "2026-08-15T00:00:00Z",
+    decision_note: null,
+    inventory_item_id: "00000000-0000-4000-8000-0000000000c1",
+    inventory_status: "available",
+    laboratory_id: testLaboratories[0]?.laboratory_id ?? "00000000-0000-4000-8000-0000000000a1",
+    request_note: null,
+    reviewed_at: null,
+    status: "pending",
+    updated_at: "2026-08-15T00:00:00Z",
+  };
 }
 
 /**
@@ -48,13 +66,30 @@ export const handlers = [
 
   // Laboratory-scoped users: /local/{collection}
   http.get("*/api/v1/local/users", () => HttpResponse.json([])),
+  // Registered before the `:collection` catch-all so the literal wins, matching
+  // how the backend orders these two routes.
+  http.get("*/api/v1/local/borrow-requests/mine", () => HttpResponse.json([])),
   http.get("*/api/v1/local/:collection", collectionResponse),
   http.get("*/api/v1/local/federation/:collection", collectionResponse),
+  http.post("*/api/v1/local/inventory-items/:itemId/borrow-requests", () =>
+    HttpResponse.json(borrowRequestStub(), { status: 201 }),
+  ),
+  http.post("*/api/v1/local/borrow-requests/:requestId/cancel", () =>
+    HttpResponse.json({ ...borrowRequestStub(), status: "cancelled" }),
+  ),
 
   // Federated remote scope
   http.get(
     "*/api/v1/federation/nodes/:nodeId/laboratories/:laboratoryId/:collection",
     collectionResponse,
+  ),
+  http.post(
+    "*/api/v1/federation/nodes/:nodeId/laboratories/:laboratoryId/inventory-items/:itemId/borrow-requests",
+    () => HttpResponse.json(borrowRequestStub(), { status: 201 }),
+  ),
+  http.post(
+    "*/api/v1/federation/nodes/:nodeId/laboratories/:laboratoryId/borrow-requests/:requestId/cancel",
+    () => HttpResponse.json({ ...borrowRequestStub(), status: "cancelled" }),
   ),
 
   http.get("*/api/v1/audit-logs", () =>

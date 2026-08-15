@@ -6,7 +6,6 @@ use super::queries::{
 use super::service::{
     add_quantities_to_item, insert_inventory_item, set_quantity_on_hand, validate_quantity_item,
 };
-use crate::access_control::InventoryItemPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{InventoryItemId, SplitInventoryItem as SplitInventoryItemCommand};
@@ -113,11 +112,10 @@ impl From<InventoryItemDatabaseError> for SplitInventoryItemError {
 pub async fn split_inventory_item(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    inventory_item_id: InventoryItemPathId,
+    inventory_item_id: InventoryItemId,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, SplitInventoryItemError> {
     let actor = laboratory_context.authorization_actor();
-    let inventory_item_id: InventoryItemId = inventory_item_id.into_inner().into();
     if !validate_permission(
         &pool,
         &actor,

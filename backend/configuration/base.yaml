@@ -30,5 +30,4 @@ federation:
   require_https: true
   allow_insecure_private_network: false
   request_ttl_seconds: 300
-  local_node_id: 2bd3013d-79fa-4996-a32f-ed9c05a5e16a
   allowed_remote_hosts: []

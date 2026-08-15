@@ -311,6 +311,14 @@ async fn migrations_create_inventory_foundation_tables_and_seed_units() {
         .unwrap();
     assert_eq!(local_node_count, 1);
 
+    // Partners pin this server's node_id, so a second identity must be impossible
+    // rather than merely unexpected.
+    let second_local_node =
+        sqlx::query("INSERT INTO federation_local_nodes (node_id) VALUES (gen_random_uuid())")
+            .execute(&app.db_pool)
+            .await;
+    assert!(second_local_node.is_err());
+
     let federation_indexes: Vec<String> = sqlx::query_scalar(
         r#"
         SELECT indexname
@@ -678,6 +686,72 @@ async fn inventory_item_tracking_mode_matches_asset_and_cascades_on_asset_delete
             .await
             .unwrap();
     assert_eq!(inventory_item_count, 0);
+}
+
+/// Guards the constraint swap in `20260815000000_add_borrow_request_cancellation`.
+///
+/// That migration drops the status CHECK by name and adds a replacement. If the
+/// name were ever wrong the `DROP ... IF EXISTS` would quietly do nothing, the
+/// old constraint would survive alongside the new one, and `'cancelled'` would
+/// still be refused — at runtime, in a deployment, rather than here.
+#[tokio::test]
+async fn borrow_request_status_check_accepts_cancelled_and_nothing_else() {
+    let app = spawn_app().await;
+    let laboratory_id = app.create_laboratory("Borrow Status Constraint Lab").await;
+    let unit_id = app.unit_id("pcs").await;
+    let asset_id = insert_test_asset(&app, laboratory_id, unit_id).await;
+    let inventory_item_id = insert_quantity_inventory_item(
+        &app,
+        asset_id,
+        laboratory_id,
+        Some("STATUS-CHECK"),
+    )
+    .await;
+
+    for status in ["pending", "approved", "rejected", "cancelled"] {
+        let result = insert_borrow_request_with_status(
+            &app,
+            laboratory_id,
+            inventory_item_id,
+            status,
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "the database refused the valid status {status}"
+        );
+    }
+
+    let result =
+        insert_borrow_request_with_status(&app, laboratory_id, inventory_item_id, "withdrawn").await;
+    assert!(result.is_err());
+}
+
+async fn insert_borrow_request_with_status(
+    app: &crate::helpers::TestApp,
+    laboratory_id: uuid::Uuid,
+    inventory_item_id: uuid::Uuid,
+    status: &str,
+) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO federation_borrow_requests (
+            borrow_request_id,
+            local_laboratory_id,
+            inventory_item_id,
+            requester_username,
+            requester_user_type,
+            status
+        )
+        VALUES ($1, $2, $3, 'remote-user', 'guest', $4)
+        "#,
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(laboratory_id)
+    .bind(inventory_item_id)
+    .bind(status)
+    .execute(&app.db_pool)
+    .await
 }
 
 async fn insert_test_asset(

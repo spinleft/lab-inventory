@@ -2,7 +2,6 @@ use super::model::{AttachmentResponse, update_attachment_rollback_details};
 use super::queries::{
     AttachmentDatabaseError, fetch_attachment_for_update, update_attachment_in_database,
 };
-use crate::access_control::AttachmentPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{AttachmentDisplayName, AttachmentId, NullableUpdate, UpdateAttachment};
@@ -101,11 +100,10 @@ impl ResponseError for UpdateAttachmentError {
 pub async fn update_attachment(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    attachment_id: AttachmentPathId,
+    attachment_id: AttachmentId,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, UpdateAttachmentError> {
     let actor = laboratory_context.authorization_actor();
-    let attachment_id: AttachmentId = attachment_id.into_inner().into();
     let update_attachment = UpdateAttachment::try_from(payload.into_inner())
         .map_err(UpdateAttachmentError::ValidationError)?;
     let mut transaction = pool

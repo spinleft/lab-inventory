@@ -1,9 +1,8 @@
 use super::model::{UnitResponse, update_unit_rollback_details};
 use super::queries::{UnitDatabaseError, fetch_unit_for_update, update_unit_in_database};
-use crate::access_control::UnitPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
-use crate::domain::{UnitCode, UnitDimension, UnitName, UnitSymbol, UpdateUnit};
+use crate::domain::{UnitCode, UnitDimension, UnitId, UnitName, UnitSymbol, UpdateUnit};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
@@ -91,7 +90,7 @@ impl From<UnitDatabaseError> for UpdateUnitError {
 pub async fn update_unit(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    unit_id: UnitPathId,
+    unit_id: UnitId,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, UpdateUnitError> {
     let actor = laboratory_context.authorization_actor();

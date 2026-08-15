@@ -1,4 +1,4 @@
-use crate::helpers::{TestApp, TestUser, spawn_app};
+use crate::helpers::{TestApp, TestUser, pair_laboratories, spawn_app};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -155,44 +155,6 @@ async fn federation_guest_link_can_be_merged_into_existing_guest() {
         links[0]["local_guest_user_id"],
         existing_guest.user_id.to_string()
     );
-}
-
-async fn pair_laboratories(
-    local: &TestApp,
-    local_laboratory_id: Uuid,
-    remote: &TestApp,
-    remote_laboratory_id: Uuid,
-) -> Uuid {
-    let remote_admin = TestUser::generate_with_user_type("lab_admin", Some(remote_laboratory_id));
-    remote.store_user(&remote_admin).await;
-    remote_admin.login(remote).await;
-    let response = remote
-        .post_federation_pairing_code(remote_laboratory_id)
-        .await;
-    assert_eq!(response.status().as_u16(), 201);
-    let pairing: serde_json::Value = response.json().await.unwrap();
-    let pairing_code = pairing["pairing_code"].as_str().unwrap();
-
-    let local_admin = TestUser::generate_with_user_type("lab_admin", Some(local_laboratory_id));
-    local.store_user(&local_admin).await;
-    local_admin.login(local).await;
-    let response = local
-        .post_federation_trust(
-            local_laboratory_id,
-            &serde_json::json!({
-                "remote_base_url": remote.address,
-                "remote_laboratory_id": remote_laboratory_id,
-                "pairing_code": pairing_code
-            }),
-        )
-        .await;
-    assert_eq!(response.status().as_u16(), 201);
-    let trust: serde_json::Value = response.json().await.unwrap();
-    let response = local.get_federation_trusts(local_laboratory_id).await;
-    assert_eq!(response.status().as_u16(), 200);
-    let trusts: serde_json::Value = response.json().await.unwrap();
-    assert_eq!(trusts.as_array().unwrap().len(), 1);
-    trust["remote_node_id"].as_str().unwrap().parse().unwrap()
 }
 
 async fn seed_remote_asset(app: &TestApp, laboratory_id: Uuid) -> Uuid {

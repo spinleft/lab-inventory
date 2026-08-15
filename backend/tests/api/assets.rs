@@ -566,7 +566,7 @@ async fn asset_permissions_follow_laboratory_scope() {
     assert_eq!(body["items"][0]["asset_id"], asset_id(&asset).to_string());
 
     let response = app.get_asset(asset_id(&other_asset)).await;
-    assert_eq!(response.status().as_u16(), 404);
+    assert_eq!(response.status().as_u16(), 403);
 
     let response = app
         .post_asset(
@@ -592,7 +592,7 @@ async fn asset_permissions_follow_laboratory_scope() {
             &serde_json::json!({ "name": "Guest Update" }),
         )
         .await;
-    assert_eq!(response.status().as_u16(), 404);
+    assert_eq!(response.status().as_u16(), 403);
 }
 
 async fn create_text_parameter(

@@ -6,10 +6,9 @@
 use super::model::{
     AssetPublicResponse, AttachmentDownloadRow, AttachmentPublicRow, CategoryRow,
     InventoryItemPublicResponse, LaboratoryPublicRow, LocationRow, PaginatedJson,
-    ParameterResponse, ParameterRow, ParameterValueResponse, UnitRow,
+    ParameterResponse, ParameterRow, ParameterValueResponse, PublicDataError, UnitRow,
 };
 use super::queries;
-use crate::routes::federation::model::FederationError;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use url::form_urlencoded;
@@ -30,27 +29,25 @@ pub(super) fn query_params(query_string: &str) -> HashMap<String, String> {
         .collect()
 }
 
-pub(super) fn limit_offset(query_string: &str) -> Result<(i64, i64), FederationError> {
+pub(super) fn limit_offset(query_string: &str) -> Result<(i64, i64), PublicDataError> {
     let params = query_params(query_string);
     let limit = params
         .get("limit")
         .map(|value| value.parse::<i64>())
         .transpose()
-        .map_err(|_| FederationError::ValidationError("limit must be a number".into()))?
+        .map_err(|_| PublicDataError::Validation("limit must be a number".into()))?
         .unwrap_or(DEFAULT_LIMIT);
     let offset = params
         .get("offset")
         .map(|value| value.parse::<i64>())
         .transpose()
-        .map_err(|_| FederationError::ValidationError("offset must be a number".into()))?
+        .map_err(|_| PublicDataError::Validation("offset must be a number".into()))?
         .unwrap_or(0);
     if limit <= 0 {
-        return Err(FederationError::ValidationError(
-            "limit must be positive".into(),
-        ));
+        return Err(PublicDataError::Validation("limit must be positive".into()));
     }
     if offset < 0 {
-        return Err(FederationError::ValidationError(
+        return Err(PublicDataError::Validation(
             "offset must be non-negative".into(),
         ));
     }
@@ -65,15 +62,17 @@ pub(super) fn limit_offset(query_string: &str) -> Result<(i64, i64), FederationE
 pub(super) async fn fetch_laboratory(
     pool: &PgPool,
     laboratory_id: Uuid,
-) -> Result<LaboratoryPublicRow, FederationError> {
-    queries::fetch_laboratory(pool, laboratory_id).await
+) -> Result<LaboratoryPublicRow, PublicDataError> {
+    queries::fetch_laboratory(pool, laboratory_id)
+        .await?
+        .ok_or_else(|| PublicDataError::NotFound("Laboratory not found".into()))
 }
 
 pub(super) async fn list_assets(
     pool: &PgPool,
     laboratory_id: Uuid,
     query_string: &str,
-) -> Result<PaginatedJson<AssetPublicResponse>, FederationError> {
+) -> Result<PaginatedJson<AssetPublicResponse>, PublicDataError> {
     let (limit, offset) = limit_offset(query_string)?;
     let params = query_params(query_string);
     let total = queries::count_assets(pool, laboratory_id, &params).await?;
@@ -100,8 +99,10 @@ pub(super) async fn fetch_asset(
     laboratory_id: Uuid,
     asset_id: Uuid,
     query_string: &str,
-) -> Result<AssetPublicResponse, FederationError> {
-    let row = queries::fetch_asset(pool, laboratory_id, asset_id).await?;
+) -> Result<AssetPublicResponse, PublicDataError> {
+    let row = queries::fetch_asset(pool, laboratory_id, asset_id)
+        .await?
+        .ok_or_else(|| PublicDataError::NotFound("Asset not found".into()))?;
     let inventory_items = list_inventory_items_for_asset(pool, laboratory_id, asset_id).await?;
     let include_parameters = query_params(query_string)
         .get("include")
@@ -128,7 +129,7 @@ pub(super) async fn list_inventory_items(
     pool: &PgPool,
     laboratory_id: Uuid,
     query_string: &str,
-) -> Result<PaginatedJson<InventoryItemPublicResponse>, FederationError> {
+) -> Result<PaginatedJson<InventoryItemPublicResponse>, PublicDataError> {
     let (limit, offset) = limit_offset(query_string)?;
     let params = query_params(query_string);
     let total = queries::count_inventory_items(pool, laboratory_id, &params).await?;
@@ -149,8 +150,10 @@ pub(super) async fn fetch_inventory_item(
     pool: &PgPool,
     laboratory_id: Uuid,
     inventory_item_id: Uuid,
-) -> Result<InventoryItemPublicResponse, FederationError> {
-    let row = queries::fetch_inventory_item(pool, laboratory_id, inventory_item_id).await?;
+) -> Result<InventoryItemPublicResponse, PublicDataError> {
+    let row = queries::fetch_inventory_item(pool, laboratory_id, inventory_item_id)
+        .await?
+        .ok_or_else(|| PublicDataError::NotFound("Inventory item not found".into()))?;
 
     Ok(InventoryItemPublicResponse::from(row))
 }
@@ -159,7 +162,7 @@ async fn list_inventory_items_for_asset(
     pool: &PgPool,
     laboratory_id: Uuid,
     asset_id: Uuid,
-) -> Result<Vec<InventoryItemPublicResponse>, FederationError> {
+) -> Result<Vec<InventoryItemPublicResponse>, PublicDataError> {
     let rows = queries::fetch_inventory_items_for_asset(pool, laboratory_id, asset_id).await?;
 
     Ok(rows
@@ -174,79 +177,77 @@ pub(super) async fn list_categories(
     pool: &PgPool,
     laboratory_id: Uuid,
     query_string: &str,
-) -> Result<Vec<CategoryRow>, FederationError> {
+) -> Result<Vec<CategoryRow>, PublicDataError> {
     let params = query_params(query_string);
     let root_path = match params
         .get("root_category_id")
         .and_then(|value| value.parse::<Uuid>().ok())
     {
-        Some(root_id) => Some(
-            queries::fetch_category(pool, laboratory_id, root_id)
-                .await?
-                .path,
-        ),
+        Some(root_id) => Some(fetch_category(pool, laboratory_id, root_id).await?.path),
         None => None,
     };
 
-    queries::fetch_categories(pool, laboratory_id, root_path).await
+    Ok(queries::fetch_categories(pool, laboratory_id, root_path).await?)
 }
 
 pub(super) async fn fetch_category(
     pool: &PgPool,
     laboratory_id: Uuid,
     category_id: Uuid,
-) -> Result<CategoryRow, FederationError> {
-    queries::fetch_category(pool, laboratory_id, category_id).await
+) -> Result<CategoryRow, PublicDataError> {
+    queries::fetch_category(pool, laboratory_id, category_id)
+        .await?
+        .ok_or_else(|| PublicDataError::NotFound("Asset category not found".into()))
 }
 
 pub(super) async fn list_locations(
     pool: &PgPool,
     laboratory_id: Uuid,
     query_string: &str,
-) -> Result<Vec<LocationRow>, FederationError> {
+) -> Result<Vec<LocationRow>, PublicDataError> {
     let params = query_params(query_string);
     let root_path = match params
         .get("root_location_id")
         .and_then(|value| value.parse::<Uuid>().ok())
     {
-        Some(root_id) => Some(
-            queries::fetch_location(pool, laboratory_id, root_id)
-                .await?
-                .path,
-        ),
+        Some(root_id) => Some(fetch_location(pool, laboratory_id, root_id).await?.path),
         None => None,
     };
 
-    queries::fetch_locations(pool, laboratory_id, root_path).await
+    Ok(queries::fetch_locations(pool, laboratory_id, root_path).await?)
 }
 
 pub(super) async fn fetch_location(
     pool: &PgPool,
     laboratory_id: Uuid,
     location_id: Uuid,
-) -> Result<LocationRow, FederationError> {
-    queries::fetch_location(pool, laboratory_id, location_id).await
+) -> Result<LocationRow, PublicDataError> {
+    queries::fetch_location(pool, laboratory_id, location_id)
+        .await?
+        .ok_or_else(|| PublicDataError::NotFound("Location not found".into()))
 }
 
 pub(super) async fn list_units(
     pool: &PgPool,
     laboratory_id: Uuid,
-) -> Result<Vec<UnitRow>, FederationError> {
-    queries::fetch_units(pool, laboratory_id).await
+) -> Result<Vec<UnitRow>, PublicDataError> {
+    Ok(queries::fetch_units(pool, laboratory_id).await?)
 }
 
 pub(super) async fn fetch_unit(
     pool: &PgPool,
     laboratory_id: Uuid,
     unit_id: Uuid,
-) -> Result<UnitRow, FederationError> {
-    queries::fetch_unit(pool, laboratory_id, unit_id).await
+) -> Result<UnitRow, PublicDataError> {
+    queries::fetch_unit(pool, laboratory_id, unit_id)
+        .await?
+        .ok_or_else(|| PublicDataError::NotFound("Unit not found".into()))
 }
 
 pub(super) async fn list_parameters(
     pool: &PgPool,
     laboratory_id: Uuid,
-) -> Result<Vec<ParameterResponse>, FederationError> {
+) -> Result<Vec<ParameterResponse>, PublicDataError> {
     let rows = queries::fetch_parameters(pool, laboratory_id).await?;
     let mut response = Vec::with_capacity(rows.len());
     for row in rows {
@@ -260,8 +261,10 @@ pub(super) async fn fetch_parameter(
     pool: &PgPool,
     laboratory_id: Uuid,
     parameter_id: Uuid,
-) -> Result<ParameterResponse, FederationError> {
-    let row = queries::fetch_parameter(pool, laboratory_id, parameter_id).await?;
+) -> Result<ParameterResponse, PublicDataError> {
+    let row = queries::fetch_parameter(pool, laboratory_id, parameter_id)
+        .await?
+        .ok_or_else(|| PublicDataError::NotFound("Asset parameter not found".into()))?;
 
     parameter_response(pool, row).await
 }
@@ -271,7 +274,7 @@ pub(super) async fn fetch_parameter(
 async fn parameter_response(
     pool: &PgPool,
     row: ParameterRow,
-) -> Result<ParameterResponse, FederationError> {
+) -> Result<ParameterResponse, PublicDataError> {
     let options = queries::fetch_parameter_options(pool, row.parameter_type_id).await?;
 
     Ok(ParameterResponse {
@@ -292,7 +295,7 @@ async fn parameter_response(
 async fn fetch_parameter_values(
     pool: &PgPool,
     asset_ids: &[Uuid],
-) -> Result<HashMap<Uuid, Vec<ParameterValueResponse>>, FederationError> {
+) -> Result<HashMap<Uuid, Vec<ParameterValueResponse>>, PublicDataError> {
     let rows = queries::fetch_parameter_values(pool, asset_ids).await?;
     let mut values: HashMap<Uuid, Vec<_>> = HashMap::new();
     for row in rows {
@@ -309,7 +312,7 @@ pub(super) async fn list_laboratory_attachments(
     pool: &PgPool,
     laboratory_id: Uuid,
     query_string: &str,
-) -> Result<PaginatedJson<AttachmentPublicRow>, FederationError> {
+) -> Result<PaginatedJson<AttachmentPublicRow>, PublicDataError> {
     let (limit, offset) = limit_offset(query_string)?;
     let total = queries::count_laboratory_attachments(pool, laboratory_id).await?;
     let items = queries::fetch_laboratory_attachments(pool, laboratory_id, limit, offset).await?;
@@ -326,30 +329,34 @@ pub(super) async fn list_asset_attachments(
     pool: &PgPool,
     laboratory_id: Uuid,
     asset_id: Uuid,
-) -> Result<Vec<AttachmentPublicRow>, FederationError> {
-    queries::fetch_asset_attachments(pool, laboratory_id, asset_id).await
+) -> Result<Vec<AttachmentPublicRow>, PublicDataError> {
+    Ok(queries::fetch_asset_attachments(pool, laboratory_id, asset_id).await?)
 }
 
 pub(super) async fn list_inventory_item_attachments(
     pool: &PgPool,
     laboratory_id: Uuid,
     inventory_item_id: Uuid,
-) -> Result<Vec<AttachmentPublicRow>, FederationError> {
-    queries::fetch_inventory_item_attachments(pool, laboratory_id, inventory_item_id).await
+) -> Result<Vec<AttachmentPublicRow>, PublicDataError> {
+    Ok(queries::fetch_inventory_item_attachments(pool, laboratory_id, inventory_item_id).await?)
 }
 
 pub(super) async fn fetch_attachment(
     pool: &PgPool,
     laboratory_id: Uuid,
     attachment_id: Uuid,
-) -> Result<AttachmentPublicRow, FederationError> {
-    queries::fetch_attachment(pool, laboratory_id, attachment_id).await
+) -> Result<AttachmentPublicRow, PublicDataError> {
+    queries::fetch_attachment(pool, laboratory_id, attachment_id)
+        .await?
+        .ok_or_else(|| PublicDataError::NotFound("Attachment not found".into()))
 }
 
 pub(super) async fn fetch_attachment_download(
     pool: &PgPool,
     laboratory_id: Uuid,
     attachment_id: Uuid,
-) -> Result<AttachmentDownloadRow, FederationError> {
-    queries::fetch_attachment_download(pool, laboratory_id, attachment_id).await
+) -> Result<AttachmentDownloadRow, PublicDataError> {
+    queries::fetch_attachment_download(pool, laboratory_id, attachment_id)
+        .await?
+        .ok_or_else(|| PublicDataError::NotFound("Attachment not found".into()))
 }

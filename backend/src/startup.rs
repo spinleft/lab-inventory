@@ -6,19 +6,22 @@ use crate::configuration::{ApplicationSettings, DatabaseSettings, FederationSett
 use crate::file_storage::FileStorage;
 use crate::routes::{
     accept_pairing, assign_asset_attachment, assign_inventory_item_attachment,
-    batch_delete_inventory_items, batch_update_inventory_items, change_password, create_asset,
-    create_asset_category, create_asset_parameter, create_borrow_request,
+    batch_delete_inventory_items, batch_update_inventory_items, cancel_borrow_request,
+    change_password, create_asset, create_asset_category, create_asset_parameter,
+    create_borrow_request,
     create_guest_registration_code, create_inventory_items, create_laboratory, create_location,
     create_pairing_code, create_trust, create_unit, create_user, delete_asset,
     delete_asset_category, delete_asset_parameter, delete_attachment, delete_file_upload,
     delete_inventory_item, delete_laboratory, delete_location, delete_unit, delete_user,
     download_attachment, enforce_guest_registration_rate_limit, get_asset, get_asset_category,
     get_asset_parameter, get_attachment, get_inventory_item, get_laboratory, get_location,
-    get_unit, get_user, health_check, inbound_get, initialize_local_node, list_asset_attachments,
+    get_unit, get_user, health_check, inbound_get, inbound_post, initialize_local_node,
+    list_asset_attachments,
     list_asset_categories, list_asset_parameters, list_assets, list_audit_logs,
     list_borrow_requests, list_guest_links, list_inventory_item_attachments, list_inventory_items,
-    list_laboratories, list_laboratory_attachments, list_locations, list_trusts, list_units,
-    list_users, login, logout, me, merge_guest_link, merge_inventory_items, proxy_get,
+    list_laboratories, list_laboratory_attachments, list_locations, list_my_borrow_requests,
+    list_trusts, list_units, list_users, login, logout, me, merge_guest_link, merge_inventory_items,
+    proxy_get, proxy_post,
     register_guest, resolve_borrow_request, revoke_trust, split_inventory_item, update_asset,
     update_asset_category, update_asset_parameter, update_attachment, update_inventory_item,
     update_laboratory, update_location, update_unit, update_user, upload_file,
@@ -92,7 +95,7 @@ async fn run(
     redis_uri: Secret<String>,
     rate_limit_namespace: String,
 ) -> Result<Server, anyhow::Error> {
-    initialize_local_node(&db_pool, &federation).await?;
+    initialize_local_node(&db_pool).await?;
     let db_pool = Data::new(db_pool);
     let file_storage = Data::new(FileStorage::new(file_storage)?);
     let federation = Data::new(federation);
@@ -213,6 +216,11 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                 "/federation/inbound/laboratories/{laboratory_id}/{tail:.*}",
                 web::get().to(inbound_get),
             )
+            // Every write tail is non-empty, so there is no bare-path variant.
+            .route(
+                "/federation/inbound/laboratories/{laboratory_id}/{tail:.*}",
+                web::post().to(inbound_post),
+            )
             .service(
                 web::scope("")
                     .wrap(from_fn(reject_anonymous_users))
@@ -232,6 +240,10 @@ fn protected_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}/{tail:.*}",
             web::get().to(proxy_get),
+        )
+        .route(
+            "/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}/{tail:.*}",
+            web::post().to(proxy_post),
         )
         .service(
             web::scope("/local")
@@ -273,9 +285,15 @@ fn local_routes(cfg: &mut web::ServiceConfig) {
             web::post().to(merge_guest_link),
         )
         .route("/borrow-requests", web::get().to(list_borrow_requests))
+        // Registered ahead of the parameterised routes so the literal wins.
+        .route("/borrow-requests/mine", web::get().to(list_my_borrow_requests))
         .route(
             "/borrow-requests/{borrow_request_id}",
             web::patch().to(resolve_borrow_request),
+        )
+        .route(
+            "/borrow-requests/{borrow_request_id}/cancel",
+            web::post().to(cancel_borrow_request),
         )
         .route(
             "/inventory-items/{inventory_item_id}/borrow-requests",

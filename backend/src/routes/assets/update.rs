@@ -9,7 +9,6 @@ use super::service::{
     apply_asset_parameter_updates, convert_inventory_quantities_to_unit,
     validate_required_parameters,
 };
-use crate::access_control::AssetPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{
@@ -144,11 +143,10 @@ impl From<AssetDatabaseError> for UpdateAssetError {
 pub async fn update_asset(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    asset_id: AssetPathId,
+    asset_id: AssetId,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, UpdateAssetError> {
     let actor = laboratory_context.authorization_actor();
-    let asset_id: AssetId = asset_id.into_inner().into();
     if !validate_permission(
         &pool,
         &actor,

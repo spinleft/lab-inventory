@@ -54,7 +54,6 @@ pub struct FederationSettings {
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub request_ttl_seconds: i64,
     pub allowed_remote_hosts: Vec<String>,
-    pub local_node_id: Option<uuid::Uuid>,
 }
 
 impl DatabaseSettings {
@@ -97,51 +96,7 @@ pub fn get_configuration() -> Result<Settings, config::ConfigError> {
         )
         .build()?;
 
-    let mut settings: Settings = settings.try_deserialize::<Settings>()?;
-    configure_federation_local_node_id(&mut settings);
-
-    Ok(settings)
-}
-
-fn configure_federation_local_node_id(settings: &mut Settings) {
-    if settings.federation.local_node_id.is_none() {
-        let new_id = uuid::Uuid::new_v4();
-        settings.federation.local_node_id = Some(new_id);
-
-        // Persist to the environment-specific config file
-        let base_path = std::env::current_dir().expect("Failed to determine the current directory");
-        let configuration_directory = base_path.join("configuration");
-        let config_path = configuration_directory.join("base.yaml");
-        if let Ok(content) = std::fs::read_to_string(&config_path) {
-            let mut yaml_value = serde_yaml::from_str(&content)
-                .unwrap_or(serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
-
-            if let Some(federation) = yaml_value.get_mut("federation") {
-                if let Some(map) = federation.as_mapping_mut() {
-                    map.insert(
-                        serde_yaml::Value::String("local_node_id".to_string()),
-                        serde_yaml::Value::String(new_id.to_string()),
-                    );
-                }
-            } else {
-                let mut fed_map = serde_yaml::Mapping::new();
-                fed_map.insert(
-                    serde_yaml::Value::String("local_node_id".to_string()),
-                    serde_yaml::Value::String(new_id.to_string()),
-                );
-                if let Some(root_map) = yaml_value.as_mapping_mut() {
-                    root_map.insert(
-                        serde_yaml::Value::String("federation".to_string()),
-                        serde_yaml::Value::Mapping(fed_map),
-                    );
-                }
-            }
-
-            if let Ok(new_content) = serde_yaml::to_string(&yaml_value) {
-                let _ = std::fs::write(&config_path, new_content);
-            }
-        }
-    }
+    settings.try_deserialize::<Settings>()
 }
 
 pub enum Environment {

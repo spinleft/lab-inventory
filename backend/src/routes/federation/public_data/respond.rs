@@ -4,17 +4,16 @@
 //! routes, so the routing that Actix would normally do happens here:
 //! [`parse_read_target`] resolves the tail, and [`respond_public_data`] hands
 //! the target to `service.rs` and serializes what comes back.
-use super::model::FederationReadTarget;
+use super::model::{FederationReadTarget, PublicDataError};
 use super::service;
 use crate::domain::FileStorageKey;
 use crate::file_storage::FileStorage;
-use crate::routes::federation::model::FederationError;
 use actix_web::HttpResponse;
 use actix_web::http::header;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-pub(crate) fn parse_read_target(tail: &str) -> Result<FederationReadTarget, FederationError> {
+pub(crate) fn parse_read_target(tail: &str) -> Result<FederationReadTarget, PublicDataError> {
     let mut parts = tail
         .trim_matches('/')
         .split('/')
@@ -23,7 +22,7 @@ pub(crate) fn parse_read_target(tail: &str) -> Result<FederationReadTarget, Fede
     let second = parts.next();
     let third = parts.next();
     if parts.next().is_some() {
-        return Err(FederationError::NotFound(
+        return Err(PublicDataError::NotFound(
             "Federation route not found".into(),
         ));
     }
@@ -66,7 +65,7 @@ pub(crate) fn parse_read_target(tail: &str) -> Result<FederationReadTarget, Fede
         (Some("attachments"), Some(attachment_id), Some("download")) => Ok(
             FederationReadTarget::AttachmentDownload(parse_uuid(attachment_id)?),
         ),
-        _ => Err(FederationError::NotFound(
+        _ => Err(PublicDataError::NotFound(
             "Federation route not found".into(),
         )),
     }
@@ -78,7 +77,7 @@ pub(crate) async fn respond_public_data(
     laboratory_id: Uuid,
     target: FederationReadTarget,
     query_string: &str,
-) -> Result<HttpResponse, FederationError> {
+) -> Result<HttpResponse, PublicDataError> {
     match target {
         FederationReadTarget::Laboratory => {
             Ok(HttpResponse::Ok().json(service::fetch_laboratory(pool, laboratory_id).await?))
@@ -126,10 +125,10 @@ pub(crate) async fn respond_public_data(
     }
 }
 
-fn parse_uuid(value: &str) -> Result<Uuid, FederationError> {
+fn parse_uuid(value: &str) -> Result<Uuid, PublicDataError> {
     value
         .parse()
-        .map_err(|_| FederationError::NotFound("Federation route not found".into()))
+        .map_err(|_| PublicDataError::NotFound("Federation route not found".into()))
 }
 
 async fn download_attachment(
@@ -137,14 +136,14 @@ async fn download_attachment(
     storage: &FileStorage,
     laboratory_id: Uuid,
     attachment_id: Uuid,
-) -> Result<HttpResponse, FederationError> {
+) -> Result<HttpResponse, PublicDataError> {
     let row = service::fetch_attachment_download(pool, laboratory_id, attachment_id).await?;
     let storage_key = FileStorageKey::parse(row.storage_key)
-        .map_err(|e| FederationError::UnexpectedError(anyhow::anyhow!("{e}")))?;
+        .map_err(|e| PublicDataError::Unexpected(anyhow::anyhow!("{e}")))?;
     let bytes = storage
         .read(&storage_key)
         .await
-        .map_err(FederationError::UnexpectedError)?;
+        .map_err(PublicDataError::Unexpected)?;
 
     Ok(HttpResponse::Ok()
         .insert_header((

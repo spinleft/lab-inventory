@@ -1,7 +1,6 @@
 use super::model::{LocationResponse, update_location_rollback_details};
 use super::queries::{LocationDatabaseError, fetch_location_for_update};
 use super::service::{build_path_and_depth, move_location, resolve_moved_parent};
-use crate::access_control::LocationPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{LocationCode, LocationId, LocationName, NullableUpdate, UpdateLocation};
@@ -104,11 +103,10 @@ impl From<LocationDatabaseError> for UpdateLocationError {
 pub async fn update_location(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    location_id: LocationPathId,
+    location_id: LocationId,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, UpdateLocationError> {
     let actor = laboratory_context.authorization_actor();
-    let location_id: LocationId = location_id.into_inner().into();
     if !validate_permission(
         &pool,
         &actor,

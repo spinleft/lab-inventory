@@ -5,8 +5,9 @@ use super::queries::{
 use super::service::{
     BorrowRequestError, fetch_user_snapshot, record_borrow_request_audit, validate_resolver_actor,
 };
-use crate::access_control::{BorrowRequestPathId, LaboratoryContext};
+use crate::access_control::LaboratoryContext;
 use crate::audit::{AuditAction, AuditResource, record_audit};
+use crate::domain::BorrowRequestId;
 use crate::routes::inventory_items::{
     fetch_inventory_item_for_update, update_inventory_item_rollback_details,
 };
@@ -17,7 +18,7 @@ use sqlx::PgPool;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ResolveBorrowRequestBody {
+pub struct ResolveBorrowRequestJsonData {
     decision: String,
     decision_note: Option<String>,
 }
@@ -30,16 +31,22 @@ pub struct ResolveBorrowRequestBody {
 pub async fn resolve_borrow_request(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    borrow_request_id: BorrowRequestPathId,
-    payload: web::Json<ResolveBorrowRequestBody>,
+    borrow_request_id: BorrowRequestId,
+    payload: web::Json<ResolveBorrowRequestJsonData>,
 ) -> Result<HttpResponse, BorrowRequestError> {
     let actor = laboratory_context.actor();
     let laboratory_id = laboratory_context.laboratory_id();
-    let borrow_request_id = borrow_request_id.into_inner();
+    let borrow_request_id = *borrow_request_id;
     validate_resolver_actor(actor, laboratory_id)?;
     let decision = BorrowRequestStatus::parse(&payload.decision)
         .map_err(BorrowRequestError::ValidationError)?;
-    if decision == BorrowRequestStatus::Pending {
+    // Cancelling is the requester's move, not a decision, and it has its own route.
+    // Letting it through here would hand a reviewer a way to retract someone
+    // else's request while stamping themselves onto `reviewed_by`.
+    if matches!(
+        decision,
+        BorrowRequestStatus::Pending | BorrowRequestStatus::Cancelled
+    ) {
         return Err(BorrowRequestError::ValidationError(
             "decision must be approved or rejected".into(),
         ));

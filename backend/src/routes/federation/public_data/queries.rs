@@ -10,13 +10,14 @@ use super::model::{
     InventoryItemPublicRow, LaboratoryPublicRow, LocationRow, ParameterOptionRow, ParameterRow,
     ParameterValueRow, UnitRow,
 };
-use crate::routes::federation::model::FederationError;
 use sqlx::{PgPool, Postgres, QueryBuilder};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-fn unexpected(error: sqlx::Error) -> FederationError {
-    FederationError::UnexpectedError(error.into())
+/// Every statement here is a read that can only fail unexpectedly, so a row that
+/// is not there comes back as `None` and `service.rs` decides what missing means.
+fn unexpected(error: sqlx::Error) -> anyhow::Error {
+    anyhow::Error::from(error).context("Failed to read federation public data")
 }
 
 // ---------------------------------------------------------------------------
@@ -26,7 +27,7 @@ fn unexpected(error: sqlx::Error) -> FederationError {
 pub(super) async fn fetch_laboratory(
     pool: &PgPool,
     laboratory_id: Uuid,
-) -> Result<LaboratoryPublicRow, FederationError> {
+) -> Result<Option<LaboratoryPublicRow>, anyhow::Error> {
     sqlx::query_as::<_, LaboratoryPublicRow>(
         r#"
         SELECT laboratory_id, name, address, description, contact, created_at, updated_at
@@ -37,8 +38,7 @@ pub(super) async fn fetch_laboratory(
     .bind(laboratory_id)
     .fetch_optional(pool)
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::NotFound("Laboratory not found".into()))
+    .map_err(unexpected)
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ pub(super) async fn fetch_assets(
     params: &HashMap<String, String>,
     limit: i64,
     offset: i64,
-) -> Result<Vec<AssetPublicRow>, FederationError> {
+) -> Result<Vec<AssetPublicRow>, anyhow::Error> {
     let mut builder = QueryBuilder::<Postgres>::new(asset_select());
     push_asset_filters(&mut builder, laboratory_id, params);
     builder.push(" ORDER BY assets.updated_at DESC, assets.asset_id LIMIT ");
@@ -105,7 +105,7 @@ pub(super) async fn count_assets(
     pool: &PgPool,
     laboratory_id: Uuid,
     params: &HashMap<String, String>,
-) -> Result<i64, FederationError> {
+) -> Result<i64, anyhow::Error> {
     let mut builder = QueryBuilder::<Postgres>::new("SELECT COUNT(*) FROM assets");
     push_asset_filters(&mut builder, laboratory_id, params);
 
@@ -171,7 +171,7 @@ pub(super) async fn fetch_asset(
     pool: &PgPool,
     laboratory_id: Uuid,
     asset_id: Uuid,
-) -> Result<AssetPublicRow, FederationError> {
+) -> Result<Option<AssetPublicRow>, anyhow::Error> {
     sqlx::query_as::<_, AssetPublicRow>(&format!(
         "{} WHERE assets.laboratory_id = $1 AND assets.asset_id = $2",
         asset_select()
@@ -180,8 +180,7 @@ pub(super) async fn fetch_asset(
     .bind(asset_id)
     .fetch_optional(pool)
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::NotFound("Asset not found".into()))
+    .map_err(unexpected)
 }
 
 // ---------------------------------------------------------------------------
@@ -223,7 +222,7 @@ pub(super) async fn fetch_inventory_items(
     params: &HashMap<String, String>,
     limit: i64,
     offset: i64,
-) -> Result<Vec<InventoryItemPublicRow>, FederationError> {
+) -> Result<Vec<InventoryItemPublicRow>, anyhow::Error> {
     let mut builder = QueryBuilder::<Postgres>::new(inventory_item_select());
     push_inventory_filters(&mut builder, laboratory_id, params);
     builder.push(" ORDER BY asset_inventory_items.updated_at DESC, asset_inventory_items.inventory_item_id LIMIT ");
@@ -242,7 +241,7 @@ pub(super) async fn count_inventory_items(
     pool: &PgPool,
     laboratory_id: Uuid,
     params: &HashMap<String, String>,
-) -> Result<i64, FederationError> {
+) -> Result<i64, anyhow::Error> {
     let mut builder = QueryBuilder::<Postgres>::new(
         "SELECT COUNT(*) FROM asset_inventory_items JOIN assets ON assets.asset_id = asset_inventory_items.asset_id",
     );
@@ -301,7 +300,7 @@ pub(super) async fn fetch_inventory_item(
     pool: &PgPool,
     laboratory_id: Uuid,
     inventory_item_id: Uuid,
-) -> Result<InventoryItemPublicRow, FederationError> {
+) -> Result<Option<InventoryItemPublicRow>, anyhow::Error> {
     sqlx::query_as::<_, InventoryItemPublicRow>(&format!(
         "{} WHERE asset_inventory_items.laboratory_id = $1 AND asset_inventory_items.inventory_item_id = $2",
         inventory_item_select()
@@ -310,15 +309,14 @@ pub(super) async fn fetch_inventory_item(
     .bind(inventory_item_id)
     .fetch_optional(pool)
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::NotFound("Inventory item not found".into()))
+    .map_err(unexpected)
 }
 
 pub(super) async fn fetch_inventory_items_for_asset(
     pool: &PgPool,
     laboratory_id: Uuid,
     asset_id: Uuid,
-) -> Result<Vec<InventoryItemPublicRow>, FederationError> {
+) -> Result<Vec<InventoryItemPublicRow>, anyhow::Error> {
     sqlx::query_as::<_, InventoryItemPublicRow>(&format!(
         "{} WHERE asset_inventory_items.laboratory_id = $1 AND asset_inventory_items.asset_id = $2 ORDER BY asset_inventory_items.created_at, asset_inventory_items.inventory_item_id",
         inventory_item_select()
@@ -338,7 +336,7 @@ pub(super) async fn fetch_categories(
     pool: &PgPool,
     laboratory_id: Uuid,
     root_path: Option<String>,
-) -> Result<Vec<CategoryRow>, FederationError> {
+) -> Result<Vec<CategoryRow>, anyhow::Error> {
     sqlx::query_as::<_, CategoryRow>(
         r#"
         SELECT category_id, laboratory_id, parent_category_id, name, code, path::text AS path, depth, description, created_at, updated_at
@@ -359,7 +357,7 @@ pub(super) async fn fetch_category(
     pool: &PgPool,
     laboratory_id: Uuid,
     category_id: Uuid,
-) -> Result<CategoryRow, FederationError> {
+) -> Result<Option<CategoryRow>, anyhow::Error> {
     sqlx::query_as::<_, CategoryRow>(
         r#"
         SELECT category_id, laboratory_id, parent_category_id, name, code, path::text AS path, depth, description, created_at, updated_at
@@ -371,15 +369,14 @@ pub(super) async fn fetch_category(
     .bind(category_id)
     .fetch_optional(pool)
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::NotFound("Asset category not found".into()))
+    .map_err(unexpected)
 }
 
 pub(super) async fn fetch_locations(
     pool: &PgPool,
     laboratory_id: Uuid,
     root_path: Option<String>,
-) -> Result<Vec<LocationRow>, FederationError> {
+) -> Result<Vec<LocationRow>, anyhow::Error> {
     sqlx::query_as::<_, LocationRow>(
         r#"
         SELECT location_id, laboratory_id, parent_location_id, name, code, path::text AS path, depth, description, created_at, updated_at
@@ -400,7 +397,7 @@ pub(super) async fn fetch_location(
     pool: &PgPool,
     laboratory_id: Uuid,
     location_id: Uuid,
-) -> Result<LocationRow, FederationError> {
+) -> Result<Option<LocationRow>, anyhow::Error> {
     sqlx::query_as::<_, LocationRow>(
         r#"
         SELECT location_id, laboratory_id, parent_location_id, name, code, path::text AS path, depth, description, created_at, updated_at
@@ -412,14 +409,13 @@ pub(super) async fn fetch_location(
     .bind(location_id)
     .fetch_optional(pool)
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::NotFound("Location not found".into()))
+    .map_err(unexpected)
 }
 
 pub(super) async fn fetch_units(
     pool: &PgPool,
     laboratory_id: Uuid,
-) -> Result<Vec<UnitRow>, FederationError> {
+) -> Result<Vec<UnitRow>, anyhow::Error> {
     sqlx::query_as::<_, UnitRow>(
         r#"
         SELECT unit_id, laboratory_id, code, name, symbol, dimension, scale_to_base, allow_decimal, created_at
@@ -438,7 +434,7 @@ pub(super) async fn fetch_unit(
     pool: &PgPool,
     laboratory_id: Uuid,
     unit_id: Uuid,
-) -> Result<UnitRow, FederationError> {
+) -> Result<Option<UnitRow>, anyhow::Error> {
     sqlx::query_as::<_, UnitRow>(
         r#"
         SELECT unit_id, laboratory_id, code, name, symbol, dimension, scale_to_base, allow_decimal, created_at
@@ -450,8 +446,7 @@ pub(super) async fn fetch_unit(
     .bind(unit_id)
     .fetch_optional(pool)
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::NotFound("Unit not found".into()))
+    .map_err(unexpected)
 }
 
 // ---------------------------------------------------------------------------
@@ -461,7 +456,7 @@ pub(super) async fn fetch_unit(
 pub(super) async fn fetch_parameters(
     pool: &PgPool,
     laboratory_id: Uuid,
-) -> Result<Vec<ParameterRow>, FederationError> {
+) -> Result<Vec<ParameterRow>, anyhow::Error> {
     sqlx::query_as::<_, ParameterRow>(
         r#"
         SELECT parameter_type_id, laboratory_id, code, name, data_type::text AS data_type, unit_dimension, default_unit_id, description, created_at, updated_at
@@ -480,7 +475,7 @@ pub(super) async fn fetch_parameter(
     pool: &PgPool,
     laboratory_id: Uuid,
     parameter_id: Uuid,
-) -> Result<ParameterRow, FederationError> {
+) -> Result<Option<ParameterRow>, anyhow::Error> {
     sqlx::query_as::<_, ParameterRow>(
         r#"
         SELECT parameter_type_id, laboratory_id, code, name, data_type::text AS data_type, unit_dimension, default_unit_id, description, created_at, updated_at
@@ -492,14 +487,13 @@ pub(super) async fn fetch_parameter(
     .bind(parameter_id)
     .fetch_optional(pool)
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::NotFound("Asset parameter not found".into()))
+    .map_err(unexpected)
 }
 
 pub(super) async fn fetch_parameter_options(
     pool: &PgPool,
     parameter_type_id: Uuid,
-) -> Result<Vec<ParameterOptionRow>, FederationError> {
+) -> Result<Vec<ParameterOptionRow>, anyhow::Error> {
     sqlx::query_as::<_, ParameterOptionRow>(
         r#"
         SELECT option_id, parameter_type_id, code, label, sort_order
@@ -517,7 +511,7 @@ pub(super) async fn fetch_parameter_options(
 pub(super) async fn fetch_parameter_values(
     pool: &PgPool,
     asset_ids: &[Uuid],
-) -> Result<Vec<ParameterValueRow>, FederationError> {
+) -> Result<Vec<ParameterValueRow>, anyhow::Error> {
     if asset_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -594,7 +588,7 @@ fn attachment_select(suffix: &str) -> String {
 pub(super) async fn count_laboratory_attachments(
     pool: &PgPool,
     laboratory_id: Uuid,
-) -> Result<i64, FederationError> {
+) -> Result<i64, anyhow::Error> {
     sqlx::query_scalar::<_, i64>(
         r#"
         SELECT COUNT(*)
@@ -614,7 +608,7 @@ pub(super) async fn fetch_laboratory_attachments(
     laboratory_id: Uuid,
     limit: i64,
     offset: i64,
-) -> Result<Vec<AttachmentPublicRow>, FederationError> {
+) -> Result<Vec<AttachmentPublicRow>, anyhow::Error> {
     sqlx::query_as::<_, AttachmentPublicRow>(&attachment_select(
         "WHERE assignments.laboratory_id = $1 AND assignments.is_public ORDER BY assignments.created_at DESC, assignments.attachment_id LIMIT $2 OFFSET $3",
     ))
@@ -630,7 +624,7 @@ pub(super) async fn fetch_asset_attachments(
     pool: &PgPool,
     laboratory_id: Uuid,
     asset_id: Uuid,
-) -> Result<Vec<AttachmentPublicRow>, FederationError> {
+) -> Result<Vec<AttachmentPublicRow>, anyhow::Error> {
     sqlx::query_as::<_, AttachmentPublicRow>(&attachment_select(
         "WHERE assignments.laboratory_id = $1 AND assignments.asset_id = $2 AND assignments.is_public ORDER BY assignments.created_at DESC, assignments.attachment_id",
     ))
@@ -645,7 +639,7 @@ pub(super) async fn fetch_inventory_item_attachments(
     pool: &PgPool,
     laboratory_id: Uuid,
     inventory_item_id: Uuid,
-) -> Result<Vec<AttachmentPublicRow>, FederationError> {
+) -> Result<Vec<AttachmentPublicRow>, anyhow::Error> {
     sqlx::query_as::<_, AttachmentPublicRow>(&attachment_select(
         "WHERE assignments.laboratory_id = $1 AND assignments.inventory_item_id = $2 AND assignments.is_public ORDER BY assignments.created_at DESC, assignments.attachment_id",
     ))
@@ -660,7 +654,7 @@ pub(super) async fn fetch_attachment(
     pool: &PgPool,
     laboratory_id: Uuid,
     attachment_id: Uuid,
-) -> Result<AttachmentPublicRow, FederationError> {
+) -> Result<Option<AttachmentPublicRow>, anyhow::Error> {
     sqlx::query_as::<_, AttachmentPublicRow>(&attachment_select(
         "WHERE assignments.laboratory_id = $1 AND assignments.attachment_id = $2 AND assignments.is_public",
     ))
@@ -668,15 +662,14 @@ pub(super) async fn fetch_attachment(
     .bind(attachment_id)
     .fetch_optional(pool)
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::NotFound("Attachment not found".into()))
+    .map_err(unexpected)
 }
 
 pub(super) async fn fetch_attachment_download(
     pool: &PgPool,
     laboratory_id: Uuid,
     attachment_id: Uuid,
-) -> Result<AttachmentDownloadRow, FederationError> {
+) -> Result<Option<AttachmentDownloadRow>, anyhow::Error> {
     sqlx::query_as::<_, AttachmentDownloadRow>(
         r#"
         SELECT files.storage_key, files.original_file_name, files.mime_type
@@ -691,6 +684,5 @@ pub(super) async fn fetch_attachment_download(
     .bind(attachment_id)
     .fetch_optional(pool)
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::NotFound("Attachment not found".into()))
+    .map_err(unexpected)
 }

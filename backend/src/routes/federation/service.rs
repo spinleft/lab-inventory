@@ -3,37 +3,30 @@
 //!
 //! Anything here orchestrates `queries.rs`. Single-statement work belongs in
 //! `queries.rs`; HTTP concerns belong in the handler modules.
-use super::model::FederationError;
 use super::queries::{
-    delete_expired_nonces, delete_shadow_guest, fetch_local_node_for_update, fetch_user_role,
-    guest_link_exists_for_user, insert_guest_link, insert_local_node, insert_nonce,
-    insert_shadow_guest, touch_guest_link, update_local_node_base_url,
+    FederationDatabaseError, delete_expired_nonces, delete_shadow_guest, fetch_local_node_id,
+    fetch_user_role, guest_link_exists_for_user, insert_guest_link, insert_nonce,
+    insert_shadow_guest, touch_guest_link, update_guest_link_user,
 };
-use super::security::InboundFederationContext;
-use crate::access_control::{Actor, get_actor};
+use super::model::GuestLinkIdentity;
+use super::security::{FederationSecurityError, InboundFederationContext};
 use crate::authentication::hash_password;
-use crate::configuration::FederationSettings;
-use crate::domain::{LaboratoryId, UserId, UserType};
+use crate::domain::UserType;
+use anyhow::Context;
 use secrecy::{ExposeSecret, Secret};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
-/// Makes sure this server has exactly one federation identity, and that the
-/// base URL other nodes reach it on matches the configuration.
-pub async fn initialize_local_node(
-    pool: &PgPool,
-    settings: &FederationSettings,
-) -> Result<(), anyhow::Error> {
-    let mut transaction = pool.begin().await?;
-    match fetch_local_node_for_update(&mut transaction).await? {
-        Some(row) if row.public_base_url != settings.public_base_url => {
-            update_local_node_base_url(&mut transaction, row.node_id, &settings.public_base_url)
-                .await?;
-        }
-        Some(_) => {}
-        None => insert_local_node(&mut transaction, &settings.public_base_url).await?,
-    }
-    transaction.commit().await?;
+/// Refuses to start without this server's federation identity.
+///
+/// The migration mints it, and the table cannot hold a second row, so the only
+/// way it can be missing is that someone deleted it. Minting a replacement here
+/// would be worse than failing: partners pin the old id, so a new one would
+/// strand every trust already built on it while looking like a clean start.
+pub async fn initialize_local_node(pool: &PgPool) -> Result<(), anyhow::Error> {
+    fetch_local_node_id(pool)
+        .await?
+        .context("This server has no federation node identity")?;
 
     Ok(())
 }
@@ -42,54 +35,16 @@ pub async fn initialize_local_node(
 // who may act
 // ---------------------------------------------------------------------------
 
-pub(super) async fn lab_admin_for_laboratory(
-    pool: &PgPool,
-    actor_user_id: UserId,
-    laboratory_id: Uuid,
-) -> Result<Actor, FederationError> {
-    let actor = federation_actor(pool, actor_user_id).await?;
-    let laboratory_id = parse_laboratory_id(laboratory_id)?;
-    if actor.is_lab_admin() && actor.laboratory_id == Some(laboratory_id) {
-        Ok(actor)
-    } else {
-        Err(FederationError::Forbidden(
-            "Only this laboratory's administrator can manage federation".into(),
-        ))
-    }
-}
+// Who may act on federation state is decided by `ResourceType::Federation` in
+// `access_control`, alongside every other resource. Each route answers a refusal
+// with its own error, and these messages keep the wording the same across all of
+// them.
 
-pub(super) async fn federation_reader_for_laboratory(
-    pool: &PgPool,
-    actor_user_id: UserId,
-    laboratory_id: Uuid,
-) -> Result<Actor, FederationError> {
-    let actor = federation_actor(pool, actor_user_id).await?;
-    let laboratory_id = parse_laboratory_id(laboratory_id)?;
-    if (actor.is_lab_admin() || actor.is_regular_user())
-        && actor.laboratory_id == Some(laboratory_id)
-    {
-        Ok(actor)
-    } else {
-        Err(FederationError::Forbidden(
-            "Only this laboratory's administrators and users can view federation".into(),
-        ))
-    }
-}
+pub(super) const MANAGE_FEDERATION_FORBIDDEN: &str =
+    "Only this laboratory's administrator can manage federation";
 
-pub(super) async fn federation_actor(
-    pool: &PgPool,
-    actor_user_id: UserId,
-) -> Result<Actor, FederationError> {
-    get_actor(pool, actor_user_id)
-        .await
-        .map_err(FederationError::UnexpectedError)?
-        .ok_or_else(|| FederationError::Forbidden("Actor not found in the database".into()))
-}
-
-fn parse_laboratory_id(laboratory_id: Uuid) -> Result<LaboratoryId, FederationError> {
-    LaboratoryId::parse(laboratory_id)
-        .map_err(|e| FederationError::UnexpectedError(anyhow::anyhow!("{e}")))
-}
+pub(super) const READ_FEDERATION_FORBIDDEN: &str =
+    "Only this laboratory's administrators and users can view federation";
 
 /// A guest link may only be pointed at a guest account of the same laboratory:
 /// merging it onto anything else would hand a remote user someone's identity.
@@ -97,17 +52,17 @@ pub(super) async fn validate_target_guest(
     pool: &PgPool,
     laboratory_id: Uuid,
     target_guest_user_id: Uuid,
-) -> Result<(), FederationError> {
+) -> Result<(), FederationDatabaseError> {
     let Some((user_type, user_laboratory_id)) = fetch_user_role(pool, target_guest_user_id).await?
     else {
-        return Err(FederationError::ValidationError(
+        return Err(FederationDatabaseError::Validation(
             "Target guest user not found".into(),
         ));
     };
-    if UserType::parse(&user_type).map_err(FederationError::ValidationError)? != UserType::Guest
+    if UserType::parse(&user_type).map_err(FederationDatabaseError::Validation)? != UserType::Guest
         || user_laboratory_id != Some(laboratory_id)
     {
-        return Err(FederationError::ValidationError(
+        return Err(FederationDatabaseError::Validation(
             "Target user must be a guest in this laboratory".into(),
         ));
     }
@@ -119,7 +74,8 @@ pub(super) async fn validate_target_guest(
 // guest links
 // ---------------------------------------------------------------------------
 
-/// The local guest account a remote user acts as in this laboratory.
+/// The identity a remote user acts under in this laboratory: the link recording
+/// where they came from, and the local guest account standing in for them.
 ///
 /// A user seen before keeps the account they already have. A new one gets a
 /// shadow account created for them, which exists only to give their activity a
@@ -128,7 +84,7 @@ pub(super) async fn upsert_guest_link(
     pool: &PgPool,
     local_laboratory_id: Uuid,
     context: &InboundFederationContext,
-) -> Result<Uuid, FederationError> {
+) -> Result<GuestLinkIdentity, FederationDatabaseError> {
     let existing = touch_guest_link(
         pool,
         local_laboratory_id,
@@ -139,19 +95,19 @@ pub(super) async fn upsert_guest_link(
         &context.remote_user_type,
     )
     .await?;
-    if let Some(user_id) = existing {
-        return Ok(user_id);
+    if let Some(identity) = existing {
+        return Ok(identity);
     }
 
     // The shadow account can never be signed into directly, but the column is
     // not nullable, so it is given a password nobody knows.
     let password_hash = hash_password(Secret::new(super::security::generate_token(32)))
         .await
-        .map_err(FederationError::UnexpectedError)?;
+        .context("Failed to hash the password of a federation shadow guest")?;
     let mut transaction = pool
         .begin()
         .await
-        .map_err(|e| FederationError::UnexpectedError(e.into()))?;
+        .context("Failed to acquire a Postgres connection from the pool")?;
     let guest_user_id = insert_shadow_guest(
         &mut transaction,
         Uuid::new_v4(),
@@ -160,7 +116,7 @@ pub(super) async fn upsert_guest_link(
         local_laboratory_id,
     )
     .await?;
-    let link_user_id = insert_guest_link(
+    let identity = insert_guest_link(
         &mut transaction,
         local_laboratory_id,
         context.remote_node.remote_node_id,
@@ -173,15 +129,15 @@ pub(super) async fn upsert_guest_link(
     .await?;
     // A concurrent request may have created the link first, in which case its
     // guest is the one that counts and the account just created is dead weight.
-    if link_user_id != guest_user_id {
+    if identity.local_guest_user_id != guest_user_id {
         delete_shadow_guest(&mut transaction, guest_user_id).await?;
     }
     transaction
         .commit()
         .await
-        .map_err(|e| FederationError::UnexpectedError(e.into()))?;
+        .context("Failed to commit SQL transaction to store a federation guest link")?;
 
-    Ok(link_user_id)
+    Ok(identity)
 }
 
 fn shadow_guest_username(context: &InboundFederationContext) -> String {
@@ -192,22 +148,17 @@ fn shadow_guest_username(context: &InboundFederationContext) -> String {
 
 /// Points a guest link at another local account, cleaning up the shadow account
 /// it used to use if that leaves it unreferenced.
+///
+/// `old_guest_user_id` is the one the caller read under `FOR UPDATE`, which is
+/// what keeps a concurrent merge from deleting an account this one just linked.
 pub(super) async fn merge_guest_link_user(
     transaction: &mut Transaction<'_, Postgres>,
     laboratory_id: Uuid,
     link_id: Uuid,
+    old_guest_user_id: Uuid,
     target_guest_user_id: Uuid,
-) -> Result<(), FederationError> {
-    let old_guest_user_id =
-        super::queries::fetch_guest_link_user_for_update(transaction, laboratory_id, link_id)
-            .await?;
-    super::queries::update_guest_link_user(
-        transaction,
-        laboratory_id,
-        link_id,
-        target_guest_user_id,
-    )
-    .await?;
+) -> Result<(), FederationDatabaseError> {
+    update_guest_link_user(transaction, laboratory_id, link_id, target_guest_user_id).await?;
     if !guest_link_exists_for_user(transaction, old_guest_user_id).await? {
         delete_shadow_guest(transaction, old_guest_user_id).await?;
     }
@@ -226,7 +177,9 @@ pub(super) async fn remember_nonce(
     remote_node_id: Uuid,
     nonce: &str,
     ttl_seconds: i64,
-) -> Result<(), FederationError> {
+) -> Result<(), FederationSecurityError> {
     delete_expired_nonces(pool).await?;
-    insert_nonce(pool, remote_node_id, nonce, ttl_seconds).await
+    insert_nonce(pool, remote_node_id, nonce, ttl_seconds).await?;
+
+    Ok(())
 }

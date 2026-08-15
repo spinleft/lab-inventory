@@ -5,15 +5,18 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 ALTER TABLE users
 ADD COLUMN is_federation_shadow BOOLEAN NOT NULL DEFAULT false;
 
+-- This server's federation identity. Partners pin `node_id` as the primary key
+-- of their own `federation_remote_nodes` row for us, so it is minted once here
+-- and never changes. The `singleton` key is what keeps the table to one row.
 CREATE TABLE federation_local_nodes (
-    node_id uuid PRIMARY KEY,
-    public_base_url TEXT NOT NULL DEFAULT '',
+    singleton BOOLEAN PRIMARY KEY DEFAULT true,
+    node_id uuid NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now()
+    CHECK (singleton)
 );
 
-INSERT INTO federation_local_nodes (node_id, public_base_url)
-VALUES (gen_random_uuid(), '');
+INSERT INTO federation_local_nodes (node_id)
+VALUES (gen_random_uuid());
 
 CREATE TABLE federation_remote_nodes (
     remote_node_id uuid PRIMARY KEY,

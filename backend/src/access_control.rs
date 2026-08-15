@@ -1,6 +1,6 @@
 use crate::domain::{
-    AssetId, AssetParameterId, InventoryItemId, LaboratoryId, LocationId, UnitId, UserId, UserRole,
-    UserType,
+    AssetCategoryId, AssetId, AssetParameterId, AttachmentId, BorrowRequestId, FileUploadId,
+    InventoryItemId, LaboratoryId, LocationId, UnitId, UserId, UserRole, UserType,
 };
 use actix_web::dev::Payload;
 use actix_web::error::InternalError;
@@ -120,31 +120,12 @@ impl FromRequest for LaboratoryContext {
     }
 }
 
+/// Lets a domain identifier be extracted straight out of a route parameter, so a
+/// handler asks for the type it is going to work with rather than a `Uuid` it
+/// has to convert. The identifiers themselves stay in `domain`, which knows
+/// nothing about Actix; only this impl does.
 macro_rules! route_uuid {
     ($name:ident, $parameter:literal) => {
-        #[derive(Clone, Copy, Debug)]
-        pub struct $name(Uuid);
-
-        impl $name {
-            pub fn into_inner(self) -> Uuid {
-                self.0
-            }
-        }
-
-        impl Deref for $name {
-            type Target = Uuid;
-
-            fn deref(&self) -> &Self::Target {
-                &self.0
-            }
-        }
-
-        impl std::fmt::Display for $name {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                self.0.fmt(f)
-            }
-        }
-
         impl FromRequest for $name {
             type Error = actix_web::Error;
             type Future = Ready<Result<Self, Self::Error>>;
@@ -158,7 +139,7 @@ macro_rules! route_uuid {
                 };
                 ready(
                     Uuid::parse_str(value)
-                        .map(Self)
+                        .map(Into::into)
                         .map_err(actix_web::error::ErrorBadRequest),
                 )
             }
@@ -166,15 +147,15 @@ macro_rules! route_uuid {
     };
 }
 
-route_uuid!(AssetPathId, "asset_id");
-route_uuid!(AssetCategoryPathId, "category_id");
-route_uuid!(AssetParameterPathId, "parameter_id");
-route_uuid!(AttachmentPathId, "attachment_id");
-route_uuid!(BorrowRequestPathId, "borrow_request_id");
-route_uuid!(FileUploadPathId, "upload_id");
-route_uuid!(InventoryItemPathId, "inventory_item_id");
-route_uuid!(LocationPathId, "location_id");
-route_uuid!(UnitPathId, "unit_id");
+route_uuid!(AssetId, "asset_id");
+route_uuid!(AssetCategoryId, "category_id");
+route_uuid!(AssetParameterId, "parameter_id");
+route_uuid!(AttachmentId, "attachment_id");
+route_uuid!(BorrowRequestId, "borrow_request_id");
+route_uuid!(FileUploadId, "upload_id");
+route_uuid!(InventoryItemId, "inventory_item_id");
+route_uuid!(LocationId, "location_id");
+route_uuid!(UnitId, "unit_id");
 
 pub enum ResourceType {
     Laboratory,
@@ -188,6 +169,7 @@ pub enum ResourceType {
     AssetParameter,
     AttachmentAssignment,
     FileUpload,
+    Federation,
 }
 
 pub enum Action<'a> {
@@ -808,10 +790,13 @@ impl Actor {
                 || (self.laboratory_id == Some(assignment.laboratory_id)
                     && (assignment.is_public || !self.is_guest())))
         } else {
-            // A missing attachment is a 404 for actors who can see every
-            // laboratory, and stays a 403 for everyone else so that they cannot
-            // probe for attachment ids they are not allowed to know about.
-            Ok(self.is_system_admin())
+            // Every route that addresses an attachment by id authorizes through
+            // `LaboratoryContext::authorization_actor`, which scopes even a system
+            // admin to a single laboratory, so no caller here can see every
+            // laboratory. A missing attachment is therefore indistinguishable from
+            // one the actor may not touch, and both answer 403 so that nobody can
+            // probe for attachment ids.
+            Ok(false)
         }
     }
 
@@ -827,6 +812,18 @@ impl Actor {
         self.is_root()
             || self.is_super_admin()
             || ((self.is_lab_admin() || self.is_regular_user()) && self.laboratory_id.is_some())
+    }
+
+    /// Federation state is a laboratory's own configuration: only its
+    /// administrator may change it.
+    pub fn can_manage_federation(&self, laboratory_id: LaboratoryId) -> bool {
+        self.is_lab_admin() && self.laboratory_id == Some(laboratory_id)
+    }
+
+    /// Reading which laboratories are federated with is open to everyone who can
+    /// actually follow those links.
+    pub fn can_read_federation(&self, laboratory_id: LaboratoryId) -> bool {
+        (self.is_lab_admin() || self.is_regular_user()) && self.laboratory_id == Some(laboratory_id)
     }
 }
 
@@ -1006,16 +1003,12 @@ pub async fn validate_permission(
             Action::Create(laboratory_id) => {
                 Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
             }
-            Action::Delete(upload_id) => {
-                Ok(actor.can_manage_file_upload(pool, upload_id).await?)
-            }
+            Action::Delete(upload_id) => Ok(actor.can_manage_file_upload(pool, upload_id).await?),
             Action::Read(_) => Ok(true),
             Action::Browse(laboratory_id) => {
                 Ok(actor.can_browse_laboratory_resource(laboratory_id.into()))
             }
-            Action::Assign(upload_id) => {
-                Ok(actor.can_assign_file_upload(pool, upload_id).await?)
-            }
+            Action::Assign(upload_id) => Ok(actor.can_assign_file_upload(pool, upload_id).await?),
             _ => Ok(false),
         },
         ResourceType::AttachmentAssignment => match action {
@@ -1038,6 +1031,20 @@ pub async fn validate_permission(
             Action::Update(attachment_id) => Ok(actor
                 .can_manage_attachment_assignment(pool, attachment_id)
                 .await?),
+            _ => Ok(false),
+        },
+        // Federation state is a laboratory's own configuration rather than a set
+        // of separately owned rows, so every action is answered from the
+        // laboratory it belongs to. The trust and guest link ids stay out of it:
+        // the queries that read them are already scoped to that laboratory.
+        ResourceType::Federation => match action {
+            Action::Create(laboratory_id)
+            | Action::Update(laboratory_id)
+            | Action::Delete(laboratory_id)
+            | Action::BrowseInternal(laboratory_id) => {
+                Ok(actor.can_manage_federation(laboratory_id.into()))
+            }
+            Action::Browse(laboratory_id) => Ok(actor.can_read_federation(laboratory_id.into())),
             _ => Ok(false),
         },
     }

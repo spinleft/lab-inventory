@@ -1,5 +1,4 @@
 use super::queries::{delete_file_upload_from_database, fetch_file_upload_for_update};
-use crate::access_control::FileUploadPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::domain::{FileStorageKey, FileUploadId};
 use crate::file_storage::FileStorage;
@@ -50,10 +49,9 @@ pub async fn delete_file_upload(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
     storage: web::Data<FileStorage>,
-    upload_id: FileUploadPathId,
+    upload_id: FileUploadId,
 ) -> Result<HttpResponse, DeleteFileUploadError> {
     let actor = laboratory_context.authorization_actor();
-    let upload_id: FileUploadId = upload_id.into_inner().into();
     if !validate_permission(
         &pool,
         &actor,

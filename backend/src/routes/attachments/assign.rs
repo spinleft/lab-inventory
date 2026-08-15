@@ -2,7 +2,6 @@ use super::model::{AttachmentResponse, AttachmentTarget};
 use super::queries::{fetch_asset_laboratory_id, fetch_inventory_item_laboratory_id};
 use super::service::{AssignAttachmentError, assign_uploaded_attachments};
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
-use crate::access_control::{AssetPathId, InventoryItemPathId};
 use crate::domain::{AssetId, AttachmentDisplayName, FileUploadId, InventoryItemId, NewAttachment};
 use actix_web::{HttpResponse, web};
 use anyhow::Context;
@@ -53,11 +52,10 @@ impl TryFrom<AttachmentJsonData> for NewAttachment {
 pub async fn assign_asset_attachment(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    asset_id: AssetPathId,
+    asset_id: AssetId,
     payload: web::Json<AttachmentJsonData>,
 ) -> Result<HttpResponse, AssignAttachmentError> {
     let actor = laboratory_context.authorization_actor();
-    let asset_id: AssetId = asset_id.into_inner().into();
     let asset_laboratory_id = fetch_asset_laboratory_id(&pool, asset_id)
         .await?
         .ok_or_else(|| AssignAttachmentError::NotFound("Asset not found".into()))?;
@@ -122,11 +120,10 @@ pub async fn assign_asset_attachment(
 pub async fn assign_inventory_item_attachment(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    inventory_item_id: InventoryItemPathId,
+    inventory_item_id: InventoryItemId,
     payload: web::Json<AttachmentJsonData>,
 ) -> Result<HttpResponse, AssignAttachmentError> {
     let actor = laboratory_context.authorization_actor();
-    let inventory_item_id: InventoryItemId = inventory_item_id.into_inner().into();
     let inventory_item_laboratory_id = fetch_inventory_item_laboratory_id(&pool, inventory_item_id)
         .await?
         .ok_or_else(|| AssignAttachmentError::NotFound("Inventory item not found".into()))?;

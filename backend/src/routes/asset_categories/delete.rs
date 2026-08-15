@@ -5,7 +5,6 @@ use super::queries::{
     fetch_asset_category_tree_for_update,
 };
 use super::service::delete_asset_category_subtree;
-use crate::access_control::AssetCategoryPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::AssetCategoryId;
@@ -65,10 +64,9 @@ impl From<AssetCategoryDatabaseError> for DeleteAssetCategoryError {
 pub async fn delete_asset_category(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    category_id: AssetCategoryPathId,
+    category_id: AssetCategoryId,
 ) -> Result<HttpResponse, DeleteAssetCategoryError> {
     let actor = laboratory_context.authorization_actor();
-    let category_id: AssetCategoryId = category_id.into_inner().into();
     if !validate_permission(
         &pool,
         &actor,

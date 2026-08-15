@@ -14,6 +14,8 @@ import {
   canManageUnits,
   canManageUser,
   canRequestBorrow,
+  canRequestRemoteBorrow,
+  canViewMyBorrowRequests,
   canSelectAssetLaboratory,
   canSelectAssetQueryLaboratory,
   canSelectAssetCategoryLaboratory,
@@ -217,6 +219,22 @@ describe("asset and borrowing access", () => {
     expect(canRequestBorrow(user("user", ownLaboratory))).toBe(true);
     expect(canRequestBorrow(user("guest"))).toBe(false);
     expect(canRequestBorrow(user("root"))).toBe(false);
+  });
+
+  it("keeps guests out of remote borrowing, which goes through the federation proxy", () => {
+    expect(canRequestRemoteBorrow(user("lab_admin", ownLaboratory))).toBe(true);
+    expect(canRequestRemoteBorrow(user("user", ownLaboratory))).toBe(true);
+    // The proxy refuses guests and system admins, so offering them the action
+    // would only produce a 403.
+    expect(canRequestRemoteBorrow(user("guest", ownLaboratory))).toBe(false);
+    expect(canRequestRemoteBorrow(user("root"))).toBe(false);
+    expect(canRequestRemoteBorrow(user("user"))).toBe(false);
+  });
+
+  it("lets everyone who can borrow see their own requests", () => {
+    expect(canViewMyBorrowRequests(user("guest", ownLaboratory))).toBe(true);
+    expect(canViewMyBorrowRequests(user("user", ownLaboratory))).toBe(true);
+    expect(canViewMyBorrowRequests(user("root"))).toBe(false);
   });
 
   it("limits laboratory management to system administrators", () => {

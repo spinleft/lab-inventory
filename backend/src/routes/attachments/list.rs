@@ -5,7 +5,6 @@ use super::queries::{
     fetch_laboratory_attachments,
 };
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
-use crate::access_control::{AssetPathId, InventoryItemPathId};
 use crate::domain::{AssetId, InventoryItemId};
 use crate::routes::{PaginatedResponse, Pagination, PaginationError};
 use crate::utils::error_chain_fmt;
@@ -59,10 +58,9 @@ impl ResponseError for ListAttachmentError {
 pub async fn list_asset_attachments(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    asset_id: AssetPathId,
+    asset_id: AssetId,
 ) -> Result<HttpResponse, ListAttachmentError> {
     let actor = laboratory_context.authorization_actor();
-    let asset_id: AssetId = asset_id.into_inner().into();
     let laboratory_id = fetch_asset_laboratory_id(&pool, asset_id)
         .await?
         .ok_or_else(|| ListAttachmentError::NotFound("Asset not found".into()))?;
@@ -104,10 +102,9 @@ pub async fn list_asset_attachments(
 pub async fn list_inventory_item_attachments(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    inventory_item_id: InventoryItemPathId,
+    inventory_item_id: InventoryItemId,
 ) -> Result<HttpResponse, ListAttachmentError> {
     let actor = laboratory_context.authorization_actor();
-    let inventory_item_id: InventoryItemId = inventory_item_id.into_inner().into();
     let laboratory_id = fetch_inventory_item_laboratory_id(&pool, inventory_item_id)
         .await?
         .ok_or_else(|| ListAttachmentError::NotFound("Inventory item not found".into()))?;

@@ -343,7 +343,7 @@ async fn update_unit_rejects_invalid_duplicate_and_unauthorized_requests() {
     let response = app
         .patch_unit(Uuid::new_v4(), &serde_json::json!({ "name": "Missing" }))
         .await;
-    assert_eq!(response.status().as_u16(), 404);
+    assert_eq!(response.status().as_u16(), 403);
 
     let guest = TestUser::generate_with_user_type("guest", Some(laboratory_id));
     app.store_user(&guest).await;
@@ -351,7 +351,7 @@ async fn update_unit_rejects_invalid_duplicate_and_unauthorized_requests() {
     let response = app
         .patch_unit(unit_id, &serde_json::json!({ "name": "Forbidden" }))
         .await;
-    assert_eq!(response.status().as_u16(), 404);
+    assert_eq!(response.status().as_u16(), 403);
 
     let other_laboratory_id = app.create_laboratory("Unit Patch Other Lab").await;
     let outsider = TestUser::generate_with_user_type("user", Some(other_laboratory_id));
@@ -360,7 +360,7 @@ async fn update_unit_rejects_invalid_duplicate_and_unauthorized_requests() {
     let response = app
         .patch_unit(unit_id, &serde_json::json!({ "name": "Forbidden" }))
         .await;
-    assert_eq!(response.status().as_u16(), 404);
+    assert_eq!(response.status().as_u16(), 403);
 }
 
 #[tokio::test]

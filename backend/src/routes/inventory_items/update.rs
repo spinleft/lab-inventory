@@ -1,7 +1,6 @@
 use super::model::{InventoryItemResponse, update_inventory_item_rollback_details};
 use super::queries::{InventoryItemDatabaseError, fetch_inventory_item_for_update};
 use super::service::apply_inventory_item_patch;
-use crate::access_control::InventoryItemPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{InventoryItemId, UpdateInventoryItem};
@@ -108,11 +107,10 @@ impl From<InventoryItemDatabaseError> for UpdateInventoryItemError {
 pub async fn update_inventory_item(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    inventory_item_id: InventoryItemPathId,
+    inventory_item_id: InventoryItemId,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, UpdateInventoryItemError> {
     let actor = laboratory_context.authorization_actor();
-    let inventory_item_id: InventoryItemId = inventory_item_id.into_inner().into();
     if !validate_permission(
         &pool,
         &actor,

@@ -1,16 +1,26 @@
-mod admin;
+mod accept_pairing;
+mod borrowing;
+mod create_pairing_code;
+mod create_trust;
 mod inbound;
+mod list_guest_links;
+mod list_trusts;
+mod merge_guest_link;
 mod model;
 mod proxy;
 mod public_data;
 mod queries;
+mod revoke_trust;
 mod security;
 mod service;
 
-pub use admin::{
-    create_pairing_code, create_trust, list_guest_links, list_trusts, merge_guest_link,
-    revoke_trust,
-};
-pub use inbound::{accept_pairing, inbound_get};
-pub use proxy::proxy_get;
+pub use accept_pairing::*;
+pub use create_pairing_code::create_pairing_code;
+pub use create_trust::create_trust;
+pub use inbound::{inbound_get, inbound_post};
+pub use list_guest_links::list_guest_links;
+pub use list_trusts::list_trusts;
+pub use merge_guest_link::merge_guest_link;
+pub use proxy::{proxy_get, proxy_post};
+pub use revoke_trust::revoke_trust;
 pub use service::initialize_local_node;

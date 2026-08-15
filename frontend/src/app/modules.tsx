@@ -2,6 +2,7 @@ import {
   Activity,
   Boxes,
   Building2,
+  HandHeart,
   Handshake,
   FolderTree,
   Gauge,
@@ -26,6 +27,7 @@ import { LocationsPage } from "../modules/admin/LocationsPage";
 import { UnitsPage } from "../modules/admin/UnitsPage";
 import { AuditLogsPage } from "../modules/audit/AuditLogsPage";
 import { BorrowRequestsPage } from "../modules/borrow-requests/BorrowRequestsPage";
+import { MyBorrowRequestsPage } from "../modules/borrow-requests/MyBorrowRequestsPage";
 import { AssetDetailPage } from "../modules/assets/AssetDetailPage";
 import { AssetsPage } from "../modules/assets/AssetsPage";
 import {
@@ -33,6 +35,7 @@ import {
   canAccessAssets,
   canAccessAuditLogs,
   canAccessBorrowRequests,
+  canViewMyBorrowRequests,
   canManageAssetCategories,
   canManageAssetParameters,
   canManageFederation,
@@ -172,6 +175,15 @@ export const appModules: FrontendModule[] = [
         path: "/borrow-requests",
         title: "借用管理",
       },
+      // A guest reaches no other borrow surface: the review queue is closed to
+      // them, so this is their only way to see what they have asked for.
+      {
+        canAccess: canViewMyBorrowRequests,
+        group: "workspace",
+        icon: HandHeart,
+        path: "/borrow-requests/mine",
+        title: "我的借用",
+      },
     ],
     commands: [
       {
@@ -181,6 +193,13 @@ export const appModules: FrontendModule[] = [
         title: "查看借用管理",
         keywords: ["borrow", "loan", "request"],
       },
+      {
+        canAccess: canViewMyBorrowRequests,
+        icon: HandHeart,
+        path: "/borrow-requests/mine",
+        title: "查看我的借用申请",
+        keywords: ["borrow", "loan", "request", "mine"],
+      },
     ],
     routes: [
       {
@@ -189,6 +208,13 @@ export const appModules: FrontendModule[] = [
         id: "borrow-requests.index",
         path: "/borrow-requests",
         title: "借用管理",
+      },
+      {
+        canAccess: canViewMyBorrowRequests,
+        element: <MyBorrowRequestsPage />,
+        id: "borrow-requests.mine",
+        path: "/borrow-requests/mine",
+        title: "我的借用",
       },
     ],
   },

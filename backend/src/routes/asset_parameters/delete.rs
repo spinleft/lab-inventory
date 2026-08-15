@@ -3,7 +3,6 @@ use super::queries::{
     AssetParameterDatabaseError, delete_asset_parameter_from_database,
     fetch_asset_parameter_for_update, fetch_asset_parameter_options_for_update,
 };
-use crate::access_control::AssetParameterPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::AssetParameterId;
@@ -63,10 +62,9 @@ impl From<AssetParameterDatabaseError> for DeleteAssetParameterError {
 pub async fn delete_asset_parameter(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    parameter_id: AssetParameterPathId,
+    parameter_id: AssetParameterId,
 ) -> Result<HttpResponse, DeleteAssetParameterError> {
     let actor = laboratory_context.authorization_actor();
-    let parameter_id: AssetParameterId = parameter_id.into_inner().into();
     if !validate_permission(
         &pool,
         &actor,

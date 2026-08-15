@@ -2,6 +2,7 @@ import { screen } from "@testing-library/react";
 import { delay, http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
 import {
+  testGuestUser,
   testLabAdminUser,
   testRootUser,
 } from "../shared/test/fixtures";
@@ -26,6 +27,8 @@ const PAGES: Array<{ as: CurrentUser; heading: string; path: string }> = [
   { as: testRootUser, heading: "审计日志", path: "/audit-logs" },
   { as: testLabAdminUser, heading: "联邦实验室", path: "/admin/federation" },
   { as: testLabAdminUser, heading: "借用管理", path: "/borrow-requests" },
+  // A guest reaches no other borrow surface, so this page is checked as one.
+  { as: testGuestUser, heading: "我的借用", path: "/borrow-requests/mine" },
   { as: testRootUser, heading: "资产详情", path: "/assets/00000000-0000-4000-8000-0000000000c1" },
   {
     as: testRootUser,

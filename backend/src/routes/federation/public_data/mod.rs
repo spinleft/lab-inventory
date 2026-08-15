@@ -8,4 +8,5 @@ mod queries;
 mod respond;
 mod service;
 
+pub(super) use model::PublicDataError;
 pub(super) use respond::{parse_read_target, respond_public_data};

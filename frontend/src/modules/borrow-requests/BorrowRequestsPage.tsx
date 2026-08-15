@@ -14,6 +14,7 @@ import { useToast } from "../../shared/ui/Toast";
 import { type InventoryItem, useInventoryItems } from "../inventory/api";
 import { inventoryStatusLabel, inventoryStatusTone } from "../inventory/format";
 import { type BorrowRequest, useBorrowRequests, useResolveBorrowRequest } from "./api";
+import { borrowRequestLabel, borrowRequestTone } from "./format";
 
 export function BorrowRequestsPage() {
   const { selectedDataScope, selectedLaboratoryId } = useLaboratorySelection();
@@ -210,18 +211,6 @@ export function BorrowRequestsPage() {
       </section>
     </main>
   );
-}
-
-function borrowRequestLabel(status: BorrowRequest["status"]) {
-  if (status === "pending") return "待审批";
-  if (status === "approved") return "已批准";
-  return "已拒绝";
-}
-
-function borrowRequestTone(status: BorrowRequest["status"]) {
-  if (status === "pending") return "warning" as const;
-  if (status === "approved") return "success" as const;
-  return "danger" as const;
 }
 
 function inventoryItemTitle(item: InventoryItem) {

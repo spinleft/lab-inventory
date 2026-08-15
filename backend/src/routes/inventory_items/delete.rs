@@ -3,7 +3,6 @@ use super::queries::{
     InventoryItemDatabaseError, delete_inventory_item_attachments,
     delete_inventory_item_from_database, fetch_inventory_item_for_update,
 };
-use crate::access_control::InventoryItemPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{FileStorageKey, InventoryItemId};
@@ -63,10 +62,9 @@ pub async fn delete_inventory_item(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
     storage: web::Data<FileStorage>,
-    inventory_item_id: InventoryItemPathId,
+    inventory_item_id: InventoryItemId,
 ) -> Result<HttpResponse, DeleteInventoryItemError> {
     let actor = laboratory_context.authorization_actor();
-    let inventory_item_id: InventoryItemId = inventory_item_id.into_inner().into();
     if !validate_permission(
         &pool,
         &actor,

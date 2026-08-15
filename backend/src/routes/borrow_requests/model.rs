@@ -8,6 +8,7 @@ pub(super) enum BorrowRequestStatus {
     Pending,
     Approved,
     Rejected,
+    Cancelled,
 }
 
 impl BorrowRequestStatus {
@@ -16,6 +17,7 @@ impl BorrowRequestStatus {
             "pending" => Ok(Self::Pending),
             "approved" => Ok(Self::Approved),
             "rejected" => Ok(Self::Rejected),
+            "cancelled" => Ok(Self::Cancelled),
             _ => Err(format!("{value} is not a valid borrow request status.")),
         }
     }
@@ -25,12 +27,16 @@ impl BorrowRequestStatus {
             Self::Pending => "pending",
             Self::Approved => "approved",
             Self::Rejected => "rejected",
+            Self::Cancelled => "cancelled",
         }
     }
 }
 
+/// Visible to the crate only because it names the shared flows in `service.rs`,
+/// which federation calls. Its fields stay module-private: a caller outside gets
+/// a response type, never the row.
 #[derive(Clone, sqlx::FromRow)]
-pub(super) struct BorrowRequestRow {
+pub(crate) struct BorrowRequestRow {
     pub(super) borrow_request_id: Uuid,
     pub(super) local_laboratory_id: Uuid,
     pub(super) inventory_item_id: Uuid,
@@ -109,6 +115,49 @@ impl From<BorrowRequestRow> for BorrowRequestResponse {
             updated_at: row.updated_at,
             asset_name: row.asset_name,
             asset_model: row.asset_model,
+        }
+    }
+}
+
+/// A request as its own requester sees it, which is also what a federated
+/// requester is served.
+///
+/// It is a narrower view than [`BorrowRequestResponse`], not the same one with a
+/// filter: it drops the reviewer's name and id, which say who at the lending
+/// laboratory handled the request and appear nowhere else in the federation API,
+/// and it drops the requester columns, which for a federated caller are the
+/// lending laboratory's own shadow identifiers and mean nothing to them.
+#[derive(Serialize)]
+pub(crate) struct MyBorrowRequestResponse {
+    borrow_request_id: Uuid,
+    laboratory_id: Uuid,
+    inventory_item_id: Uuid,
+    inventory_status: String,
+    asset_name: String,
+    asset_model: Option<String>,
+    status: String,
+    request_note: Option<String>,
+    decision_note: Option<String>,
+    reviewed_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+impl From<BorrowRequestRow> for MyBorrowRequestResponse {
+    fn from(row: BorrowRequestRow) -> Self {
+        Self {
+            borrow_request_id: row.borrow_request_id,
+            laboratory_id: row.local_laboratory_id,
+            inventory_item_id: row.inventory_item_id,
+            inventory_status: row.inventory_status,
+            asset_name: row.asset_name,
+            asset_model: row.asset_model,
+            status: row.status,
+            request_note: row.request_note,
+            decision_note: row.decision_note,
+            reviewed_at: row.reviewed_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
         }
     }
 }

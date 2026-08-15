@@ -1,8 +1,8 @@
 use super::model::delete_unit_rollback_details;
 use super::queries::{UnitDatabaseError, delete_unit_from_database, fetch_unit_for_update};
-use crate::access_control::UnitPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
+use crate::domain::UnitId;
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
@@ -59,7 +59,7 @@ impl From<UnitDatabaseError> for DeleteUnitError {
 pub async fn delete_unit(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    unit_id: UnitPathId,
+    unit_id: UnitId,
 ) -> Result<HttpResponse, DeleteUnitError> {
     let actor = laboratory_context.authorization_actor();
     let mut transaction = pool

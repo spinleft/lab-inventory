@@ -4,132 +4,89 @@
 //! Rules for this module:
 //! - one function issues at most one statement, and performs no orchestration;
 //!   anything that chains several statements belongs in `service.rs`
-//! - functions never return a handler error type, only [`FederationError`],
-//!   which every federation route already answers with
+//! - functions never return a handler error type. A statement that can only
+//!   fail unexpectedly returns [`anyhow::Error`], and reports a row that is not
+//!   there as `None` so the caller decides what missing means; a statement a
+//!   caller can violate returns [`FederationDatabaseError`]
 use super::model::{
-    FederationError, GuestLinkRow, LaboratoryIdentityRow, LocalNodeRow, PairingCodeRow,
-    ProxyUserRow, RemoteNodeRow, TrustRow, TrustWithRemoteRow,
+    GuestLinkIdentity, GuestLinkRow, LaboratoryIdentityRow, PairingCodeRow, ProxyUserRow,
+    RemoteNodeRow, TrustRow, TrustWithRemoteRow,
 };
+use crate::utils::error_chain_fmt;
+use anyhow::Context;
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
-pub(super) fn map_database_error(error: sqlx::Error) -> FederationError {
+#[derive(thiserror::Error)]
+pub(super) enum FederationDatabaseError {
+    #[error("{0}")]
+    Validation(String),
+    #[error("{0}")]
+    Conflict(String),
+    #[error(transparent)]
+    Unexpected(#[from] anyhow::Error),
+}
+
+impl std::fmt::Debug for FederationDatabaseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+pub(super) fn map_database_error(error: sqlx::Error) -> FederationDatabaseError {
     if let sqlx::Error::Database(database_error) = &error {
         match database_error.code().as_deref() {
             Some("23505") => {
-                return FederationError::ConflictError("Federation record already exists".into());
+                return FederationDatabaseError::Conflict(
+                    "Federation record already exists".into(),
+                );
             }
             Some("23503") => {
-                return FederationError::ValidationError("Invalid referenced record".into());
+                return FederationDatabaseError::Validation("Invalid referenced record".into());
             }
             Some("23514") => {
-                return FederationError::ValidationError("Invalid federation data".into());
+                return FederationDatabaseError::Validation("Invalid federation data".into());
             }
             _ => {}
         }
     }
 
-    FederationError::UnexpectedError(error.into())
-}
-
-fn unexpected(error: sqlx::Error) -> FederationError {
-    FederationError::UnexpectedError(error.into())
+    FederationDatabaseError::Unexpected(error.into())
 }
 
 // ---------------------------------------------------------------------------
 // this node
 // ---------------------------------------------------------------------------
 
-pub(super) async fn fetch_local_node(pool: &PgPool) -> Result<LocalNodeRow, FederationError> {
-    sqlx::query_as::<_, LocalNodeRow>(
+pub(super) async fn fetch_local_node_id(pool: &PgPool) -> Result<Option<Uuid>, anyhow::Error> {
+    sqlx::query_scalar!(
         r#"
-        SELECT node_id, public_base_url
+        SELECT node_id
         FROM federation_local_nodes
-        ORDER BY created_at
-        LIMIT 1
         "#,
     )
     .fetch_optional(pool)
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::UnexpectedError(anyhow::anyhow!("Local node not initialized")))
-}
-
-pub(super) async fn fetch_local_node_for_update(
-    transaction: &mut Transaction<'_, Postgres>,
-) -> Result<Option<LocalNodeRow>, FederationError> {
-    sqlx::query_as::<_, LocalNodeRow>(
-        r#"
-        SELECT node_id, public_base_url
-        FROM federation_local_nodes
-        ORDER BY created_at
-        LIMIT 1
-        FOR UPDATE
-        "#,
-    )
-    .fetch_optional(transaction.as_mut())
-    .await
-    .map_err(unexpected)
-}
-
-pub(super) async fn insert_local_node(
-    transaction: &mut Transaction<'_, Postgres>,
-    public_base_url: &str,
-) -> Result<(), FederationError> {
-    sqlx::query(
-        r#"
-        INSERT INTO federation_local_nodes (node_id, public_base_url)
-        VALUES ($1, $2)
-        "#,
-    )
-    .bind(Uuid::new_v4())
-    .bind(public_base_url)
-    .execute(transaction.as_mut())
-    .await
-    .map_err(unexpected)?;
-
-    Ok(())
-}
-
-pub(super) async fn update_local_node_base_url(
-    transaction: &mut Transaction<'_, Postgres>,
-    node_id: Uuid,
-    public_base_url: &str,
-) -> Result<(), FederationError> {
-    sqlx::query(
-        r#"
-        UPDATE federation_local_nodes
-        SET public_base_url = $2,
-            updated_at = now()
-        WHERE node_id = $1
-        "#,
-    )
-    .bind(node_id)
-    .bind(public_base_url)
-    .execute(transaction.as_mut())
-    .await
-    .map_err(unexpected)?;
-
-    Ok(())
+    .context("Failed to fetch node id")
 }
 
 pub(super) async fn fetch_laboratory_identity(
     pool: &PgPool,
     laboratory_id: Uuid,
-) -> Result<LaboratoryIdentityRow, FederationError> {
-    sqlx::query_as::<_, LaboratoryIdentityRow>(
+) -> Result<Option<LaboratoryIdentityRow>, anyhow::Error> {
+    sqlx::query_as!(
+        LaboratoryIdentityRow,
         r#"
         SELECT laboratory_id, name
         FROM laboratories
         WHERE laboratory_id = $1
         "#,
+        laboratory_id
     )
-    .bind(laboratory_id)
     .fetch_optional(pool)
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::NotFound("Laboratory not found".into()))
+    .context("Failed to fetch laboratory identity")
 }
 
 // ---------------------------------------------------------------------------
@@ -139,8 +96,9 @@ pub(super) async fn fetch_laboratory_identity(
 pub(super) async fn fetch_remote_node(
     pool: &PgPool,
     remote_node_id: Uuid,
-) -> Result<RemoteNodeRow, FederationError> {
-    sqlx::query_as::<_, RemoteNodeRow>(
+) -> Result<Option<RemoteNodeRow>, anyhow::Error> {
+    sqlx::query_as!(
+        RemoteNodeRow,
         r#"
         SELECT
             remote_node_id,
@@ -155,12 +113,11 @@ pub(super) async fn fetch_remote_node(
         FROM federation_remote_nodes
         WHERE remote_node_id = $1
         "#,
+        remote_node_id
     )
-    .bind(remote_node_id)
     .fetch_optional(pool)
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::Unauthorized("Unknown federation node".into()))
+    .context("Failed to fetch remote node")
 }
 
 /// Pairing may be repeated to rotate the shared secret, so a node that is
@@ -175,8 +132,9 @@ pub(super) async fn upsert_remote_node(
     shared_secret_hash: &str,
     tls_certificate_sha256: Option<&str>,
     key_version: i32,
-) -> Result<RemoteNodeRow, FederationError> {
-    sqlx::query_as::<_, RemoteNodeRow>(
+) -> Result<RemoteNodeRow, FederationDatabaseError> {
+    sqlx::query_as!(
+        RemoteNodeRow,
         r#"
         INSERT INTO federation_remote_nodes (
             remote_node_id,
@@ -211,14 +169,14 @@ pub(super) async fn upsert_remote_node(
             key_version,
             last_handshake_at
         "#,
+        remote_node_id,
+        base_url,
+        display_name,
+        shared_secret,
+        shared_secret_hash,
+        tls_certificate_sha256,
+        key_version
     )
-    .bind(remote_node_id)
-    .bind(base_url)
-    .bind(display_name)
-    .bind(shared_secret)
-    .bind(shared_secret_hash)
-    .bind(tls_certificate_sha256)
-    .bind(key_version)
     .fetch_one(transaction.as_mut())
     .await
     .map_err(map_database_error)
@@ -233,8 +191,9 @@ pub(super) async fn upsert_trust(
     remote_laboratory_id: Uuid,
     remote_laboratory_name: Option<&str>,
     created_by_user_id: Option<Uuid>,
-) -> Result<TrustRow, FederationError> {
-    sqlx::query_as::<_, TrustRow>(
+) -> Result<TrustRow, FederationDatabaseError> {
+    sqlx::query_as!(
+        TrustRow,
         r#"
         INSERT INTO federation_laboratory_trusts (
             trust_id,
@@ -262,13 +221,13 @@ pub(super) async fn upsert_trust(
             updated_at,
             revoked_at
         "#,
+        Uuid::new_v4(),
+        local_laboratory_id,
+        remote_node_id,
+        remote_laboratory_id,
+        remote_laboratory_name,
+        created_by_user_id
     )
-    .bind(Uuid::new_v4())
-    .bind(local_laboratory_id)
-    .bind(remote_node_id)
-    .bind(remote_laboratory_id)
-    .bind(remote_laboratory_name)
-    .bind(created_by_user_id)
     .fetch_one(transaction.as_mut())
     .await
     .map_err(map_database_error)
@@ -279,8 +238,9 @@ pub(super) async fn fetch_active_trust(
     local_laboratory_id: Uuid,
     remote_node_id: Uuid,
     remote_laboratory_id: Uuid,
-) -> Result<TrustRow, FederationError> {
-    sqlx::query_as::<_, TrustRow>(
+) -> Result<Option<TrustRow>, anyhow::Error> {
+    sqlx::query_as!(
+        TrustRow,
         r#"
         SELECT
             trust_id,
@@ -298,20 +258,19 @@ pub(super) async fn fetch_active_trust(
           AND remote_laboratory_id = $3
           AND status = 'active'
         "#,
+        local_laboratory_id,
+        remote_node_id,
+        remote_laboratory_id
     )
-    .bind(local_laboratory_id)
-    .bind(remote_node_id)
-    .bind(remote_laboratory_id)
     .fetch_optional(pool)
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::Forbidden("Laboratory trust is not active".into()))
+    .context("Failed to fetch federation trust")
 }
 
 pub(super) async fn fetch_trusts(
     pool: &PgPool,
     laboratory_id: Uuid,
-) -> Result<Vec<TrustWithRemoteRow>, FederationError> {
+) -> Result<Vec<TrustWithRemoteRow>, anyhow::Error> {
     sqlx::query_as::<_, TrustWithRemoteRow>(
         r#"
         SELECT
@@ -335,7 +294,7 @@ pub(super) async fn fetch_trusts(
     .bind(laboratory_id)
     .fetch_all(pool)
     .await
-    .map_err(unexpected)
+    .context("Failed to fetch federation trusts")
 }
 
 /// A trust is revoked rather than deleted, so the history of the pairing stays
@@ -344,8 +303,9 @@ pub(super) async fn revoke_trust_in_database(
     transaction: &mut Transaction<'_, Postgres>,
     laboratory_id: Uuid,
     trust_id: Uuid,
-) -> Result<TrustRow, FederationError> {
-    sqlx::query_as::<_, TrustRow>(
+) -> Result<Option<TrustRow>, FederationDatabaseError> {
+    sqlx::query_as!(
+        TrustRow,
         r#"
         UPDATE federation_laboratory_trusts
         SET status = 'revoked',
@@ -355,13 +315,12 @@ pub(super) async fn revoke_trust_in_database(
           AND trust_id = $2
         RETURNING trust_id, local_laboratory_id, remote_node_id, remote_laboratory_id, remote_laboratory_name, status, created_at, updated_at, revoked_at
         "#,
+        laboratory_id,
+        trust_id
     )
-    .bind(laboratory_id)
-    .bind(trust_id)
     .fetch_optional(transaction.as_mut())
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::NotFound("Federation trust not found".into()))
+    .map_err(map_database_error)
 }
 
 // ---------------------------------------------------------------------------
@@ -374,8 +333,9 @@ pub(super) async fn insert_pairing_code(
     code_hash: &str,
     expires_at: DateTime<Utc>,
     created_by_user_id: Uuid,
-) -> Result<PairingCodeRow, FederationError> {
-    sqlx::query_as::<_, PairingCodeRow>(
+) -> Result<PairingCodeRow, FederationDatabaseError> {
+    sqlx::query_as!(
+        PairingCodeRow,
         r#"
         INSERT INTO federation_pairing_codes (
             pairing_code_id,
@@ -387,15 +347,15 @@ pub(super) async fn insert_pairing_code(
         VALUES ($1, $2, $3, $4, $5)
         RETURNING pairing_code_id, local_laboratory_id, expires_at
         "#,
+        Uuid::new_v4(),
+        laboratory_id,
+        code_hash,
+        expires_at,
+        created_by_user_id
     )
-    .bind(Uuid::new_v4())
-    .bind(laboratory_id)
-    .bind(code_hash)
-    .bind(expires_at)
-    .bind(created_by_user_id)
     .fetch_one(pool)
     .await
-    .map_err(unexpected)
+    .map_err(map_database_error)
 }
 
 /// Claims a pairing code, in a single statement so two requests presenting the
@@ -403,77 +363,75 @@ pub(super) async fn insert_pairing_code(
 pub(super) async fn consume_pairing_code(
     transaction: &mut Transaction<'_, Postgres>,
     code_hash: &str,
-) -> Result<PairingCodeRow, FederationError> {
-    sqlx::query_as::<_, PairingCodeRow>(
+) -> Result<Option<PairingCodeRow>, FederationDatabaseError> {
+    sqlx::query_as!(
+        PairingCodeRow,
         r#"
         UPDATE federation_pairing_codes
         SET consumed_at = now()
-        WHERE pairing_code_id = (
-            SELECT pairing_code_id
-            FROM federation_pairing_codes
-            WHERE code_hash = $1
-              AND consumed_at IS NULL
-              AND expires_at > now()
-            FOR UPDATE
-        )
+        WHERE code_hash = $1
+          AND consumed_at IS NULL
+          AND expires_at > now()
         RETURNING pairing_code_id, local_laboratory_id, expires_at
         "#,
+        code_hash
     )
-    .bind(code_hash)
     .fetch_optional(transaction.as_mut())
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::Unauthorized("Pairing code is invalid or expired".into()))
+    .map_err(map_database_error)
 }
 
 // ---------------------------------------------------------------------------
 // request nonces
 // ---------------------------------------------------------------------------
 
-pub(super) async fn delete_expired_nonces(pool: &PgPool) -> Result<(), FederationError> {
+pub(super) async fn delete_expired_nonces(pool: &PgPool) -> Result<(), FederationDatabaseError> {
     sqlx::query("DELETE FROM federation_request_nonces WHERE expires_at <= now()")
         .execute(pool)
         .await
-        .map_err(unexpected)?;
+        .map_err(map_database_error)?;
 
     Ok(())
 }
 
 /// Records a nonce so the same signed request cannot be replayed. A duplicate is
-/// exactly the replay this guards against, hence the dedicated error.
+/// exactly the replay this guards against, hence the dedicated message.
 pub(super) async fn insert_nonce(
     pool: &PgPool,
     remote_node_id: Uuid,
     nonce: &str,
     ttl_seconds: i64,
-) -> Result<(), FederationError> {
-    let result = sqlx::query(
+) -> Result<(), FederationDatabaseError> {
+    sqlx::query!(
         r#"
         INSERT INTO federation_request_nonces (remote_node_id, nonce, expires_at)
-        VALUES ($1, $2, now() + ($3 || ' seconds')::interval)
+        VALUES ($1, $2, now() + ($3::BIGINT * INTERVAL '1 second'))
         "#,
+        remote_node_id,
+        nonce,
+        ttl_seconds
     )
-    .bind(remote_node_id)
-    .bind(nonce)
-    .bind(ttl_seconds.to_string())
     .execute(pool)
-    .await;
-
-    match result {
-        Ok(_) => Ok(()),
-        Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("23505") => Err(
-            FederationError::Unauthorized("Federation request nonce has already been used".into()),
+    .await
+    .map(|_| ())
+    .map_err(|error| match map_database_error(error) {
+        FederationDatabaseError::Conflict(_) => FederationDatabaseError::Conflict(
+            "Federation request nonce has already been used".into(),
         ),
-        Err(error) => Err(unexpected(error)),
-    }
+        other => other,
+    })
 }
 
 // ---------------------------------------------------------------------------
 // guest links and their shadow users
 // ---------------------------------------------------------------------------
 
-fn guest_link_select(suffix: &str) -> String {
-    format!(
+pub(super) async fn fetch_guest_links(
+    pool: &PgPool,
+    laboratory_id: Uuid,
+) -> Result<Vec<GuestLinkRow>, anyhow::Error> {
+    sqlx::query_as!(
+        GuestLinkRow,
         r#"
         SELECT
             links.link_id,
@@ -491,46 +449,56 @@ fn guest_link_select(suffix: &str) -> String {
         FROM federation_guest_links AS links
         JOIN users ON users.user_id = links.local_guest_user_id
         JOIN federation_remote_nodes AS nodes ON nodes.remote_node_id = links.remote_node_id
-        {suffix}
-        "#
+        WHERE links.local_laboratory_id = $1
+        ORDER BY links.last_seen_at DESC, links.link_id
+        "#,
+        laboratory_id
     )
-}
-
-pub(super) async fn fetch_guest_links(
-    pool: &PgPool,
-    laboratory_id: Uuid,
-) -> Result<Vec<GuestLinkRow>, FederationError> {
-    sqlx::query_as::<_, GuestLinkRow>(&guest_link_select(
-        "WHERE links.local_laboratory_id = $1 ORDER BY links.last_seen_at DESC, links.link_id",
-    ))
-    .bind(laboratory_id)
     .fetch_all(pool)
     .await
-    .map_err(unexpected)
+    .context("Failed to fetch federation guest links")
 }
 
 pub(super) async fn fetch_guest_link(
     pool: &PgPool,
     laboratory_id: Uuid,
     link_id: Uuid,
-) -> Result<GuestLinkRow, FederationError> {
-    sqlx::query_as::<_, GuestLinkRow>(&guest_link_select(
-        "WHERE links.local_laboratory_id = $1 AND links.link_id = $2",
-    ))
-    .bind(laboratory_id)
-    .bind(link_id)
+) -> Result<Option<GuestLinkRow>, anyhow::Error> {
+    sqlx::query_as!(
+        GuestLinkRow,
+        r#"
+        SELECT
+            links.link_id,
+            links.local_laboratory_id,
+            links.remote_node_id,
+            links.remote_laboratory_id,
+            links.remote_user_id,
+            links.remote_username,
+            links.remote_user_type,
+            links.local_guest_user_id,
+            links.first_seen_at,
+            links.last_seen_at,
+            users.username AS local_guest_username,
+            nodes.base_url AS remote_base_url
+        FROM federation_guest_links AS links
+        JOIN users ON users.user_id = links.local_guest_user_id
+        JOIN federation_remote_nodes AS nodes ON nodes.remote_node_id = links.remote_node_id
+        WHERE links.local_laboratory_id = $1 AND links.link_id = $2
+        "#,
+        laboratory_id,
+        link_id
+    )
     .fetch_optional(pool)
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::NotFound("Federation guest link not found".into()))
+    .context("Failed to fetch federation guest link")
 }
 
 pub(super) async fn fetch_guest_link_user_for_update(
     transaction: &mut Transaction<'_, Postgres>,
     laboratory_id: Uuid,
     link_id: Uuid,
-) -> Result<Uuid, FederationError> {
-    sqlx::query_scalar::<_, Uuid>(
+) -> Result<Option<Uuid>, anyhow::Error> {
+    sqlx::query_scalar!(
         r#"
         SELECT local_guest_user_id
         FROM federation_guest_links
@@ -538,13 +506,12 @@ pub(super) async fn fetch_guest_link_user_for_update(
           AND link_id = $2
         FOR UPDATE
         "#,
+        laboratory_id,
+        link_id
     )
-    .bind(laboratory_id)
-    .bind(link_id)
     .fetch_optional(transaction.as_mut())
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::NotFound("Federation guest link not found".into()))
+    .context("Failed to fetch federation guest link user")
 }
 
 pub(super) async fn update_guest_link_user(
@@ -552,8 +519,8 @@ pub(super) async fn update_guest_link_user(
     laboratory_id: Uuid,
     link_id: Uuid,
     target_guest_user_id: Uuid,
-) -> Result<(), FederationError> {
-    sqlx::query(
+) -> Result<(), FederationDatabaseError> {
+    sqlx::query!(
         r#"
         UPDATE federation_guest_links
         SET local_guest_user_id = $3,
@@ -561,19 +528,19 @@ pub(super) async fn update_guest_link_user(
         WHERE local_laboratory_id = $1
           AND link_id = $2
         "#,
+        laboratory_id,
+        link_id,
+        target_guest_user_id
     )
-    .bind(laboratory_id)
-    .bind(link_id)
-    .bind(target_guest_user_id)
     .execute(transaction.as_mut())
     .await
-    .map_err(unexpected)?;
+    .map_err(map_database_error)?;
 
     Ok(())
 }
 
-/// Refreshes the link a remote user already has here, returning the local guest
-/// they are known as. `None` means this remote user has never been seen.
+/// Refreshes the link a remote user already has here, returning who they are
+/// known as. `None` means this remote user has never been seen.
 pub(super) async fn touch_guest_link(
     pool: &PgPool,
     local_laboratory_id: Uuid,
@@ -582,8 +549,8 @@ pub(super) async fn touch_guest_link(
     remote_user_id: Uuid,
     remote_username: &str,
     remote_user_type: &str,
-) -> Result<Option<Uuid>, FederationError> {
-    sqlx::query_scalar::<_, Uuid>(
+) -> Result<Option<GuestLinkIdentity>, FederationDatabaseError> {
+    let row = sqlx::query!(
         r#"
         UPDATE federation_guest_links
         SET remote_username = $5,
@@ -593,23 +560,28 @@ pub(super) async fn touch_guest_link(
           AND remote_node_id = $2
           AND remote_laboratory_id = $3
           AND remote_user_id = $4
-        RETURNING local_guest_user_id
+        RETURNING link_id, local_guest_user_id
         "#,
+        local_laboratory_id,
+        remote_node_id,
+        remote_laboratory_id,
+        remote_user_id,
+        remote_username,
+        remote_user_type
     )
-    .bind(local_laboratory_id)
-    .bind(remote_node_id)
-    .bind(remote_laboratory_id)
-    .bind(remote_user_id)
-    .bind(remote_username)
-    .bind(remote_user_type)
     .fetch_optional(pool)
     .await
-    .map_err(unexpected)
+    .map_err(map_database_error)?;
+
+    Ok(row.map(|row| GuestLinkIdentity {
+        link_id: row.link_id,
+        local_guest_user_id: row.local_guest_user_id,
+    }))
 }
 
-/// Returns the local guest the link ended up pointing at, which is not
-/// necessarily `local_guest_user_id`: a concurrent request may have created the
-/// link first, and its guest wins.
+/// Returns the link as it stands after the write, whose guest is not necessarily
+/// `local_guest_user_id`: a concurrent request may have created the link first,
+/// and its guest wins.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn insert_guest_link(
     transaction: &mut Transaction<'_, Postgres>,
@@ -620,8 +592,8 @@ pub(super) async fn insert_guest_link(
     remote_username: &str,
     remote_user_type: &str,
     local_guest_user_id: Uuid,
-) -> Result<Uuid, FederationError> {
-    sqlx::query_scalar::<_, Uuid>(
+) -> Result<GuestLinkIdentity, FederationDatabaseError> {
+    let row = sqlx::query!(
         r#"
         INSERT INTO federation_guest_links (
             link_id,
@@ -635,31 +607,35 @@ pub(super) async fn insert_guest_link(
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (local_laboratory_id, remote_node_id, remote_laboratory_id, remote_user_id)
-        WHERE remote_node_id IS NOT NULL
         DO UPDATE SET
             remote_username = EXCLUDED.remote_username,
             remote_user_type = EXCLUDED.remote_user_type,
             last_seen_at = now()
-        RETURNING local_guest_user_id
+        RETURNING link_id, local_guest_user_id
         "#,
+        Uuid::new_v4(),
+        local_laboratory_id,
+        remote_node_id,
+        remote_laboratory_id,
+        remote_user_id,
+        remote_username,
+        remote_user_type,
+        local_guest_user_id
     )
-    .bind(Uuid::new_v4())
-    .bind(local_laboratory_id)
-    .bind(remote_node_id)
-    .bind(remote_laboratory_id)
-    .bind(remote_user_id)
-    .bind(remote_username)
-    .bind(remote_user_type)
-    .bind(local_guest_user_id)
     .fetch_one(transaction.as_mut())
     .await
-    .map_err(unexpected)
+    .map_err(map_database_error)?;
+
+    Ok(GuestLinkIdentity {
+        link_id: row.link_id,
+        local_guest_user_id: row.local_guest_user_id,
+    })
 }
 
 pub(super) async fn guest_link_exists_for_user(
     transaction: &mut Transaction<'_, Postgres>,
     local_guest_user_id: Uuid,
-) -> Result<bool, FederationError> {
+) -> Result<bool, anyhow::Error> {
     sqlx::query_scalar::<_, bool>(
         r#"
         SELECT EXISTS (
@@ -672,7 +648,7 @@ pub(super) async fn guest_link_exists_for_user(
     .bind(local_guest_user_id)
     .fetch_one(transaction.as_mut())
     .await
-    .map_err(unexpected)
+    .context("Failed to check whether a federation guest link still exists")
 }
 
 /// A shadow guest exists only to stand in for a remote user, so it can be
@@ -681,18 +657,18 @@ pub(super) async fn guest_link_exists_for_user(
 pub(super) async fn delete_shadow_guest(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: Uuid,
-) -> Result<(), FederationError> {
-    sqlx::query(
+) -> Result<(), FederationDatabaseError> {
+    sqlx::query!(
         r#"
         DELETE FROM users
         WHERE user_id = $1
           AND is_federation_shadow = true
         "#,
+        user_id
     )
-    .bind(user_id)
     .execute(transaction.as_mut())
     .await
-    .map_err(unexpected)?;
+    .map_err(map_database_error)?;
 
     Ok(())
 }
@@ -703,8 +679,8 @@ pub(super) async fn insert_shadow_guest(
     username: &str,
     password_hash: &str,
     local_laboratory_id: Uuid,
-) -> Result<Uuid, FederationError> {
-    sqlx::query_scalar::<_, Uuid>(
+) -> Result<Uuid, FederationDatabaseError> {
+    sqlx::query_scalar!(
         r#"
         INSERT INTO users (
             user_id,
@@ -719,14 +695,14 @@ pub(super) async fn insert_shadow_guest(
         WHERE name = 'guest'
         RETURNING user_id
         "#,
+        user_id,
+        username,
+        password_hash,
+        local_laboratory_id
     )
-    .bind(user_id)
-    .bind(username)
-    .bind(password_hash)
-    .bind(local_laboratory_id)
     .fetch_one(transaction.as_mut())
     .await
-    .map_err(unexpected)
+    .map_err(map_database_error)
 }
 
 // ---------------------------------------------------------------------------
@@ -736,7 +712,7 @@ pub(super) async fn insert_shadow_guest(
 pub(super) async fn fetch_proxy_user(
     pool: &PgPool,
     user_id: Uuid,
-) -> Result<ProxyUserRow, FederationError> {
+) -> Result<Option<ProxyUserRow>, anyhow::Error> {
     sqlx::query_as::<_, ProxyUserRow>(
         r#"
         SELECT users.user_id, users.username, user_types.name AS user_type_name, users.laboratory_id
@@ -748,14 +724,13 @@ pub(super) async fn fetch_proxy_user(
     .bind(user_id)
     .fetch_optional(pool)
     .await
-    .map_err(unexpected)?
-    .ok_or_else(|| FederationError::Forbidden("Current user not found".into()))
+    .context("Failed to fetch the user a federation request is proxied for")
 }
 
 pub(super) async fn fetch_user_role(
     pool: &PgPool,
     user_id: Uuid,
-) -> Result<Option<(String, Option<Uuid>)>, FederationError> {
+) -> Result<Option<(String, Option<Uuid>)>, anyhow::Error> {
     sqlx::query_as::<_, (String, Option<Uuid>)>(
         r#"
         SELECT user_types.name, users.laboratory_id
@@ -767,5 +742,5 @@ pub(super) async fn fetch_user_role(
     .bind(user_id)
     .fetch_optional(pool)
     .await
-    .map_err(unexpected)
+    .context("Failed to fetch user role")
 }

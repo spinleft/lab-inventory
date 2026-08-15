@@ -1,6 +1,5 @@
 use super::model::LocationResponse;
 use super::queries::fetch_location;
-use crate::access_control::LocationPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::domain::LocationId;
 use crate::utils::error_chain_fmt;
@@ -42,10 +41,9 @@ impl ResponseError for GetLocationError {
 pub async fn get_location(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    location_id: LocationPathId,
+    location_id: LocationId,
 ) -> Result<HttpResponse, GetLocationError> {
     let actor = laboratory_context.authorization_actor();
-    let location_id: LocationId = location_id.into_inner().into();
     if !validate_permission(
         &pool,
         &actor,

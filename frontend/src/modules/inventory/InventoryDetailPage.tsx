@@ -23,7 +23,11 @@ import {
   useUnits,
 } from "../admin/api";
 import { AttachmentSection } from "../attachments/AttachmentPanel";
-import { canManageLaboratoryAssets, canRequestBorrow } from "../auth/permissions";
+import {
+  canManageLaboratoryAssets,
+  canRequestBorrow,
+  canRequestRemoteBorrow,
+} from "../auth/permissions";
 import { type AssetParameterValue, useAsset } from "../assets/api";
 import { useCreateBorrowRequest } from "../borrow-requests/api";
 import {
@@ -51,7 +55,8 @@ const EMPTY_UNITS: Unit[] = [];
 
 export function InventoryDetailPage() {
   const { currentUser } = useAuth();
-  const { isRemoteLaboratory, selectedDataScope } = useLaboratorySelection();
+  const { isRemoteLaboratory, selectedDataScope, selectedLaboratoryName } =
+    useLaboratorySelection();
   const navigate = useNavigate();
   const toast = useToast();
   const { inventoryItemId = "" } = useParams();
@@ -62,12 +67,16 @@ export function InventoryDetailPage() {
   const item = inventoryQuery.data;
   const canManage =
     !isRemoteLaboratory && canManageLaboratoryAssets(currentUser, item?.laboratory_id);
+  // Remote borrowing goes out through the federation proxy, which admits a
+  // narrower set of roles than the local route does — a guest would be refused
+  // there — so the two scopes are gated separately.
   const canRequestBorrowItem =
-    canRequestBorrow(currentUser) &&
-    selectedDataScope.kind === "local" &&
     item?.status === "available" &&
-    (currentUser.user_type.name === "guest" ||
-     item?.laboratory_id !== currentUser.laboratory?.laboratory_id);
+    (selectedDataScope.kind === "remote"
+      ? canRequestRemoteBorrow(currentUser)
+      : canRequestBorrow(currentUser) &&
+        (currentUser.user_type.name === "guest" ||
+          item?.laboratory_id !== currentUser.laboratory?.laboratory_id));
   const assetQuery = useAsset({
     assetId: item?.asset_id ?? "",
     enabled: Boolean(item?.asset_id),
@@ -291,7 +300,7 @@ export function InventoryDetailPage() {
       />
 
       <Dialog
-        description="提交后由本实验室的管理员或普通用户审批。"
+        description={`提交后由「${selectedLaboratoryName}」的管理员或普通用户审批。`}
         footer={
           <div className="dialog-footer">
             <Button onClick={() => setBorrowDialogOpen(false)}>取消</Button>
@@ -303,6 +312,7 @@ export function InventoryDetailPage() {
                   {
                     inventoryItemId: item.inventory_item_id,
                     payload: { request_note: borrowNote.trim() || undefined },
+                    scope: selectedDataScope,
                   },
                   {
                     onError: (error) =>

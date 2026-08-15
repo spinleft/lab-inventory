@@ -7,7 +7,6 @@ use super::queries::{
     validate_location,
 };
 use super::service::{insert_inventory_item, next_serial_numbers};
-use crate::access_control::AssetPathId;
 use crate::access_control::{Action, Actor, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{
@@ -233,12 +232,11 @@ impl From<AssignAttachmentError> for CreateInventoryItemsError {
 pub async fn create_inventory_items(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    asset_id: AssetPathId,
+    asset_id: AssetId,
     payload: web::Json<JsonData>,
 ) -> Result<HttpResponse, CreateInventoryItemsError> {
     let scope_laboratory_id = laboratory_context.laboratory_id();
     let actor = laboratory_context.authorization_actor();
-    let asset_id: AssetId = asset_id.into_inner().into();
     let laboratory_id: LaboratoryId = fetch_asset_laboratory_id(&pool, asset_id.into())
         .await?
         .ok_or(CreateInventoryItemsError::NotFound(

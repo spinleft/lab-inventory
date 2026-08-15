@@ -82,7 +82,7 @@ import {
   useInventoryItems,
   useUpdateInventoryItem,
 } from "./api";
-import { canRequestBorrow, isSystemAdmin } from "../auth/permissions";
+import { canRequestBorrow, canRequestRemoteBorrow, isSystemAdmin } from "../auth/permissions";
 import {
   categoryLabel,
   formatNumber,
@@ -212,6 +212,7 @@ export function InventoryPage() {
     canManageSelectedLaboratoryAssets,
     selectedDataScope,
     selectedLaboratoryId,
+    selectedLaboratoryName,
   } = useLaboratorySelection();
   const { currentUser } = useAuth();
   const { apiBaseUrl } = useBackendConfig();
@@ -219,11 +220,15 @@ export function InventoryPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const canManage = canManageSelectedLaboratoryAssets;
+  // Remote borrowing goes out through the federation proxy, which admits a
+  // narrower set of roles than the local route does — a guest would be refused
+  // there — so the two scopes are gated separately.
   const canBorrow =
-    canRequestBorrow(currentUser) &&
-    selectedDataScope.kind === "local" &&
-    (currentUser.user_type.name === "guest" ||
-     selectedLaboratoryId !== currentUser.laboratory?.laboratory_id);
+    selectedDataScope.kind === "remote"
+      ? canRequestRemoteBorrow(currentUser)
+      : canRequestBorrow(currentUser) &&
+        (currentUser.user_type.name === "guest" ||
+          selectedLaboratoryId !== currentUser.laboratory?.laboratory_id);
   const categoryFromUrl = searchParams.get("category_id") ?? "";
   const exactCategoryFromUrl = searchParams.get("exact_category") === "true";
   const locationFromUrl = searchParams.get("location_id") ?? "";
@@ -525,6 +530,7 @@ export function InventoryPage() {
       {
         inventoryItemId: borrowItem.inventory_item_id,
         payload: { request_note: borrowNote.trim() || undefined },
+        scope: selectedDataScope,
       },
       {
         onError: (error) =>
@@ -706,6 +712,7 @@ export function InventoryPage() {
       />
       <BorrowRequestDialog
         item={borrowItem}
+        laboratoryName={selectedLaboratoryName}
         loading={createBorrowRequest.isPending}
         note={borrowNote}
         onNoteChange={setBorrowNote}
@@ -1972,6 +1979,7 @@ function DeleteInventoryDialog({
 
 function BorrowRequestDialog({
   item,
+  laboratoryName,
   loading,
   note,
   onNoteChange,
@@ -1979,6 +1987,7 @@ function BorrowRequestDialog({
   onConfirm,
 }: {
   item: InventoryItem | null;
+  laboratoryName: string;
   loading: boolean;
   note: string;
   onNoteChange: (value: string) => void;
@@ -1987,7 +1996,7 @@ function BorrowRequestDialog({
 }) {
   return (
     <Dialog
-      description="提交后由本实验室的管理员或普通用户审批。"
+      description={`提交后由「${laboratoryName}」的管理员或普通用户审批。`}
       onOpenChange={(open) => {
         if (!open && !loading) onClose();
       }}

@@ -139,6 +139,158 @@ async fn rejected_borrow_request_remains_available_and_guest_cannot_approve() {
     assert_eq!(response.status().as_u16(), 403);
 }
 
+/// A guest who registered with this laboratory directly never went through
+/// federation, so there is no link to file their request under. They borrow all
+/// the same, and the request simply records no link.
+#[tokio::test]
+async fn local_guest_without_a_federation_link_can_request_borrow() {
+    let app = spawn_app().await;
+    let laboratory_id = app.create_laboratory("Local Guest Lab").await;
+    let unit_id = app.unit_id("pcs").await;
+
+    let guest = TestUser::generate_with_user_type("guest", Some(laboratory_id));
+    app.store_user(&guest).await;
+
+    let owner = TestUser::generate_with_user_type("user", Some(laboratory_id));
+    app.store_user(&owner).await;
+    owner.login(&app).await;
+
+    let asset_id = create_asset(&app, laboratory_id, unit_id, "quantity", "Local Reagent").await;
+    let inventory_item_id = create_inventory_item(&app, asset_id, "B-003").await;
+
+    guest.login(&app).await;
+    let response = app
+        .post_borrow_request(
+            inventory_item_id,
+            &serde_json::json!({ "request_note": "Registered here, not federated" }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 201);
+    let request: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(request["status"], "pending");
+    assert_eq!(request["requester_user_id"], guest.user_id.to_string());
+    assert!(request["requester_guest_link_id"].is_null());
+
+    owner.login(&app).await;
+    let response = app.get_borrow_requests(laboratory_id).await;
+    assert_eq!(response.status().as_u16(), 200);
+    let requests: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(requests.as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_second_pending_request_on_one_item_is_a_conflict() {
+    let app = spawn_app().await;
+    let laboratory_id = app.create_laboratory("Borrow Conflict Lab").await;
+    let unit_id = app.unit_id("pcs").await;
+
+    let first_guest = TestUser::generate_with_user_type("guest", Some(laboratory_id));
+    app.store_user(&first_guest).await;
+    let second_guest = TestUser::generate_with_user_type("guest", Some(laboratory_id));
+    app.store_user(&second_guest).await;
+
+    app.test_user.login(&app).await;
+    let asset_id = create_asset(&app, laboratory_id, unit_id, "quantity", "Contested Item").await;
+    let inventory_item_id = create_inventory_item(&app, asset_id, "C-001").await;
+
+    first_guest.login(&app).await;
+    let response = app
+        .post_borrow_request(inventory_item_id, &serde_json::json!({}))
+        .await;
+    assert_eq!(response.status().as_u16(), 201);
+
+    second_guest.login(&app).await;
+    let response = app
+        .post_borrow_request(inventory_item_id, &serde_json::json!({}))
+        .await;
+    assert_eq!(response.status().as_u16(), 409);
+}
+
+#[tokio::test]
+async fn a_guest_can_list_and_cancel_only_their_own_pending_request() {
+    let app = spawn_app().await;
+    let laboratory_id = app.create_laboratory("Borrow Own Request Lab").await;
+    let unit_id = app.unit_id("pcs").await;
+
+    let owner = TestUser::generate_with_user_type("guest", Some(laboratory_id));
+    app.store_user(&owner).await;
+    let bystander = TestUser::generate_with_user_type("guest", Some(laboratory_id));
+    app.store_user(&bystander).await;
+
+    app.test_user.login(&app).await;
+    let asset_id = create_asset(&app, laboratory_id, unit_id, "quantity", "Cancellable Item").await;
+    let inventory_item_id = create_inventory_item(&app, asset_id, "X-001").await;
+
+    owner.login(&app).await;
+    let response = app
+        .post_borrow_request(inventory_item_id, &serde_json::json!({}))
+        .await;
+    assert_eq!(response.status().as_u16(), 201);
+    let request: serde_json::Value = response.json().await.unwrap();
+    let borrow_request_id = value_uuid(&request["borrow_request_id"]);
+
+    // The reviewer queue turns a guest away, but their own requests do not.
+    let response = app.get_borrow_requests(laboratory_id).await;
+    assert_eq!(response.status().as_u16(), 403);
+    let response = app.get_my_borrow_requests().await;
+    assert_eq!(response.status().as_u16(), 200);
+    let mine: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(mine.as_array().unwrap().len(), 1);
+
+    // Another guest, who also has no federation link, must not be able to reach
+    // this request just because both of their links are absent.
+    bystander.login(&app).await;
+    let response = app.post_borrow_request_cancel(borrow_request_id).await;
+    assert_eq!(response.status().as_u16(), 404);
+    let response = app.get_my_borrow_requests().await;
+    assert_eq!(response.status().as_u16(), 200);
+    let theirs: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(theirs.as_array().unwrap().len(), 0);
+
+    owner.login(&app).await;
+    let response = app.post_borrow_request_cancel(borrow_request_id).await;
+    assert_eq!(response.status().as_u16(), 200);
+    let cancelled: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(cancelled["status"], "cancelled");
+
+    let response = app.post_borrow_request_cancel(borrow_request_id).await;
+    assert_eq!(response.status().as_u16(), 409);
+}
+
+#[tokio::test]
+async fn a_reviewer_cannot_cancel_through_the_decision_endpoint() {
+    let app = spawn_app().await;
+    let laboratory_id = app.create_laboratory("Borrow Decision Guard Lab").await;
+    let unit_id = app.unit_id("pcs").await;
+
+    let guest = TestUser::generate_with_user_type("guest", Some(laboratory_id));
+    app.store_user(&guest).await;
+    let reviewer = TestUser::generate_with_user_type("lab_admin", Some(laboratory_id));
+    app.store_user(&reviewer).await;
+
+    app.test_user.login(&app).await;
+    let asset_id = create_asset(&app, laboratory_id, unit_id, "quantity", "Guarded Item").await;
+    let inventory_item_id = create_inventory_item(&app, asset_id, "G-001").await;
+
+    guest.login(&app).await;
+    let response = app
+        .post_borrow_request(inventory_item_id, &serde_json::json!({}))
+        .await;
+    assert_eq!(response.status().as_u16(), 201);
+    let request: serde_json::Value = response.json().await.unwrap();
+    let borrow_request_id = value_uuid(&request["borrow_request_id"]);
+
+    reviewer.login(&app).await;
+    let response = app
+        .patch_borrow_request(
+            laboratory_id,
+            borrow_request_id,
+            &serde_json::json!({ "decision": "cancelled" }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+}
+
 async fn seed_guest_link(app: &crate::helpers::TestApp, laboratory_id: Uuid, guest_user_id: Uuid) {
     let remote_node_id = Uuid::new_v4();
     let remote_laboratory_id = Uuid::new_v4();

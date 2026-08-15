@@ -2,7 +2,6 @@ use super::model::delete_attachment_rollback_details;
 use super::queries::{
     AttachmentDatabaseError, delete_attachment_from_database, fetch_attachment_for_update,
 };
-use crate::access_control::AttachmentPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::{AttachmentId, FileStorageKey};
@@ -64,10 +63,9 @@ pub async fn delete_attachment(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
     storage: web::Data<FileStorage>,
-    attachment_id: AttachmentPathId,
+    attachment_id: AttachmentId,
 ) -> Result<HttpResponse, DeleteAttachmentError> {
     let actor = laboratory_context.authorization_actor();
-    let attachment_id: AttachmentId = attachment_id.into_inner().into();
     let mut transaction = pool
         .begin()
         .await

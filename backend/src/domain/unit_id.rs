@@ -1,7 +1,22 @@
+use std::ops::Deref;
 use uuid::Uuid;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct UnitId(pub Uuid);
+
+impl AsRef<Uuid> for UnitId {
+    fn as_ref(&self) -> &Uuid {
+        &self.0
+    }
+}
+
+impl Deref for UnitId {
+    type Target = Uuid;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl From<UnitId> for Uuid {
     fn from(user_id: UnitId) -> Self {

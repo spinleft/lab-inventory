@@ -91,6 +91,102 @@ pub(super) async fn fetch_borrow_requests(
         .context("Failed to fetch borrow requests")
 }
 
+/// The requests a federated caller filed here, found through the guest link that
+/// ties them to their remote identity.
+///
+/// The link is matched by equality, so a request with no link — one a guest who
+/// registered here directly filed — can never be returned to a federated caller.
+/// Matching on the link rather than on `requester_user_id` is also what keeps a
+/// history readable after a merge: merging deletes the shadow account, and the
+/// requester column is ON DELETE SET NULL, so only the link survives it.
+pub(super) async fn fetch_borrow_requests_for_guest_link(
+    pool: &PgPool,
+    laboratory_id: LaboratoryId,
+    guest_link_id: Uuid,
+    status: Option<String>,
+) -> Result<Vec<BorrowRequestRow>, anyhow::Error> {
+    let mut builder = QueryBuilder::<Postgres>::new(borrow_request_select());
+    builder.push(" WHERE requests.local_laboratory_id = ");
+    builder.push_bind(*laboratory_id);
+    builder.push(" AND requests.requester_guest_link_id = ");
+    builder.push_bind(guest_link_id);
+    if let Some(status) = status {
+        builder.push(" AND requests.status = ");
+        builder.push_bind(status);
+    }
+    builder.push(" ORDER BY requests.created_at DESC, requests.borrow_request_id DESC");
+    builder.push(" LIMIT ");
+    builder.push_bind(MY_BORROW_REQUEST_LIMIT);
+
+    builder
+        .build_query_as::<BorrowRequestRow>()
+        .fetch_all(pool)
+        .await
+        .context("Failed to fetch borrow requests for a federation guest link")
+}
+
+/// The requests a locally signed-in user filed, which is the mirror of
+/// [`fetch_borrow_requests_for_guest_link`] for someone who never came through
+/// federation. A local account is never reaped by a guest link merge, so keying
+/// on the user id is safe here.
+pub(super) async fn fetch_borrow_requests_for_requester(
+    pool: &PgPool,
+    laboratory_id: LaboratoryId,
+    requester_user_id: UserId,
+    status: Option<String>,
+) -> Result<Vec<BorrowRequestRow>, anyhow::Error> {
+    let mut builder = QueryBuilder::<Postgres>::new(borrow_request_select());
+    builder.push(" WHERE requests.local_laboratory_id = ");
+    builder.push_bind(*laboratory_id);
+    builder.push(" AND requests.requester_user_id = ");
+    builder.push_bind(*requester_user_id);
+    if let Some(status) = status {
+        builder.push(" AND requests.status = ");
+        builder.push_bind(status);
+    }
+    builder.push(" ORDER BY requests.created_at DESC, requests.borrow_request_id DESC");
+    builder.push(" LIMIT ");
+    builder.push_bind(MY_BORROW_REQUEST_LIMIT);
+
+    builder
+        .build_query_as::<BorrowRequestRow>()
+        .fetch_all(pool)
+        .await
+        .context("Failed to fetch borrow requests for a requester")
+}
+
+/// Neither "my requests" read is paginated, so both are bounded instead. A single
+/// requester filing more than this against one laboratory is not a case worth
+/// carrying a page cursor for.
+const MY_BORROW_REQUEST_LIMIT: i64 = 200;
+
+/// Whether the item already has a request waiting on a decision.
+///
+/// The caller holds the item's row lock, so this cannot go stale before the
+/// insert that follows it. `uq_federation_borrow_requests_pending_item` remains
+/// the backstop; reaching it now would mean the lock discipline broke.
+pub(super) async fn pending_borrow_request_exists(
+    transaction: &mut Transaction<'_, Postgres>,
+    inventory_item_id: Uuid,
+) -> Result<bool, anyhow::Error> {
+    let exists = sqlx::query_scalar!(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM federation_borrow_requests
+            WHERE inventory_item_id = $1
+              AND status = 'pending'
+        )
+        "#,
+        inventory_item_id,
+    )
+    .fetch_one(transaction.as_mut())
+    .await
+    .context("Failed to check for a pending borrow request")?;
+
+    Ok(exists.unwrap_or(false))
+}
+
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(
     name = "Saving new borrow request in the database",
@@ -105,7 +201,7 @@ pub(super) async fn insert_borrow_request(
     requester_user_id: UserId,
     requester_username: &str,
     requester_user_type: &str,
-    guest_link_id: Uuid,
+    guest_link_id: Option<Uuid>,
     request_note: Option<&str>,
 ) -> Result<(), anyhow::Error> {
     sqlx::query!(
@@ -179,6 +275,37 @@ pub(super) async fn update_borrow_request_decision(
     .execute(transaction.as_mut())
     .await
     .context("Failed to record the borrow request decision")?;
+
+    Ok(())
+}
+
+/// Retracting a request is not a decision, so this deliberately leaves the
+/// `reviewed_by_*` columns alone rather than reusing
+/// [`update_borrow_request_decision`]: nobody reviewed a cancelled request.
+#[tracing::instrument(
+    name = "Recording borrow request cancellation in the database",
+    skip(transaction),
+    fields(borrow_request_id=%borrow_request_id)
+)]
+pub(super) async fn update_borrow_request_cancelled(
+    transaction: &mut Transaction<'_, Postgres>,
+    borrow_request_id: Uuid,
+    laboratory_id: LaboratoryId,
+) -> Result<(), anyhow::Error> {
+    sqlx::query!(
+        r#"
+        UPDATE federation_borrow_requests
+        SET status = 'cancelled',
+            updated_at = now()
+        WHERE borrow_request_id = $1
+          AND local_laboratory_id = $2
+        "#,
+        borrow_request_id,
+        *laboratory_id,
+    )
+    .execute(transaction.as_mut())
+    .await
+    .context("Failed to record the borrow request cancellation")?;
 
     Ok(())
 }

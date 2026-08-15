@@ -57,7 +57,7 @@ async fn create_list_get_asset_parameters_are_laboratory_scoped_and_record_audit
     let response = app
         .get_asset_parameter(parameter_id(&other_parameter))
         .await;
-    assert_eq!(response.status().as_u16(), 404);
+    assert_eq!(response.status().as_u16(), 403);
 }
 
 #[tokio::test]

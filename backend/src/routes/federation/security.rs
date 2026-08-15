@@ -1,7 +1,8 @@
-use super::model::{FederationError, RemoteNodeRow};
-use super::queries::{fetch_active_trust, fetch_remote_node};
+use super::model::RemoteNodeRow;
+use super::queries::{FederationDatabaseError, fetch_active_trust, fetch_remote_node};
 use super::service::remember_nonce;
 use crate::configuration::FederationSettings;
+use crate::utils::error_chain_fmt;
 use actix_web::HttpRequest;
 use actix_web::http::header::HeaderMap;
 use base64::Engine;
@@ -17,6 +18,49 @@ use url::Url;
 use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
+
+/// What every route answers with while federation is switched off, so the wording
+/// does not drift between them.
+pub(super) const FEDERATION_DISABLED: &str = "Federation is disabled";
+
+/// What can go wrong proving an inbound request is genuine.
+///
+/// These are failure modes of the protocol rather than of any one route, so they
+/// are named here and the routes that speak the protocol map them onto their own
+/// error. The checks that only inspect what a caller sent — a URL, a certificate
+/// pin — report a plain message instead, the way the domain parsers do.
+#[derive(thiserror::Error)]
+pub(super) enum FederationSecurityError {
+    #[error("{0}")]
+    Unauthorized(String),
+    #[error("{0}")]
+    Forbidden(String),
+    #[error(transparent)]
+    Unexpected(#[from] anyhow::Error),
+}
+
+impl std::fmt::Debug for FederationSecurityError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+/// The only statements issued while verifying a request are the nonce ones, so a
+/// conflict here is a nonce that was already spent — a replay, not a caller
+/// mistake.
+impl From<FederationDatabaseError> for FederationSecurityError {
+    fn from(error: FederationDatabaseError) -> Self {
+        match error {
+            FederationDatabaseError::Conflict(message) => Self::Unauthorized(message),
+            // Nothing a signed request carries reaches these statements as data,
+            // so a rejected write is this server's problem, not the caller's.
+            FederationDatabaseError::Validation(message) => {
+                Self::Unexpected(anyhow::anyhow!(message))
+            }
+            FederationDatabaseError::Unexpected(error) => Self::Unexpected(error),
+        }
+    }
+}
 
 const HEADER_NODE_ID: &str = "x-federation-node-id";
 const HEADER_KEY_VERSION: &str = "x-federation-key-version";
@@ -46,14 +90,6 @@ pub(super) struct InboundFederationContext {
     pub(super) remote_user_type: String,
 }
 
-pub(super) fn ensure_enabled(settings: &FederationSettings) -> Result<(), FederationError> {
-    if settings.enabled {
-        Ok(())
-    } else {
-        Err(FederationError::Disabled)
-    }
-}
-
 pub(super) fn generate_token(byte_len: usize) -> String {
     let mut bytes = vec![0; byte_len];
     OsRng.fill_bytes(&mut bytes);
@@ -68,27 +104,24 @@ pub(super) fn sha256_hex(bytes: &[u8]) -> String {
 pub(super) fn normalize_base_url(
     input: &str,
     settings: &FederationSettings,
-) -> Result<String, FederationError> {
-    let url = Url::parse(input)
-        .map_err(|_| FederationError::ValidationError("Invalid remote base URL".into()))?;
+) -> Result<String, String> {
+    let url = Url::parse(input).map_err(|_| String::from("Invalid remote base URL"))?;
     validate_remote_url(&url, settings)?;
     let mut normalized = url;
     normalized.set_query(None);
     normalized.set_fragment(None);
     if normalized.path() != "/" && !normalized.path().is_empty() {
-        return Err(FederationError::ValidationError(
-            "Remote base URL cannot include a path".into(),
-        ));
+        return Err(String::from("Remote base URL cannot include a path"));
     }
     Ok(normalized.as_str().trim_end_matches('/').to_string())
 }
 
-pub(super) fn validate_tls_pin_value(value: Option<&str>) -> Result<(), FederationError> {
+pub(super) fn validate_tls_pin_value(value: Option<&str>) -> Result<(), String> {
     if let Some(value) = value {
         let valid = value.len() == 64 && value.chars().all(|ch| ch.is_ascii_hexdigit());
         if !valid {
-            return Err(FederationError::ValidationError(
-                "TLS certificate SHA-256 pin must be 64 hex characters".into(),
+            return Err(String::from(
+                "TLS certificate SHA-256 pin must be 64 hex characters",
             ));
         }
     }
@@ -134,13 +167,22 @@ pub(super) fn signed_headers(
     ]
 }
 
+/// `body` is the request body exactly as it arrived. The signature covers its
+/// hash, so passing anything other than the received bytes — a re-serialized
+/// value, or an empty slice on a request that had one — would either reject a
+/// legitimate caller or, worse, accept a body nobody signed.
 pub(super) async fn verify_inbound_request(
     req: &HttpRequest,
+    body: &[u8],
     pool: &PgPool,
     settings: &FederationSettings,
     target_laboratory_id: Uuid,
-) -> Result<InboundFederationContext, FederationError> {
-    ensure_enabled(settings)?;
+) -> Result<InboundFederationContext, FederationSecurityError> {
+    if !settings.enabled {
+        return Err(FederationSecurityError::Forbidden(
+            FEDERATION_DISABLED.into(),
+        ));
+    }
     let headers = req.headers();
     let remote_node_id = parse_uuid_header(headers, HEADER_NODE_ID)?;
     let key_version = parse_i32_header(headers, HEADER_KEY_VERSION)?;
@@ -157,44 +199,55 @@ pub(super) async fn verify_inbound_request(
         .to_string();
 
     if !matches!(remote_user_type.as_str(), "lab_admin" | "user") {
-        return Err(FederationError::Forbidden(
+        return Err(FederationSecurityError::Forbidden(
             "Remote user type is not allowed for federation".into(),
         ));
     }
     if remote_username.is_empty() {
-        return Err(FederationError::Unauthorized(
+        return Err(FederationSecurityError::Unauthorized(
             "Remote username is required".into(),
         ));
     }
 
     let now = Utc::now().timestamp();
     if (now - timestamp).abs() > settings.request_ttl_seconds {
-        return Err(FederationError::Unauthorized(
+        return Err(FederationSecurityError::Unauthorized(
             "Federation request timestamp is outside the allowed window".into(),
         ));
     }
 
-    let remote_node = fetch_remote_node(pool, remote_node_id).await?;
+    // An unknown node is answered exactly like a known one that fails to sign,
+    // so probing this endpoint cannot tell the two apart.
+    let remote_node = fetch_remote_node(pool, remote_node_id)
+        .await?
+        .ok_or_else(|| {
+            FederationSecurityError::Unauthorized("Federation node is not known".into())
+        })?;
     if remote_node.status != "active" || remote_node.key_version != key_version {
-        return Err(FederationError::Unauthorized(
+        return Err(FederationSecurityError::Unauthorized(
             "Federation node is not active or key version is invalid".into(),
         ));
     }
-    fetch_active_trust(
+    if fetch_active_trust(
         pool,
         target_laboratory_id,
         remote_node_id,
         remote_laboratory_id,
     )
-    .await?;
-    remember_nonce(pool, remote_node_id, &nonce, settings.request_ttl_seconds).await?;
+    .await?
+    .is_none()
+    {
+        return Err(FederationSecurityError::Forbidden(
+            "No active federation trust between these laboratories".into(),
+        ));
+    }
 
     let path_and_query = req
         .uri()
         .path_and_query()
         .map(|value| value.as_str())
         .unwrap_or_else(|| req.path());
-    let body_hash = sha256_hex(&[]);
+    let body_hash = sha256_hex(body);
     let expected = sign_canonical(
         &remote_node.shared_secret,
         req.method().as_str(),
@@ -210,6 +263,11 @@ pub(super) async fn verify_inbound_request(
     );
     verify_signature(&signature, &expected)?;
 
+    // Only a request that already proved its signature may spend a nonce, so an
+    // unsigned caller cannot write to the nonce table on our behalf. The nonce is
+    // part of the signed material, so a replay cannot carry a fresh one either.
+    remember_nonce(pool, remote_node_id, &nonce, settings.request_ttl_seconds).await?;
+
     Ok(InboundFederationContext {
         remote_node,
         remote_laboratory_id,
@@ -222,27 +280,23 @@ pub(super) async fn verify_inbound_request(
 pub(super) fn verify_tls_pin(
     response: &reqwest::Response,
     expected_pin: Option<&str>,
-) -> Result<(), FederationError> {
+) -> Result<(), String> {
     let Some(expected_pin) = expected_pin else {
         return Ok(());
     };
     let Some(tls_info) = response.extensions().get::<reqwest::tls::TlsInfo>() else {
-        return Err(FederationError::BadGateway(
-            "TLS peer certificate information is unavailable".into(),
+        return Err(String::from(
+            "TLS peer certificate information is unavailable",
         ));
     };
     let Some(peer_certificate) = tls_info.peer_certificate() else {
-        return Err(FederationError::BadGateway(
-            "TLS peer certificate is unavailable".into(),
-        ));
+        return Err(String::from("TLS peer certificate is unavailable"));
     };
     let actual_pin = sha256_hex(peer_certificate);
     if actual_pin.eq_ignore_ascii_case(expected_pin) {
         Ok(())
     } else {
-        Err(FederationError::BadGateway(
-            "Remote TLS certificate pin does not match".into(),
-        ))
+        Err(String::from("Remote TLS certificate pin does not match"))
     }
 }
 
@@ -278,13 +332,13 @@ fn sign_canonical(
     STANDARD.encode(mac.finalize().into_bytes())
 }
 
-fn verify_signature(provided: &str, expected: &str) -> Result<(), FederationError> {
-    let provided = STANDARD
-        .decode(provided)
-        .map_err(|_| FederationError::Unauthorized("Invalid federation signature".into()))?;
-    let expected = STANDARD
-        .decode(expected)
-        .map_err(|_| FederationError::Unauthorized("Invalid federation signature".into()))?;
+fn verify_signature(provided: &str, expected: &str) -> Result<(), FederationSecurityError> {
+    let provided = STANDARD.decode(provided).map_err(|_| {
+        FederationSecurityError::Unauthorized("Invalid federation signature".into())
+    })?;
+    let expected = STANDARD.decode(expected).map_err(|_| {
+        FederationSecurityError::Unauthorized("Invalid federation signature".into())
+    })?;
     if provided.len() == expected.len()
         && provided
             .iter()
@@ -294,7 +348,7 @@ fn verify_signature(provided: &str, expected: &str) -> Result<(), FederationErro
     {
         Ok(())
     } else {
-        Err(FederationError::Unauthorized(
+        Err(FederationSecurityError::Unauthorized(
             "Federation signature mismatch".into(),
         ))
     }
@@ -303,56 +357,63 @@ fn verify_signature(provided: &str, expected: &str) -> Result<(), FederationErro
 fn required_header<'a>(
     headers: &'a HeaderMap,
     name: &'static str,
-) -> Result<&'a str, FederationError> {
+) -> Result<&'a str, FederationSecurityError> {
     headers
         .get(name)
-        .ok_or_else(|| FederationError::Unauthorized(format!("Missing federation header: {name}")))?
+        .ok_or_else(|| {
+            FederationSecurityError::Unauthorized(format!("Missing federation header: {name}"))
+        })?
         .to_str()
-        .map_err(|_| FederationError::Unauthorized(format!("Invalid federation header: {name}")))
+        .map_err(|_| {
+            FederationSecurityError::Unauthorized(format!("Invalid federation header: {name}"))
+        })
 }
 
-fn parse_uuid_header(headers: &HeaderMap, name: &'static str) -> Result<Uuid, FederationError> {
-    required_header(headers, name)?
-        .parse()
-        .map_err(|_| FederationError::Unauthorized(format!("Invalid federation header: {name}")))
+fn parse_uuid_header(
+    headers: &HeaderMap,
+    name: &'static str,
+) -> Result<Uuid, FederationSecurityError> {
+    required_header(headers, name)?.parse().map_err(|_| {
+        FederationSecurityError::Unauthorized(format!("Invalid federation header: {name}"))
+    })
 }
 
-fn parse_i32_header(headers: &HeaderMap, name: &'static str) -> Result<i32, FederationError> {
-    required_header(headers, name)?
-        .parse()
-        .map_err(|_| FederationError::Unauthorized(format!("Invalid federation header: {name}")))
+fn parse_i32_header(
+    headers: &HeaderMap,
+    name: &'static str,
+) -> Result<i32, FederationSecurityError> {
+    required_header(headers, name)?.parse().map_err(|_| {
+        FederationSecurityError::Unauthorized(format!("Invalid federation header: {name}"))
+    })
 }
 
-fn parse_i64_header(headers: &HeaderMap, name: &'static str) -> Result<i64, FederationError> {
-    required_header(headers, name)?
-        .parse()
-        .map_err(|_| FederationError::Unauthorized(format!("Invalid federation header: {name}")))
+fn parse_i64_header(
+    headers: &HeaderMap,
+    name: &'static str,
+) -> Result<i64, FederationSecurityError> {
+    required_header(headers, name)?.parse().map_err(|_| {
+        FederationSecurityError::Unauthorized(format!("Invalid federation header: {name}"))
+    })
 }
-fn validate_remote_url(url: &Url, settings: &FederationSettings) -> Result<(), FederationError> {
+fn validate_remote_url(url: &Url, settings: &FederationSettings) -> Result<(), String> {
     match url.scheme() {
         "https" => {}
         "http" if !settings.require_https && settings.allow_insecure_private_network => {}
         "http" => {
-            return Err(FederationError::ValidationError(
-                "HTTP federation URLs are not allowed by this configuration".into(),
+            return Err(String::from(
+                "HTTP federation URLs are not allowed by this configuration",
             ));
         }
         _ => {
-            return Err(FederationError::ValidationError(
-                "Federation URL must use http or https".into(),
-            ));
+            return Err(String::from("Federation URL must use http or https"));
         }
     }
     if !url.username().is_empty() || url.password().is_some() {
-        return Err(FederationError::ValidationError(
-            "Federation URL cannot contain credentials".into(),
-        ));
+        return Err(String::from("Federation URL cannot contain credentials"));
     }
     let host = url
         .host_str()
-        .ok_or_else(|| {
-            FederationError::ValidationError("Federation URL must include a host".into())
-        })?
+        .ok_or_else(|| String::from("Federation URL must include a host"))?
         .to_ascii_lowercase();
     let host_with_port = match url.port() {
         Some(port) => format!("{host}:{port}"),
@@ -364,8 +425,8 @@ fn validate_remote_url(url: &Url, settings: &FederationSettings) -> Result<(), F
         .map(|value| value.to_ascii_lowercase())
         .any(|value| value == host || value == host_with_port);
     if !settings.allowed_remote_hosts.is_empty() && !allowlisted {
-        return Err(FederationError::ValidationError(
-            "Remote host is not in federation allowed_remote_hosts".into(),
+        return Err(String::from(
+            "Remote host is not in federation allowed_remote_hosts",
         ));
     }
 
@@ -373,17 +434,15 @@ fn validate_remote_url(url: &Url, settings: &FederationSettings) -> Result<(), F
         if settings.allow_insecure_private_network || allowlisted {
             return Ok(());
         }
-        return Err(FederationError::ValidationError(
-            "Localhost federation URLs are not allowed".into(),
-        ));
+        return Err(String::from("Localhost federation URLs are not allowed"));
     }
 
     if let Ok(ip) = host.parse::<IpAddr>() {
         validate_remote_ip(ip, settings, allowlisted)?;
     }
     if url.scheme() == "http" && !settings.allow_insecure_private_network && !allowlisted {
-        return Err(FederationError::ValidationError(
-            "HTTP federation URLs require explicit private-network allowance".into(),
+        return Err(String::from(
+            "HTTP federation URLs require explicit private-network allowance",
         ));
     }
     Ok(())
@@ -393,10 +452,10 @@ fn validate_remote_ip(
     ip: IpAddr,
     settings: &FederationSettings,
     allowlisted: bool,
-) -> Result<(), FederationError> {
+) -> Result<(), String> {
     if is_metadata_ip(ip) {
-        return Err(FederationError::ValidationError(
-            "Metadata service IPs are not allowed as federation targets".into(),
+        return Err(String::from(
+            "Metadata service IPs are not allowed as federation targets",
         ));
     }
     let special = match ip {
@@ -418,8 +477,8 @@ fn validate_remote_ip(
         }
     };
     if special && !(settings.allow_insecure_private_network || allowlisted) {
-        return Err(FederationError::ValidationError(
-            "Private or special-use federation target IPs require explicit allowance".into(),
+        return Err(String::from(
+            "Private or special-use federation target IPs require explicit allowance",
         ));
     }
     Ok(())

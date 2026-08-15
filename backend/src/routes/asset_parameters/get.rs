@@ -1,6 +1,5 @@
 use super::model::AssetParameterResponse;
 use super::queries::{fetch_asset_parameter, fetch_asset_parameter_options};
-use crate::access_control::AssetParameterPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::domain::AssetParameterId;
 use crate::utils::error_chain_fmt;
@@ -42,10 +41,9 @@ impl ResponseError for GetAssetParameterError {
 pub async fn get_asset_parameter(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    parameter_id: AssetParameterPathId,
+    parameter_id: AssetParameterId,
 ) -> Result<HttpResponse, GetAssetParameterError> {
     let actor = laboratory_context.authorization_actor();
-    let parameter_id: AssetParameterId = parameter_id.into_inner().into();
     if !validate_permission(
         &pool,
         &actor,

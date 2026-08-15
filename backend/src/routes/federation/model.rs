@@ -1,67 +1,7 @@
-use crate::utils::error_chain_fmt;
-use actix_web::http::StatusCode;
-use actix_web::{HttpResponse, ResponseError};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
-
-/// The error every federation route answers with.
-///
-/// Federation spans two audiences — an administrator driving pairing from the
-/// UI and another server speaking the signed protocol — so one type carries both
-/// the ordinary outcomes and the protocol-level ones (`Unauthorized` for a
-/// failed signature, `BadGateway` for a remote node that misbehaved).
-#[derive(thiserror::Error)]
-pub enum FederationError {
-    #[error("Federation is disabled")]
-    Disabled,
-    #[error("{0}")]
-    ValidationError(String),
-    #[error("{0}")]
-    Unauthorized(String),
-    #[error("{0}")]
-    Forbidden(String),
-    #[error("{0}")]
-    NotFound(String),
-    #[error("{0}")]
-    ConflictError(String),
-    #[error("{0}")]
-    BadGateway(String),
-    #[error(transparent)]
-    UnexpectedError(#[from] anyhow::Error),
-}
-
-impl std::fmt::Debug for FederationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        error_chain_fmt(self, f)
-    }
-}
-
-impl ResponseError for FederationError {
-    fn status_code(&self) -> StatusCode {
-        match self {
-            FederationError::Disabled => StatusCode::FORBIDDEN,
-            FederationError::ValidationError(_) => StatusCode::BAD_REQUEST,
-            FederationError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
-            FederationError::Forbidden(_) => StatusCode::FORBIDDEN,
-            FederationError::NotFound(_) => StatusCode::NOT_FOUND,
-            FederationError::ConflictError(_) => StatusCode::CONFLICT,
-            FederationError::BadGateway(_) => StatusCode::BAD_GATEWAY,
-            FederationError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-        }
-    }
-
-    fn error_response(&self) -> HttpResponse {
-        HttpResponse::build(self.status_code()).json(json!({ "error": self.to_string() }))
-    }
-}
-
-#[derive(Clone, sqlx::FromRow)]
-pub(super) struct LocalNodeRow {
-    pub(super) node_id: Uuid,
-    pub(super) public_base_url: String,
-}
 
 #[derive(Clone, sqlx::FromRow)]
 #[allow(dead_code)]
@@ -142,6 +82,19 @@ pub(super) struct PairingCodeRow {
     pub(super) pairing_code_id: Uuid,
     pub(super) local_laboratory_id: Uuid,
     pub(super) expires_at: DateTime<Utc>,
+}
+
+/// Who an inbound federated caller is, once resolved against this server: the
+/// link that records their remote identity, and the local guest account they act
+/// as here.
+///
+/// Anything a federated caller writes is attributed through both. The account is
+/// what the local authorization rules see; the link is what the record is filed
+/// under, because a link outlives the account it points at.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct GuestLinkIdentity {
+    pub(super) link_id: Uuid,
+    pub(super) local_guest_user_id: Uuid,
 }
 
 #[derive(sqlx::FromRow)]

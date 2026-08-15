@@ -1,6 +1,5 @@
 use super::model::AttachmentResponse;
 use super::queries::fetch_attachment;
-use crate::access_control::AttachmentPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::domain::AttachmentId;
 use crate::utils::error_chain_fmt;
@@ -48,10 +47,9 @@ impl ResponseError for GetAttachmentError {
 pub async fn get_attachment(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    attachment_id: AttachmentPathId,
+    attachment_id: AttachmentId,
 ) -> Result<HttpResponse, GetAttachmentError> {
     let actor = laboratory_context.authorization_actor();
-    let attachment_id: AttachmentId = attachment_id.into_inner().into();
     if !validate_permission(
         &pool,
         &actor,

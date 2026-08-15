@@ -115,6 +115,135 @@ pub async fn spawn_app() -> TestApp {
     test_app
 }
 
+/// Runs the pairing handshake between two instances and returns the remote node
+/// id `local` now knows `remote` by.
+///
+/// Leaves both apps logged in as a freshly created `lab_admin` of their own
+/// laboratory, which is what the handshake needs; callers that want a different
+/// session log in again afterwards.
+pub async fn pair_laboratories(
+    local: &TestApp,
+    local_laboratory_id: Uuid,
+    remote: &TestApp,
+    remote_laboratory_id: Uuid,
+) -> Uuid {
+    let remote_admin = TestUser::generate_with_user_type("lab_admin", Some(remote_laboratory_id));
+    remote.store_user(&remote_admin).await;
+    remote_admin.login(remote).await;
+    let response = remote
+        .post_federation_pairing_code(remote_laboratory_id)
+        .await;
+    assert_eq!(response.status().as_u16(), 201);
+    let pairing: serde_json::Value = response.json().await.unwrap();
+    let pairing_code = pairing["pairing_code"].as_str().unwrap();
+
+    let local_admin = TestUser::generate_with_user_type("lab_admin", Some(local_laboratory_id));
+    local.store_user(&local_admin).await;
+    local_admin.login(local).await;
+    let response = local
+        .post_federation_trust(
+            local_laboratory_id,
+            &serde_json::json!({
+                "remote_base_url": remote.address,
+                "remote_laboratory_id": remote_laboratory_id,
+                "pairing_code": pairing_code
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 201);
+    let trust: serde_json::Value = response.json().await.unwrap();
+    let response = local.get_federation_trusts(local_laboratory_id).await;
+    assert_eq!(response.status().as_u16(), 200);
+    let trusts: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(trusts.as_array().unwrap().len(), 1);
+    trust["remote_node_id"].as_str().unwrap().parse().unwrap()
+}
+
+/// The headers a partner would send, built from the shared secret the handshake
+/// stored, so a test can put a signed request on the wire without going through
+/// the proxy.
+///
+/// It reproduces `sign_canonical` rather than calling it — that function is
+/// private to the crate's federation module. Signing here over a *different*
+/// body than the one sent is how the body-tampering test is written.
+pub async fn sign_federation_request(
+    sender: &TestApp,
+    receiver: &TestApp,
+    method: &str,
+    path_and_query: &str,
+    signed_body: &[u8],
+    caller_laboratory_id: Uuid,
+    caller_user_id: Uuid,
+    caller_user_type: &str,
+) -> Vec<(String, String)> {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD;
+    use hmac::{Hmac, Mac};
+    use sha2::{Digest, Sha256};
+
+    // The node id on the wire is the sender's own identity, which the receiver
+    // recorded as one of its known remote nodes during the handshake.
+    let sender_node_id = sqlx::query_scalar!("SELECT node_id FROM federation_local_nodes")
+        .fetch_one(&sender.db_pool)
+        .await
+        .expect("Failed to read the sender's federation node identity.");
+    let record = sqlx::query!(
+        "SELECT shared_secret, key_version FROM federation_remote_nodes WHERE remote_node_id = $1",
+        sender_node_id
+    )
+    .fetch_one(&receiver.db_pool)
+    .await
+    .expect("Failed to read the federation shared secret.");
+
+    let body_hash: String = Sha256::digest(signed_body)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let timestamp = chrono::Utc::now().timestamp().to_string();
+    let nonce = Uuid::new_v4().to_string();
+    let canonical = format!(
+        "v1\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        method.to_uppercase(),
+        path_and_query,
+        body_hash,
+        sender_node_id,
+        caller_laboratory_id,
+        caller_user_id,
+        caller_user_type,
+        timestamp,
+        nonce,
+        record.key_version,
+    );
+    let mut mac = Hmac::<Sha256>::new_from_slice(record.shared_secret.as_bytes())
+        .expect("HMAC accepts keys of any size");
+    mac.update(canonical.as_bytes());
+    let signature = STANDARD.encode(mac.finalize().into_bytes());
+
+    vec![
+        ("x-federation-node-id".into(), sender_node_id.to_string()),
+        (
+            "x-federation-key-version".into(),
+            record.key_version.to_string(),
+        ),
+        ("x-federation-timestamp".into(), timestamp),
+        ("x-federation-nonce".into(), nonce),
+        ("x-federation-signature".into(), signature),
+        (
+            "x-federation-remote-laboratory-id".into(),
+            caller_laboratory_id.to_string(),
+        ),
+        (
+            "x-federation-remote-user-id".into(),
+            caller_user_id.to_string(),
+        ),
+        ("x-federation-remote-username".into(), "tamper".into()),
+        (
+            "x-federation-remote-user-type".into(),
+            caller_user_type.into(),
+        ),
+    ]
+}
+
 impl TestApp {
     pub async fn get_health_check(&self) -> reqwest::Response {
         self.api_client
@@ -1007,6 +1136,80 @@ impl TestApp {
     pub async fn get_borrow_requests(&self, _laboratory_id: Uuid) -> reqwest::Response {
         self.api_client
             .get(format!("{}/api/v1/local/borrow-requests", &self.address))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_my_borrow_requests(&self) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/local/borrow-requests/mine",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn post_borrow_request_cancel(&self, borrow_request_id: Uuid) -> reqwest::Response {
+        self.api_client
+            .post(format!(
+                "{}/api/v1/local/borrow-requests/{borrow_request_id}/cancel",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn post_federation_borrow_request<Body>(
+        &self,
+        remote_node_id: Uuid,
+        remote_laboratory_id: Uuid,
+        inventory_item_id: Uuid,
+        body: &Body,
+    ) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(format!(
+                "{}/api/v1/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}/inventory-items/{inventory_item_id}/borrow-requests",
+                &self.address
+            ))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn get_federation_borrow_requests(
+        &self,
+        remote_node_id: Uuid,
+        remote_laboratory_id: Uuid,
+    ) -> reqwest::Response {
+        self.api_client
+            .get(format!(
+                "{}/api/v1/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}/borrow-requests",
+                &self.address
+            ))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
+    pub async fn post_federation_borrow_request_cancel(
+        &self,
+        remote_node_id: Uuid,
+        remote_laboratory_id: Uuid,
+        borrow_request_id: Uuid,
+    ) -> reqwest::Response {
+        self.api_client
+            .post(format!(
+                "{}/api/v1/federation/nodes/{remote_node_id}/laboratories/{remote_laboratory_id}/borrow-requests/{borrow_request_id}/cancel",
+                &self.address
+            ))
             .send()
             .await
             .expect("Failed to execute request.")

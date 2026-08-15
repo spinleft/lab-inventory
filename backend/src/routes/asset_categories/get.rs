@@ -1,6 +1,5 @@
 use super::model::AssetCategoryResponse;
 use super::queries::{fetch_asset_category, fetch_asset_category_parameter_assignments};
-use crate::access_control::AssetCategoryPathId;
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::domain::AssetCategoryId;
 use crate::utils::error_chain_fmt;
@@ -42,10 +41,9 @@ impl ResponseError for GetAssetCategoryError {
 pub async fn get_asset_category(
     laboratory_context: LaboratoryContext,
     pool: web::Data<PgPool>,
-    category_id: AssetCategoryPathId,
+    category_id: AssetCategoryId,
 ) -> Result<HttpResponse, GetAssetCategoryError> {
     let actor = laboratory_context.authorization_actor();
-    let category_id: AssetCategoryId = category_id.into_inner().into();
     if !validate_permission(
         &pool,
         &actor,
