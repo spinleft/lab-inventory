@@ -81,6 +81,6 @@ reqwest = { version = "0.12", default-features = false, features = [
     "cookies",
 ] }
 claims = "0.8"
-fake = "2.9"
+fake = "5.1"
 quickcheck = "1.1"
 quickcheck_macros = "1"
