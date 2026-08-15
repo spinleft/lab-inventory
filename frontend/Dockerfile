@@ -3,7 +3,7 @@
 # The bundle is built without an API address baked in. `docker-entrypoint.sh`
 # writes one into `config.js` when the container starts, so the same image can
 # be pointed at any backend.
-FROM node:22-bookworm-slim AS builder
+FROM node:26-bookworm-slim AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
