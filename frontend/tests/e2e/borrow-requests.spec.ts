@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { record } from "./shell";
 
 const apiBaseUrl = "http://127.0.0.1:8000/api/v1";
 const laboratoryId = "50000000-0000-4000-8000-000000000001";
@@ -248,8 +249,7 @@ test("requester can cancel a pending request from any laboratory", async ({ page
   await expect(page.getByRole("heading", { name: "我的借用" })).toBeVisible();
   await expect(page.getByText("Remote Spectrometer")).toBeVisible();
 
-  await page
-    .getByRole("row", { name: /Remote Spectrometer/ })
+  await record(page, /Remote Spectrometer/)
     .getByRole("button", { name: "撤销" })
     .click();
   const dialog = page.getByRole("alertdialog", { name: "撤销借用申请" });

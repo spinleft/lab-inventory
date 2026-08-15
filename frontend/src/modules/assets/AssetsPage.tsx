@@ -30,6 +30,7 @@ import { useLaboratorySelection } from "../../app/laboratory-selection-context";
 import { useBackendConfig } from "../../shared/api/backendConfig";
 import { formatDate } from "../../shared/lib/date";
 import { toErrorMessage } from "../../shared/lib/errors";
+import { useIsMobile } from "../../shared/lib/useIsMobile";
 import { Badge } from "../../shared/ui/Badge";
 import { Button } from "../../shared/ui/Button";
 import { Dialog } from "../../shared/ui/Dialog";
@@ -1274,6 +1275,7 @@ function AssetsTable({
   selectedIds: string[];
   sort: SortState;
 }) {
+  const isMobile = useIsMobile();
   const selection = new Set(selectedIds);
   const pageIds = items.map((asset) => asset.asset_id);
   const allSelected = pageIds.length > 0 && pageIds.every((id) => selection.has(id));
@@ -1315,6 +1317,62 @@ function AssetsTable({
         description="当前查询条件下没有资产。"
         title="暂无资产"
       />
+    );
+  }
+
+  if (isMobile) {
+    const [titleColumn, ...fieldColumns] = columns;
+    return (
+      <ul className="data-cards">
+        {items.map((asset) => (
+          <li className="data-card" key={asset.asset_id}>
+            {/* Tappable anywhere, but only the title is a control — see the
+                same shape in shared/ui/DataTable.tsx. */}
+            <div className="data-card-main clickable" onClick={() => onRowClick(asset)}>
+              {selectable ? (
+                <span
+                  className="data-card-select"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <input
+                    aria-label="选择此资产"
+                    checked={selection.has(asset.asset_id)}
+                    type="checkbox"
+                    onChange={(event) => toggle(asset.asset_id, event.target.checked)}
+                  />
+                </span>
+              ) : null}
+              <div className="data-card-body">
+                {titleColumn ? (
+                  <button
+                    className="data-card-title"
+                    type="button"
+                    onClick={() => onRowClick(asset)}
+                  >
+                    {titleColumn.render(asset)}
+                  </button>
+                ) : null}
+                <dl className="data-card-fields">
+                  {fieldColumns.map((column) => (
+                    <div className="data-card-field" key={column.key}>
+                      <dt>{column.label}</dt>
+                      <dd>{column.render(asset)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+              <span className="data-card-menu" onClick={(event) => event.stopPropagation()}>
+                <AssetActions
+                  canManage={canManage}
+                  asset={asset}
+                  onDelete={onDelete}
+                  onEdit={onEdit}
+                />
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
     );
   }
 

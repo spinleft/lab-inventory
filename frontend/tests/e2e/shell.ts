@@ -48,6 +48,16 @@ export async function signOut(page: Page) {
   await page.getByText("退出登录").click();
 }
 
+/**
+ * One record in a list, whether the shell drew it as a table row or a card.
+ *
+ * Scoping to the record matters when several of them carry the same button —
+ * "撤销" on every pending request, say.
+ */
+export function record(page: Page, name: string | RegExp) {
+  return page.locator("tbody tr, .data-card").filter({ hasText: name });
+}
+
 /** Follows a navigation entry, wherever this shell keeps it. */
 export async function openNavItem(page: Page, name: string) {
   const link = page.getByRole("link", { exact: true, name });

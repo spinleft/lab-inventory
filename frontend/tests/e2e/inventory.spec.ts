@@ -276,7 +276,9 @@ test("browse, filter, edit, create, delete, and open inventory detail", async ({
 
   await page.goto("/inventory");
   await page.getByRole("tab", { name: "参数信息" }).click();
-  await expect(page.getByRole("button", { name: "功率" })).toBeVisible();
+  // A sortable column header on the desktop shell, a field label on the cards
+  // the phone shell draws instead — either way the parameter is now on screen.
+  await expect(page.getByText("功率").first()).toBeVisible();
   await expect(page.getByText("42 pcs").first()).toBeVisible();
 
   await page.getByText("SN-001").first().click();

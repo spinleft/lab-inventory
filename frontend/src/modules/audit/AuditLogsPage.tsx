@@ -5,6 +5,7 @@ import { Badge } from "../../shared/ui/Badge";
 import { Button } from "../../shared/ui/Button";
 import { DataTable, type DataTableColumn } from "../../shared/ui/DataTable";
 import { Dialog } from "../../shared/ui/Dialog";
+import { FilterPanel } from "../../shared/ui/FilterPanel";
 import { FormField } from "../../shared/ui/FormField";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { Select } from "../../shared/ui/Select";
@@ -39,6 +40,9 @@ export function AuditLogsPage() {
     }),
     [filters, offset],
   );
+  // Drives the badge on the phone shell's filter button: applied filters are
+  // out of sight there, and a list quietly showing a subset is a trap.
+  const activeFilterCount = Object.values(filters).filter(Boolean).length;
   const auditLogsQuery = useAuditLogs(query);
   const response = auditLogsQuery.data;
   const total = response?.total ?? 0;
@@ -93,14 +97,10 @@ export function AuditLogsPage() {
         description="查看关键管理操作的追踪记录。仅根用户和超级管理员可访问。"
       />
 
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <h2 className="panel-title">筛选</h2>
-            <p className="panel-description">按操作者、资源、动作和时间范围缩小日志范围。</p>
-          </div>
-        </div>
-        <div className="panel-body">
+      <FilterPanel
+        activeCount={activeFilterCount}
+        description="按操作者、资源、动作和时间范围缩小日志范围。"
+      >
           <form className="form-grid" onSubmit={submitFilters}>
             <div className="form-grid form-grid-2">
               <FormField label="动作" htmlFor="audit-action">
@@ -202,8 +202,7 @@ export function AuditLogsPage() {
               </Button>
             </div>
           </form>
-        </div>
-      </section>
+      </FilterPanel>
 
       <section className="panel">
         <div className="panel-header">

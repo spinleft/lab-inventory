@@ -34,6 +34,7 @@ import { useBackendConfig } from "../../shared/api/backendConfig";
 import { createApiClient } from "../../shared/api/httpClient";
 import { formatDate } from "../../shared/lib/date";
 import { toErrorMessage } from "../../shared/lib/errors";
+import { useIsMobile } from "../../shared/lib/useIsMobile";
 import { Badge } from "../../shared/ui/Badge";
 import { Button } from "../../shared/ui/Button";
 import { Dialog } from "../../shared/ui/Dialog";
@@ -1360,6 +1361,7 @@ function InventoryTable({
   selectedIds: string[];
   sort: SortState;
 }) {
+  const isMobile = useIsMobile();
   const selection = new Set(selectedIds);
   const pageIds = items.map((item) => item.inventory_item_id);
   const allSelected = pageIds.length > 0 && pageIds.every((id) => selection.has(id));
@@ -1401,6 +1403,66 @@ function InventoryTable({
         description="当前查询条件下没有库存项。"
         title="暂无库存"
       />
+    );
+  }
+
+  if (isMobile) {
+    const [titleColumn, ...fieldColumns] = columns;
+    return (
+      <ul className="data-cards">
+        {items.map((item) => (
+          <li className="data-card" key={item.inventory_item_id}>
+            {/* Tappable anywhere, but only the title is a control — see the
+                same shape in shared/ui/DataTable.tsx. */}
+            <div className="data-card-main clickable" onClick={() => onRowClick(item)}>
+              {selectable ? (
+                <span
+                  className="data-card-select"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <input
+                    aria-label="选择此库存项"
+                    checked={selection.has(item.inventory_item_id)}
+                    type="checkbox"
+                    onChange={(event) =>
+                      toggle(item.inventory_item_id, event.target.checked)
+                    }
+                  />
+                </span>
+              ) : null}
+              <div className="data-card-body">
+                {titleColumn ? (
+                  <button
+                    className="data-card-title"
+                    type="button"
+                    onClick={() => onRowClick(item)}
+                  >
+                    {titleColumn.render(item)}
+                  </button>
+                ) : null}
+                <dl className="data-card-fields">
+                  {fieldColumns.map((column) => (
+                    <div className="data-card-field" key={column.key}>
+                      <dt>{column.label}</dt>
+                      <dd>{column.render(item)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+              <span className="data-card-menu" onClick={(event) => event.stopPropagation()}>
+                <InventoryActions
+                  canBorrow={canBorrow}
+                  canManage={canManage}
+                  item={item}
+                  onBorrow={onBorrow}
+                  onDelete={onDelete}
+                  onEdit={onEdit}
+                />
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
     );
   }
 
