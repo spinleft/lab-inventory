@@ -176,7 +176,7 @@ jobs:
       - name: 构建 ${{ matrix.component }}
         # 只构建不推送:发布由 release.yml 负责。这一步是为了保证合到 main
         # 的每个提交都是能打出镜像的。
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./${{ matrix.component }}
           push: false
