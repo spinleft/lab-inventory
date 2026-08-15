@@ -189,6 +189,7 @@
     --radius-md: 8px;
     --radius-lg: 12px;
     --tabbar-height: 56px;
+    --tree-indent: 14px;
   }
 
   .app-shell-mobile {
@@ -509,6 +510,35 @@
   .table-wrap {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+  }
+
+  /* The tree and group tables cannot become cards without losing the nesting
+     that is the whole point of them. They keep their shape and drop the
+     columns in the middle instead: the first two identify the row, the last
+     holds its buttons, and everything else is one tap away in the editor.
+     Written as "not the first two, not the last" so adding a column later
+     hides itself rather than shifting what stays. */
+  .category-tree-table th:not(:nth-child(-n + 2)):not(:last-child),
+  .category-tree-table td:not(:nth-child(-n + 2)):not(:last-child),
+  .unit-groups-table th:not(:nth-child(-n + 2)):not(:last-child),
+  .unit-groups-table td:not(:nth-child(-n + 2)):not(:last-child) {
+    display: none;
+  }
+
+  .category-tree-table,
+  .unit-groups-table {
+    width: 100%;
+  }
+
+  .category-tree-cell {
+    /* Deep trees would otherwise indent themselves off the screen. */
+    max-width: 100%;
+  }
+
+  .category-tree-title span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* Dialogs become bottom sheets: reachable with a thumb, and the drag handle

@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { isPhoneShell } from "./shell";
 
 const apiBaseUrl = "http://127.0.0.1:18081/api/v1";
 const appUrl = "/admin/asset-categories";
@@ -121,7 +122,13 @@ test("manage asset category parameter assignments", async ({ page }) => {
   await page.goto(appUrl);
   await expect(page.getByRole("heading", { exact: true, name: "资产分类" })).toBeVisible();
   await expect(page.getByText("显微镜")).toBeVisible();
-  await expect(page.locator(".category-tree-table").getByText("1 个", { exact: true })).toBeVisible();
+  // The phone shell keeps the tree readable by dropping the columns between
+  // the name and the buttons, and the child count is one of them.
+  if (!(await isPhoneShell(page))) {
+    await expect(
+      page.locator(".category-tree-table").getByText("1 个", { exact: true }),
+    ).toBeVisible();
+  }
   await expectNoHorizontalOverflow(page);
 
   await page.getByRole("button", { name: "编辑" }).click();
@@ -145,7 +152,13 @@ test("manage asset category parameter assignments", async ({ page }) => {
     ],
   });
   await expect(page.getByText("制造商")).not.toBeVisible();
-  await expect(page.locator(".category-tree-table").getByText("1 个", { exact: true })).toBeVisible();
+  // The phone shell keeps the tree readable by dropping the columns between
+  // the name and the buttons, and the child count is one of them.
+  if (!(await isPhoneShell(page))) {
+    await expect(
+      page.locator(".category-tree-table").getByText("1 个", { exact: true }),
+    ).toBeVisible();
+  }
   await expectNoHorizontalOverflow(page);
 });
 

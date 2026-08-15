@@ -277,7 +277,9 @@ function LocationTreeTable({
                 <td>
                   <div
                     className="category-tree-cell"
-                    style={{ paddingLeft: depth * 24 }}
+                    // A phone shrinks the step (styles/mobile.css): five levels
+                    // at the desktop's 24px would eat a third of the screen.
+                    style={{ paddingLeft: `calc(var(--tree-indent) * ${depth})` }}
                   >
                     <Button
                       aria-label={expanded ? "收起位置" : "展开位置"}

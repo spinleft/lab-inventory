@@ -31,6 +31,8 @@
   --sidebar-width: 220px;
   --topbar-height: 44px;
   --control-height: 28px;
+  /* Per-level indent of the location and category trees. */
+  --tree-indent: 24px;
   --focus: 0 0 0 2px rgb(10 132 255 / 22%);
 }
 
