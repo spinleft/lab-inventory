@@ -211,6 +211,7 @@ export const adminQueryKeys = {
   assetParameters: (apiBaseUrl: string, laboratoryId: string) =>
     ["admin", "asset-parameters", apiBaseUrl, laboratoryId] as const,
   laboratories: (apiBaseUrl: string) => ["admin", "laboratories", apiBaseUrl] as const,
+  ownLaboratory: (apiBaseUrl: string) => ["admin", "laboratory", "own", apiBaseUrl] as const,
   locations: (apiBaseUrl: string, laboratoryId: string) =>
     ["admin", "locations", apiBaseUrl, laboratoryId] as const,
   units: (apiBaseUrl: string, scopeKey?: string) =>
@@ -229,6 +230,26 @@ export function useLaboratories({ enabled = true }: { enabled?: boolean } = {}) 
     queryFn: async () => {
       const client = createApiClient(apiBaseUrl);
       return laboratoriesSchema.parse(await client.get("/admin/laboratories"));
+    },
+  });
+}
+
+/**
+ * The caller's own laboratory.
+ *
+ * Laboratory-scoped admins never reach `/admin/laboratories` — that whole scope
+ * is closed to them — but the API does hand them their own laboratory here, and
+ * lets them edit it.
+ */
+export function useOwnLaboratory({ enabled = true }: { enabled?: boolean } = {}) {
+  const { apiBaseUrl } = useBackendConfig();
+
+  return useQuery({
+    enabled,
+    queryKey: adminQueryKeys.ownLaboratory(apiBaseUrl),
+    queryFn: async () => {
+      const client = createApiClient(apiBaseUrl);
+      return laboratorySchema.parse(await client.get("/local/laboratory"));
     },
   });
 }
@@ -361,6 +382,7 @@ export function useCreateLaboratory() {
 
 export function useUpdateLaboratory() {
   const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
 
   return useMutation({
     mutationFn: async ({
@@ -371,9 +393,12 @@ export function useUpdateLaboratory() {
       payload: Partial<LaboratoryPayload>;
     }) => {
       const client = createApiClient(apiBaseUrl);
-      return laboratorySchema.parse(
-        await client.patch(`/admin/laboratories/${laboratoryId}`, payload),
-      );
+      // A laboratory admin edits their own laboratory through /local, where the
+      // id is implied by the session rather than named in the path.
+      const path = isSystemAdmin(currentUser)
+        ? `/admin/laboratories/${laboratoryId}`
+        : "/local/laboratory";
+      return laboratorySchema.parse(await client.patch(path, payload));
     },
   });
 }

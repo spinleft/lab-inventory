@@ -38,6 +38,7 @@ import {
   useDeleteLaboratory,
   useDeleteUser,
   useLaboratories,
+  useOwnLaboratory,
   useUpdateLaboratory,
   useUpdateUser,
   useUsers,
@@ -80,14 +81,24 @@ export function LaboratoriesPage() {
   const { apiBaseUrl } = useBackendConfig();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const laboratoriesQuery = useLaboratories();
+  // Only system admins may list laboratories; a laboratory admin reaches this
+  // page too, and sees the one laboratory the API will hand them.
+  const systemAdmin = isSystemAdmin(currentUser);
+  const laboratoriesQuery = useLaboratories({ enabled: systemAdmin });
+  const ownLaboratoryQuery = useOwnLaboratory({
+    enabled: !systemAdmin && Boolean(currentUser.laboratory),
+  });
   const createLaboratory = useCreateLaboratory();
   const updateLaboratory = useUpdateLaboratory();
   const deleteLaboratory = useDeleteLaboratory();
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<Laboratory | "new" | null>(null);
   const isOwner = canManageLaboratories(currentUser);
-  const laboratories = laboratoriesQuery.data ?? [];
+  const laboratories = systemAdmin
+    ? (laboratoriesQuery.data ?? [])
+    : ownLaboratoryQuery.data
+      ? [ownLaboratoryQuery.data]
+      : [];
   const filteredLaboratories = laboratories.filter((laboratory) =>
     [laboratory.name, laboratory.address, laboratory.contact ?? "", laboratory.description ?? ""]
       .join(" ")
@@ -97,6 +108,10 @@ export function LaboratoriesPage() {
 
   function refresh() {
     queryClient.invalidateQueries({ queryKey: adminQueryKeys.laboratories(apiBaseUrl) });
+    queryClient.invalidateQueries({ queryKey: adminQueryKeys.ownLaboratory(apiBaseUrl) });
+    // The shell prints the laboratory's name beside the user, so a rename has
+    // to reach the session too.
+    queryClient.invalidateQueries({ queryKey: authQueryKeys.me(apiBaseUrl) });
   }
 
   function handleDelete(laboratory: Laboratory) {
@@ -178,7 +193,7 @@ export function LaboratoriesPage() {
           emptyDescription="当前范围内没有实验室。"
           getRowKey={(item) => item.laboratory_id}
           items={filteredLaboratories}
-          loading={laboratoriesQuery.isLoading}
+          loading={laboratoriesQuery.isLoading || ownLaboratoryQuery.isLoading}
         />
       </section>
       <LaboratoryEditor

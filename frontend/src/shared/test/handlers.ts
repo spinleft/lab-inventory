@@ -66,6 +66,9 @@ export const handlers = [
 
   // Laboratory-scoped users: /local/{collection}
   http.get("*/api/v1/local/users", () => HttpResponse.json([])),
+  // Singular, and an object rather than a list: the caller's own laboratory,
+  // which is all a laboratory-scoped admin can read.
+  http.get("*/api/v1/local/laboratory", () => HttpResponse.json(testLaboratories[0])),
   // Registered before the `:collection` catch-all so the literal wins, matching
   // how the backend orders these two routes.
   http.get("*/api/v1/local/borrow-requests/mine", () => HttpResponse.json([])),
