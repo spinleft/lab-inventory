@@ -1,6 +1,6 @@
 [package]
 name = "lab-inventory-client"
-version = "0.1.0"
+version = "0.1.1"
 description = "Client for lab inventory management system"
 authors = ["you"]
 edition = "2021"

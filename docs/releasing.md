@@ -6,14 +6,17 @@
 
 遵循 [语义化版本](https://semver.org/lang/zh-CN/)。0.x 阶段次版本号可以带不兼容变更,主版本号保持 0。
 
-版本号出现在四个地方,**必须一致**,否则发布流程的第一步就会失败:
+版本号出现在这几个地方,**必须一致**,否则发布流程的第一步就会失败:
 
 | 文件                                   | 字段          |
 | -------------------------------------- | ------------- |
 | `backend/Cargo.toml`                 | `version`   |
 | `frontend/package.json`              | `version`   |
 | `frontend/src-tauri/tauri.conf.json` | `version`   |
+| `frontend/src-tauri/Cargo.toml`      | `version`   |
 | git tag                                | `v<版本号>` |
+
+发布流程只核对前三处和 tag —— `src-tauri/Cargo.toml` 不参与打包版本号,但放着不改会一直漂移。
 
 ## 流程
 
@@ -29,9 +32,11 @@ VERSION=0.2.0
 sed -i "0,/^version = .*/s//version = \"$VERSION\"/" backend/Cargo.toml
 cd frontend && npm version "$VERSION" --no-git-tag-version && cd ..
 sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" frontend/src-tauri/tauri.conf.json
+sed -i "0,/^version = .*/s//version = \"$VERSION\"/" frontend/src-tauri/Cargo.toml
 
-# Cargo.lock 里的版本号也要跟着更新
+# 两个 Cargo.lock 里的版本号也要跟着更新
 cd backend && cargo check --quiet && cd ..
+cd frontend/src-tauri && cargo check --quiet && cd ../..
 ```
 
 ### 3. 写 CHANGELOG
@@ -181,7 +186,7 @@ $ANDROID_HOME/build-tools/34.0.0/apksigner verify --print-certs lab-inventory-0.
 ## 发版检查清单
 
 - [ ] main 上 CI 全绿
-- [ ] 四处版本号一致
+- [ ] 各处版本号一致
 - [ ] CHANGELOG 写了,标题格式对
 - [ ] 有数据库迁移的话,CHANGELOG 里标注了
 - [ ] tag 已推送

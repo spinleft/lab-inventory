@@ -193,8 +193,14 @@
   }
 
   .app-shell-mobile {
-    min-height: 100vh;
-    min-height: 100dvh;
+    /* Exactly the viewport, not "at least" it: with a min-height the middle
+       row grows to fit its content, the shell grows with it, and the tab bar
+       ends up below the fold on any page longer than a screen. Fixing the
+       height is what makes the content area — and only the content area —
+       scroll. */
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
     grid-template-columns: minmax(0, 1fr);
@@ -211,10 +217,8 @@
     padding: env(safe-area-inset-top) 8px 0 8px;
     border-bottom: 1px solid var(--border-subtle);
     background: var(--surface);
-    /* Sticky rather than static so a long page keeps the title and the
-       laboratory chip — which says what the page is scoped to — on screen. */
-    position: sticky;
-    top: 0;
+    /* No stickiness needed: the bar is a row of the fixed-height shell, so it
+       stays put while the row below it scrolls. */
     z-index: 20;
   }
 
