@@ -138,16 +138,15 @@ export function canViewMyBorrowRequests(user: CurrentUser) {
 }
 
 /**
- * Units belong to a laboratory, not to the server.
+ * Units belong to a laboratory, and its admin maintains them.
  *
- * The API grants create/update/delete to any non-guest member of the owning
- * laboratory (`ResourceType::Unit` in the backend's access_control.rs), the
- * same rule as asset categories, parameters and locations. Restricting the UI
- * to server admins hid a capability the backend already allowed, which left a
- * laboratory admin with no way to maintain their own units at all.
+ * Not the server admins alone — that left a laboratory admin unable to add a
+ * unit for their own assets — and not every member either: a unit's scale
+ * restates every quantity recorded against it. Mirrors `can_manage_units` in
+ * the backend's access_control.rs.
  */
 export function canManageUnits(user: CurrentUser) {
-  return canManageAssetCategories(user);
+  return isRoot(user) || isSuperAdmin(user) || (isLabAdmin(user) && Boolean(user.laboratory));
 }
 
 export function canSelectLocationLaboratory(user: CurrentUser) {

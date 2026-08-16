@@ -60,6 +60,36 @@ async fn list_and_get_units_are_laboratory_scoped() {
     assert_eq!(body["laboratory_id"], own_laboratory_id.to_string());
     assert_eq!(body["dimension"], "length");
 
+    // Reading is not editing: a unit's scale restates every quantity already
+    // recorded against it, so maintaining them stops at the laboratory admin.
+    assert_eq!(
+        app.post_unit(
+            own_laboratory_id,
+            &serde_json::json!({
+                "code": unique_unit_code(),
+                "name": "Regular User Unit",
+                "symbol": "ruu",
+                "dimension": "length",
+                "scale_to_base": 1,
+                "allow_decimal": true
+            }),
+        )
+        .await
+        .status()
+        .as_u16(),
+        403
+    );
+    assert_eq!(
+        app.patch_unit(own_unit_id, &serde_json::json!({ "name": "Renamed" }))
+            .await
+            .status()
+            .as_u16(),
+        403
+    );
+    // Delete answers 404 rather than 403 — it hides the unit's existence
+    // instead of confirming it, unlike the update above.
+    assert_eq!(app.delete_unit(own_unit_id).await.status().as_u16(), 404);
+
     // Units of another laboratory are invisible.
     let response = app.get_units(other_laboratory_id).await;
     assert_eq!(response.status().as_u16(), 200);

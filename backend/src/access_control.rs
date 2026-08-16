@@ -321,6 +321,14 @@ impl Actor {
         self.is_system_admin() || (self.laboratory_id == Some(laboratory_id) && !self.is_guest())
     }
 
+    /// Units are laboratory settings: everyone in the laboratory reads them,
+    /// but only its admin edits them. Changing a unit's scale silently restates
+    /// every quantity recorded against it, which is not a call for the people
+    /// entering stock to make.
+    pub fn can_manage_units(&self, laboratory_id: LaboratoryId) -> bool {
+        self.is_system_admin() || (self.is_lab_admin() && self.laboratory_id == Some(laboratory_id))
+    }
+
     pub async fn can_manage_unit(
         &self,
         pool: &PgPool,
@@ -343,10 +351,7 @@ impl Actor {
         .fetch_optional(pool)
         .await
         .context("Failed to fetch unit")?
-        .map(|unit| {
-            !self.is_guest()
-                && (self.is_system_admin() || self.laboratory_id == Some(unit.laboratory_id))
-        })
+        .map(|unit| self.can_manage_units(unit.laboratory_id))
         .unwrap_or(false))
     }
 
@@ -952,9 +957,7 @@ pub async fn validate_permission(
             _ => Ok(false),
         },
         ResourceType::Unit => match action {
-            Action::Create(laboratory_id) => {
-                Ok(actor.can_write_laboratory_resource(laboratory_id.into()))
-            }
+            Action::Create(laboratory_id) => Ok(actor.can_manage_units(laboratory_id.into())),
             Action::Delete(unit_id) => Ok(actor.can_manage_unit(pool, unit_id.into()).await?),
             Action::Read(unit_id) => Ok(actor.can_view_unit(pool, unit_id.into()).await?),
             Action::Browse(laboratory_id) => {

@@ -95,15 +95,17 @@ describe("permissions", () => {
     expect(canManageLocations(user("guest"))).toBe(false);
   });
 
-  // Units are laboratory data, and the API lets any non-guest member of the
-  // laboratory maintain them. The UI used to stop at server admins, which left
-  // a laboratory admin unable to add so much as a unit for their own assets.
-  it("lets every non-guest role manage units, as the API does", () => {
+  // Units are laboratory settings: its admin maintains them, the people
+  // entering stock only read them. A unit's scale restates every quantity
+  // recorded against it, so this stops short of every member.
+  it("limits unit management to laboratory admins and above", () => {
     expect(canManageUnits(user("root"))).toBe(true);
     expect(canManageUnits(user("super_admin"))).toBe(true);
-    expect(canManageUnits(user("lab_admin"))).toBe(true);
-    expect(canManageUnits(user("user"))).toBe(true);
-    expect(canManageUnits(user("guest"))).toBe(false);
+    expect(canManageUnits(user("lab_admin", ownLaboratory))).toBe(true);
+    // Nothing to scope the units to until a laboratory is assigned.
+    expect(canManageUnits(user("lab_admin"))).toBe(false);
+    expect(canManageUnits(user("user", ownLaboratory))).toBe(false);
+    expect(canManageUnits(user("guest", ownLaboratory))).toBe(false);
   });
 
   it("limits asset category laboratory selection to global admins", () => {
