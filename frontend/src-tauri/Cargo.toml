@@ -14,6 +14,20 @@ edition = "2021"
 name = "lab_inventory_client_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# 安卓包里 95% 的体积是这个库编译出的 .so(每个 ABI 一份),所以这里按体积调,
+# 不按速度调。外壳本身只做 IPC 转发和原生 HTTP 请求,计算量都在 WebView 和后端,
+# opt-level="z" 的性能损失在这个应用里量不出来。
+#
+# panic="abort" 去掉展开表(.eh_frame / .gcc_except_table)。代价是 panic 不再能被
+# 捕获:tokio 里 spawn 的任务 panic 会直接终止进程,而不是变成 JoinError。对一个
+# WebView 外壳来说,那种 panic 本来也没法继续。
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

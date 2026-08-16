@@ -19,7 +19,21 @@
 | macOS(Apple Silicon) | `lab-inventory-<版本>-macos-aarch64.dmg` |
 | macOS(Intel) | `lab-inventory-<版本>-macos-x86_64.dmg` |
 | Linux | `lab-inventory-<版本>-linux-x86_64.deb` / `.AppImage` |
-| 安卓 | `lab-inventory-<版本>-android-universal.apk` |
+| 安卓 | `lab-inventory-<版本>-android-arm64.apk`(见下) |
+
+### 安卓选哪个 APK
+
+安卓那一栏有好几个文件,区别只是 CPU 架构:
+
+| 文件 | 适用 |
+| --- | --- |
+| `-android-arm64.apk` | **绝大多数手机和平板**。2015 年之后的机器基本都是这个 |
+| `-android-arm.apk` | 很老的 32 位 ARM 机器 |
+| `-android-x86_64.apk` | 模拟器、部分 Chromebook |
+| `-android-x86.apk` | 32 位模拟器 |
+| `-android-universal.apk` | 四个架构打在一起,谁都能装,但体积是单架构包的三四倍 |
+
+拿不准就下 `arm64`;真装不上(系统提示"应用未安装"或"软件包无效")再换 `universal`。
 
 ### 关于签名
 
@@ -117,6 +131,18 @@ npm run tauri:android:build
 APK 在 `frontend/src-tauri/gen/android/app/build/outputs/apk/` 下。
 
 `gen/` 目录是生成的,不在版本库里,可以随时删掉重新 init。
+
+默认打的是 universal 包,四个架构都编一遍,慢。只给自己的机器装的话指定架构会快很多,包也小得多:
+
+```bash
+npm run tauri:android:build -- --target aarch64
+```
+
+发布用的按架构拆分的包(Release 页面上那几个)是这样出的:
+
+```bash
+npm run tauri:android:build -- --split-per-abi
+```
 
 签名配置写在 `src-tauri/gen/android/keystore.properties`:
 
