@@ -83,6 +83,9 @@ export function LoginPage() {
                   onChange={(event) => setPassword(event.target.value)}
                 />
               </FormField>
+              <p className="entry-footnote">
+                收到注册码？<Link to="/register">注册访客账号</Link>
+              </p>
               <div className="entry-actions">
                 <Button asChild>
                   <Link to="/server-settings">

@@ -87,6 +87,17 @@ export function canManageLocations(user: CurrentUser) {
   return canManageAssetCategories(user);
 }
 
+/**
+ * Who may invite a guest into their laboratory.
+ *
+ * Deliberately not the server admins: the API requires the actor to belong to
+ * the laboratory the code is for (`can_create_guest_registration_code`), and
+ * root and super_admin belong to none, so the button would only ever 403.
+ */
+export function canCreateGuestRegistrationCode(user: CurrentUser) {
+  return (isLabAdmin(user) || getUserTypeName(user) === "user") && Boolean(user.laboratory);
+}
+
 export function canManageFederation(user: CurrentUser) {
   return isLabAdmin(user) && Boolean(user.laboratory);
 }

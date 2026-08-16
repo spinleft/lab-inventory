@@ -27,6 +27,7 @@ import {
   roleTone,
 } from "../auth/permissions";
 import { type UserTypeName } from "../auth/types";
+import { GuestInviteButton } from "../guests/GuestInviteButton";
 import {
   adminQueryKeys,
   type AdminUser,
@@ -456,10 +457,13 @@ export function UsersPage() {
         title="用户"
         description="管理账号、角色、实验室范围和联系信息。"
         actions={
-          <Button onClick={() => setEditing("new")} variant="primary">
-            <Plus size={15} />
-            新建用户
-          </Button>
+          <>
+            <GuestInviteButton />
+            <Button onClick={() => setEditing("new")} variant="primary">
+              <Plus size={15} />
+              新建用户
+            </Button>
+          </>
         }
       />
       <section className="panel">

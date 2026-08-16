@@ -104,6 +104,51 @@
   color: var(--danger);
 }
 
+.entry-footnote {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.guest-invite-issued {
+  display: grid;
+  gap: 12px;
+}
+
+.guest-invite-code {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+}
+
+.guest-invite-code code {
+  /* The code gets read aloud and retyped, so it gets room to breathe. */
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  overflow-wrap: anywhere;
+}
+
+.guest-invite-expiry {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.guest-invite-notes {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
 .input,
 .textarea,
 .select-trigger {

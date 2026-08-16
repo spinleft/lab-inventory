@@ -4,6 +4,7 @@ import { canAccessAdmin, canAccessAuditLogs } from "../auth/permissions";
 import { useAuth } from "../../app/auth-context";
 import { Button } from "../../shared/ui/Button";
 import { PageHeader } from "../../shared/ui/PageHeader";
+import { GuestInviteButton } from "../guests/GuestInviteButton";
 
 export function DashboardPage() {
   const { currentUser } = useAuth();
@@ -60,6 +61,10 @@ export function DashboardPage() {
                 </Link>
               </Button>
             ) : null}
+            {/* Also on the user administration page, for admins. A plain
+                laboratory member may invite a guest too but cannot open that
+                page, so this is their only way in. */}
+            <GuestInviteButton />
           </div>
         </div>
       </section>
