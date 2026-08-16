@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { LoginPage } from "../modules/auth/LoginPage";
+import { GuestRegisterPage } from "../modules/guests/GuestRegisterPage";
 import { ServerSettingsPage } from "../modules/server-settings/ServerSettingsPage";
 import { AppShell } from "./AppShell";
 import { RequireAuth, RootRoute } from "./AuthGate";
@@ -13,6 +14,9 @@ export function App() {
       <Route path="/" element={<RootRoute />} />
       <Route path="/server-settings" element={<ServerSettingsPage />} />
       <Route path="/login" element={<LoginPage />} />
+      {/* Outside the shell on purpose: whoever opens it has a code, not an
+          account. */}
+      <Route path="/register" element={<GuestRegisterPage />} />
       <Route
         element={
           <RequireAuth>

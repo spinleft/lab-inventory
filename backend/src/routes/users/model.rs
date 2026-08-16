@@ -9,6 +9,7 @@ pub(in crate::routes) struct UserResponse {
     username: String,
     email: Option<String>,
     phone_number: Option<String>,
+    description: Option<String>,
     user_type: UserTypeResponse,
     laboratory: Option<UserLaboratoryResponse>,
     created_at: DateTime<Utc>,
@@ -33,6 +34,7 @@ pub(super) struct UserRow {
     pub(super) username: String,
     pub(super) email: Option<String>,
     pub(super) phone_number: Option<String>,
+    pub(super) description: Option<String>,
     pub(super) user_type_id: Option<Uuid>,
     pub(super) user_type_name: Option<String>,
     pub(super) laboratory_id: Option<Uuid>,
@@ -48,6 +50,7 @@ pub(super) struct DeletedUserRow {
     pub(super) password_hash: String,
     pub(super) email: Option<String>,
     pub(super) phone_number: Option<String>,
+    pub(super) description: Option<String>,
     pub(super) user_type_id: Option<Uuid>,
     pub(super) user_type_name: Option<String>,
     pub(super) laboratory_id: Option<Uuid>,
@@ -82,6 +85,7 @@ pub(super) fn update_user_rollback_details(user: &UserRow) -> Value {
                 "laboratory_id": user.laboratory_id,
                 "email": user.email.as_deref(),
                 "phone_number": user.phone_number.as_deref(),
+                "description": user.description.as_deref(),
             },
         },
     })
@@ -101,6 +105,7 @@ pub(super) fn delete_user_rollback_details(user: &DeletedUserRow) -> Value {
                 "laboratory_id": user.laboratory_id,
                 "email": user.email.as_deref(),
                 "phone_number": user.phone_number.as_deref(),
+                "description": user.description.as_deref(),
                 "created_at": &user.created_at,
                 "last_login_at": user.last_login_at.as_ref(),
             },
@@ -115,6 +120,7 @@ impl From<UserRow> for UserResponse {
             username: row.username,
             email: row.email,
             phone_number: row.phone_number,
+            description: row.description,
             user_type: row
                 .user_type_id
                 .zip(row.user_type_name)

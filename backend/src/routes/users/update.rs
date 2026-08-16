@@ -4,7 +4,8 @@ use crate::access_control::{Action, Actor, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::domain::UserRole;
 use crate::domain::{
-    LaboratoryId, NullableUpdate, PhoneNumber, UpdateUser, UserEmail, UserName, UserType,
+    LaboratoryId, NullableUpdate, PhoneNumber, UpdateUser, UserDescription, UserEmail, UserName,
+    UserType,
 };
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
@@ -25,6 +26,8 @@ pub struct UpdateUserJsonData {
     email: Option<Option<String>>,
     #[serde(default, deserialize_with = "deserialize_nullable")]
     phone_number: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_nullable")]
+    description: Option<Option<String>>,
 }
 
 fn deserialize_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
@@ -53,6 +56,13 @@ impl UpdateUserJsonData {
         let laboratory_id = self.laboratory_id.map(|id| id.map(Uuid::into)).into();
         let email = NullableUpdate::parse(self.email, UserEmail::parse)?;
         let phone_number = NullableUpdate::parse(self.phone_number, PhoneNumber::parse)?;
+        // A form that submits an emptied note means "clear it", not "store a
+        // blank" — and UserDescription refuses to parse blanks.
+        let description = match self.description {
+            Some(Some(text)) if text.trim().is_empty() => Some(None),
+            other => other,
+        };
+        let description = NullableUpdate::parse(description, UserDescription::parse)?;
 
         UpdateUser::new(
             username,
@@ -60,6 +70,7 @@ impl UpdateUserJsonData {
             laboratory_id,
             email,
             phone_number,
+            description,
             current_user_type,
             current_laboratory_id,
         )
@@ -159,6 +170,8 @@ pub async fn update_user(
     let email = resolve_nullable_string_update(update_user.email, target_user.email.clone());
     let phone_number =
         resolve_nullable_string_update(update_user.phone_number, target_user.phone_number.clone());
+    let description =
+        resolve_nullable_string_update(update_user.description, target_user.description.clone());
     let user_type_name = user_type.to_string();
 
     let mut transaction = pool
@@ -173,6 +186,7 @@ pub async fn update_user(
         laboratory_id.map(Uuid::from),
         email.as_deref(),
         phone_number.as_deref(),
+        description.as_deref(),
     )
     .await?;
 

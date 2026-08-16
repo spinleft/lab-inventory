@@ -106,6 +106,7 @@ export const userSchema = z.object({
   username: z.string(),
   email: z.string().nullable(),
   phone_number: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
   user_type: z.object({
     user_type_id: z.string().uuid(),
     name: userTypeNameSchema,
@@ -189,6 +190,7 @@ export type UnitPayload = {
 };
 
 export type CreateUserPayload = {
+  description: string | null;
   email: string | null;
   laboratory_id: string | null;
   password: string;
@@ -198,6 +200,7 @@ export type CreateUserPayload = {
 };
 
 export type UpdateUserPayload = {
+  description?: string | null;
   email?: string | null;
   laboratory_id?: string | null;
   phone_number?: string | null;

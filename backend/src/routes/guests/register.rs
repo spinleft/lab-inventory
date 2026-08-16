@@ -2,8 +2,8 @@ use super::queries::{RegistrationCodeRow, consume_registration_code};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::authentication::{GuestRegistrationHasher, GuestRegistrationRateLimiter, hash_password};
 use crate::domain::{
-    GuestRegistrationCode, NewUser, PhoneNumber, UserEmail, UserId, UserName, UserPassword,
-    UserType,
+    GuestRegistrationCode, NewUser, PhoneNumber, UserDescription, UserEmail, UserId, UserName,
+    UserPassword, UserType,
 };
 use crate::routes::users::{UserDatabaseError, store_new_user};
 use crate::utils::error_chain_fmt;
@@ -25,6 +25,8 @@ pub struct GuestRegistrationJsonData {
     email: String,
     phone_number: String,
     registration_code: Secret<String>,
+    #[serde(default)]
+    description: Option<String>,
 }
 
 #[derive(Debug)]
@@ -34,6 +36,7 @@ struct GuestRegistration {
     email: UserEmail,
     phone_number: PhoneNumber,
     registration_code: GuestRegistrationCode,
+    description: Option<UserDescription>,
 }
 
 impl TryFrom<GuestRegistrationJsonData> for GuestRegistration {
@@ -46,6 +49,11 @@ impl TryFrom<GuestRegistrationJsonData> for GuestRegistration {
             email: UserEmail::parse(value.email)?,
             phone_number: PhoneNumber::parse(value.phone_number)?,
             registration_code: GuestRegistrationCode::parse(value.registration_code)?,
+            description: value
+                .description
+                .map(UserDescription::parse_optional)
+                .transpose()?
+                .flatten(),
         })
     }
 }
@@ -163,6 +171,7 @@ pub async fn register_guest(
         Some(code.laboratory_id.into()),
         Some(registration.email),
         Some(registration.phone_number),
+        registration.description,
     )
     .map_err(GuestRegistrationError::ValidationError)?;
     let created_user = store_new_user(&mut transaction, new_user, password_hash).await?;
@@ -222,6 +231,7 @@ mod tests {
             email: "guest@example.com".into(),
             phone_number: "12345678901".into(),
             registration_code: Secret::new("012345".into()),
+            description: None,
         }));
     }
 
@@ -234,6 +244,7 @@ mod tests {
                 email: "guest@example.com".into(),
                 phone_number: "12345678901".into(),
                 registration_code: Secret::new("012345".into()),
+                description: None,
             },
             GuestRegistrationJsonData {
                 username: "guest-user".into(),
@@ -241,6 +252,7 @@ mod tests {
                 email: "guest@example.com".into(),
                 phone_number: "12345678901".into(),
                 registration_code: Secret::new("012345".into()),
+                description: None,
             },
             GuestRegistrationJsonData {
                 username: "guest-user".into(),
@@ -248,6 +260,7 @@ mod tests {
                 email: "invalid".into(),
                 phone_number: "12345678901".into(),
                 registration_code: Secret::new("012345".into()),
+                description: None,
             },
             GuestRegistrationJsonData {
                 username: "guest-user".into(),
@@ -255,6 +268,7 @@ mod tests {
                 email: "guest@example.com".into(),
                 phone_number: "123".into(),
                 registration_code: Secret::new("012345".into()),
+                description: None,
             },
             GuestRegistrationJsonData {
                 username: "guest-user".into(),
@@ -262,6 +276,7 @@ mod tests {
                 email: "guest@example.com".into(),
                 phone_number: "12345678901".into(),
                 registration_code: Secret::new("12345".into()),
+                description: None,
             },
         ] {
             assert_err!(GuestRegistration::try_from(payload));

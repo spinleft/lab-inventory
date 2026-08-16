@@ -300,7 +300,22 @@ jobs:
         run: node scripts/android-permissions.mjs
       - name: 构建 APK
         working-directory: frontend
-        run: npx tauri android build --apk
+        # 跑两趟:先按 ABI 拆包,再打一个 universal。
+        #
+        # APK 体积几乎全是 Rust 库编译出的 .so,一个 ABI 一份;universal 包把四份
+        # 全塞进去,而任何一台设备只用得到其中一份。拆包后单架构包只有 universal
+        # 的四分之一左右,知道自己机型的人下那个就行。universal 仍然保留,给不确定
+        # 机型的人兜底 —— 装上一定能跑,只是大。
+        #
+        # 两趟的产物落在 outputs/apk/ 下不同的 flavor 目录里,互不覆盖。第二趟依赖
+        # 有缓存,但 beforeBuildCommand 会重新构建前端,顶层 crate 的指纹跟着变,
+        # 于是四个目标各自重做一次 LTO 链接 —— 这一趟不便宜,几分钟。
+        #
+        # universal 放在后面跑:它要把四个 ABI 的 .so 都打进去,得等第一趟把四个
+        # 目标都编出来。
+        run: |
+          npx tauri android build --apk --split-per-abi
+          npx tauri android build --apk
         env:
           NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
       - name: 签名 APK

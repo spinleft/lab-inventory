@@ -86,7 +86,7 @@ curl -b cookies.txt http://localhost:8080/api/v1/auth/me
 | POST | `/auth/logout` | 登出 |
 | GET | `/auth/me` | 当前用户信息(用户名、角色、所属实验室) |
 | PATCH | `/auth/password` | 改自己的密码 |
-| POST | `/auth/guest-registration` | 凭注册码自助注册为访客,不需要登录;带频率限制 |
+| POST | `/auth/guest-registration` | 凭注册码自助注册为访客,不需要登录;带频率限制。可选 `description` 备注 |
 
 ### 实验室
 
