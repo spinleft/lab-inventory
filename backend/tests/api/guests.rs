@@ -425,3 +425,51 @@ fn registration_codes_are_not_plain_secrets_in_debug_output() {
         lab_inventory::domain::GuestRegistrationCode::parse(Secret::new("123456".into())).unwrap();
     assert!(!format!("{code:?}").contains(code.as_ref().expose_secret()));
 }
+
+#[tokio::test]
+async fn a_guest_can_explain_themselves_when_registering() {
+    let app = spawn_app().await;
+    let laboratory_id = app.create_laboratory("Guest Description Lab").await;
+    let issuer = TestUser::generate_with_user_type("lab_admin", Some(laboratory_id));
+    app.store_user(&issuer).await;
+    let code = issue_code(&app, &issuer, laboratory_id).await;
+    assert_eq!(app.post_logout().await.status(), StatusCode::OK);
+
+    let mut body = registration_body(
+        "explained-guest",
+        "explained-guest@example.com",
+        "12345678911",
+        code["registration_code"].as_str().unwrap(),
+    );
+    body["description"] = serde_json::json!("材料组李四，来借万用表");
+
+    let response = app.post_guest_registration(&body).await;
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let guest: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(guest["description"], "材料组李四，来借万用表");
+}
+
+#[tokio::test]
+async fn registering_without_a_description_leaves_it_empty() {
+    let app = spawn_app().await;
+    let laboratory_id = app.create_laboratory("Guest No Description Lab").await;
+    let issuer = TestUser::generate_with_user_type("lab_admin", Some(laboratory_id));
+    app.store_user(&issuer).await;
+    let code = issue_code(&app, &issuer, laboratory_id).await;
+    assert_eq!(app.post_logout().await.status(), StatusCode::OK);
+
+    // The field is optional: an older client that never sends it still works.
+    let response = app
+        .post_guest_registration(&registration_body(
+            "terse-guest",
+            "terse-guest@example.com",
+            "12345678912",
+            code["registration_code"].as_str().unwrap(),
+        ))
+        .await;
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let guest: serde_json::Value = response.json().await.unwrap();
+    assert!(guest["description"].is_null());
+}

@@ -398,3 +398,77 @@ async fn latest_audit_details(
     .await
     .unwrap()
 }
+
+#[tokio::test]
+async fn user_description_is_stored_updated_and_cleared() {
+    let app = spawn_app().await;
+    app.test_user.login(&app).await;
+    let laboratory_id = app.create_laboratory("Users Description Lab").await;
+
+    let response = app
+        .post_user(&serde_json::json!({
+            "username": "noted-user",
+            "password": "password",
+            "user_type": "user",
+            "laboratory_id": laboratory_id,
+            "email": "noted-user@example.com",
+            "phone_number": "12345678902",
+            "description": "  仪器室钥匙管理员  "
+        }))
+        .await;
+
+    assert_eq!(response.status().as_u16(), 201);
+    let body: serde_json::Value = response.json().await.unwrap();
+    // Stored trimmed, as every other free-text field is.
+    assert_eq!(body["description"], "仪器室钥匙管理员");
+    let user_id: Uuid = body["user_id"].as_str().unwrap().parse().unwrap();
+
+    let response = app
+        .patch_user(user_id, &serde_json::json!({ "description": "已交接给张三" }))
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["description"], "已交接给张三");
+
+    // Omitting the field leaves the note alone; sending null erases it.
+    let response = app
+        .patch_user(user_id, &serde_json::json!({ "email": "moved@example.com" }))
+        .await;
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["description"], "已交接给张三");
+
+    let response = app
+        .patch_user(user_id, &serde_json::json!({ "description": null }))
+        .await;
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert!(body["description"].is_null());
+
+    // A blank note means the same thing as no note.
+    let response = app
+        .patch_user(user_id, &serde_json::json!({ "description": "   " }))
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert!(body["description"].is_null());
+}
+
+#[tokio::test]
+async fn create_user_rejects_an_overlong_description() {
+    let app = spawn_app().await;
+    app.test_user.login(&app).await;
+    let laboratory_id = app.create_laboratory("Users Long Description Lab").await;
+
+    let response = app
+        .post_user(&serde_json::json!({
+            "username": "verbose-user",
+            "password": "password",
+            "user_type": "user",
+            "laboratory_id": laboratory_id,
+            "email": "verbose-user@example.com",
+            "phone_number": "12345678903",
+            "description": "实".repeat(501)
+        }))
+        .await;
+
+    assert_eq!(response.status().as_u16(), 400);
+}

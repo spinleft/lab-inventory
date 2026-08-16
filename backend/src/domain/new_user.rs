@@ -1,5 +1,6 @@
 use crate::domain::LaboratoryId;
 use crate::domain::PhoneNumber;
+use crate::domain::UserDescription;
 use crate::domain::UserEmail;
 use crate::domain::UserName;
 use crate::domain::UserPassword;
@@ -13,6 +14,7 @@ pub struct NewUser {
     pub laboratory_id: Option<LaboratoryId>,
     pub email: Option<UserEmail>,
     pub phone_number: Option<PhoneNumber>,
+    pub description: Option<UserDescription>,
 }
 
 impl NewUser {
@@ -23,6 +25,7 @@ impl NewUser {
         laboratory_id: Option<LaboratoryId>,
         email: Option<UserEmail>,
         phone_number: Option<PhoneNumber>,
+        description: Option<UserDescription>,
     ) -> Result<Self, String> {
         if !matches!(user_type, UserType::SuperAdmin | UserType::Root) && laboratory_id.is_none() {
             return Err(format!("Laboratory ID is required for {}.", user_type));
@@ -35,6 +38,7 @@ impl NewUser {
             laboratory_id,
             email,
             phone_number,
+            description,
         })
     }
 }
@@ -69,6 +73,7 @@ mod tests {
                 None,
                 Some(valid_email()),
                 None,
+                None,
             ));
         }
     }
@@ -83,6 +88,7 @@ mod tests {
                 None,
                 Some(valid_email()),
                 None,
+                None,
             ));
         }
     }
@@ -95,6 +101,7 @@ mod tests {
             UserType::LabAdmin,
             Some(Uuid::new_v4().into()),
             Some(valid_email()),
+            None,
             None,
         ));
     }

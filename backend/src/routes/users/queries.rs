@@ -84,6 +84,7 @@ pub(super) async fn fetch_user(pool: &PgPool, user_id: Uuid) -> Result<UserRow, 
             users.username,
             users.email,
             users.phone_number,
+            users.description,
             user_types.user_type_id,
             user_types.name AS user_type_name,
             laboratories.laboratory_id AS "laboratory_id?",
@@ -112,6 +113,7 @@ pub(super) async fn fetch_users(pool: &PgPool) -> Result<Vec<UserRow>, anyhow::E
             users.username,
             users.email,
             users.phone_number,
+            users.description,
             user_types.user_type_id AS "user_type_id?",
             user_types.name AS "user_type_name?",
             laboratories.laboratory_id AS "laboratory_id?",
@@ -145,20 +147,22 @@ pub(super) async fn insert_user(
     let laboratory_id = new_user.laboratory_id.map(Uuid::from);
     let email = new_user.email.map(String::from);
     let phone_number = new_user.phone_number.map(String::from);
+    let description = new_user.description.map(String::from);
 
     sqlx::query_as!(
         UserRow,
         r#"
         WITH inserted_user AS (
-            INSERT INTO users (user_id, username, password_hash, user_type_id, laboratory_id, email, phone_number)
-            SELECT $1, $2, $3, user_types.user_type_id, $4, $5, $6
+            INSERT INTO users (user_id, username, password_hash, user_type_id, laboratory_id, email, phone_number, description)
+            SELECT $1, $2, $3, user_types.user_type_id, $4, $5, $6, $7
             FROM user_types
-            WHERE user_types.name = $7
+            WHERE user_types.name = $8
             RETURNING
                 users.user_id,
                 users.username,
                 users.email,
                 users.phone_number,
+            users.description,
                 users.user_type_id,
                 users.laboratory_id,
                 users.created_at,
@@ -169,6 +173,7 @@ pub(super) async fn insert_user(
             inserted_user.username,
             inserted_user.email,
             inserted_user.phone_number,
+            inserted_user.description,
             user_types.user_type_id AS "user_type_id?",
             user_types.name AS "user_type_name?",
             laboratories.laboratory_id AS "laboratory_id?",
@@ -185,6 +190,7 @@ pub(super) async fn insert_user(
         laboratory_id,
         email,
         phone_number,
+        description,
         &user_type_name,
     )
     .fetch_one(transaction.as_mut())
@@ -194,9 +200,11 @@ pub(super) async fn insert_user(
 
 #[tracing::instrument(
     name = "Updating user in the database",
-    skip(transaction, username, email, phone_number),
+    skip(transaction, username, email, phone_number, description),
     fields(user_id=%user_id)
 )]
+// One parameter per column the update writes.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn update_user_in_database(
     transaction: &mut Transaction<'_, Postgres>,
     user_id: Uuid,
@@ -205,6 +213,7 @@ pub(super) async fn update_user_in_database(
     laboratory_id: Option<Uuid>,
     email: Option<&str>,
     phone_number: Option<&str>,
+    description: Option<&str>,
 ) -> Result<UserRow, UserDatabaseError> {
     sqlx::query_as!(
         UserRow,
@@ -216,13 +225,15 @@ pub(super) async fn update_user_in_database(
                 user_type_id = (SELECT user_type_id FROM user_types WHERE name = $3),
                 laboratory_id = $4,
                 email = $5,
-                phone_number = $6
+                phone_number = $6,
+                description = $7
             WHERE user_id = $1
             RETURNING
                 users.user_id,
                 users.username,
                 users.email,
                 users.phone_number,
+            users.description,
                 users.user_type_id,
                 users.laboratory_id,
                 users.created_at,
@@ -233,6 +244,7 @@ pub(super) async fn update_user_in_database(
             updated_user.username,
             updated_user.email,
             updated_user.phone_number,
+            updated_user.description,
             user_types.user_type_id AS "user_type_id?",
             user_types.name AS "user_type_name?",
             laboratories.laboratory_id AS "laboratory_id?",
@@ -249,6 +261,7 @@ pub(super) async fn update_user_in_database(
         laboratory_id,
         email,
         phone_number,
+        description,
     )
     .fetch_one(transaction.as_mut())
     .await
@@ -278,6 +291,7 @@ pub(super) async fn delete_user_from_database(
                 users.password_hash,
                 users.email,
                 users.phone_number,
+            users.description,
                 users.user_type_id,
                 users.laboratory_id,
                 users.created_at,
@@ -289,6 +303,7 @@ pub(super) async fn delete_user_from_database(
             deleted_user.password_hash,
             deleted_user.email,
             deleted_user.phone_number,
+            deleted_user.description,
             user_types.user_type_id AS "user_type_id?",
             user_types.name AS "user_type_name?",
             laboratories.laboratory_id AS "laboratory_id?",

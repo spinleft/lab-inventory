@@ -24,6 +24,7 @@ export function GuestRegisterPage() {
   const navigate = useNavigate();
   const toast = useToast();
   const [values, setValues] = useState({
+    description: "",
     email: "",
     password: "",
     phone_number: "",
@@ -36,7 +37,10 @@ export function GuestRegisterPage() {
     return <Navigate to="/server-settings" replace />;
   }
 
-  const complete = Object.values(values).every((value) => value.trim());
+  // The note is the one optional field, so it stays out of this check.
+  const complete = Object.entries(values)
+    .filter(([field]) => field !== "description")
+    .every(([, value]) => value.trim());
 
   function update(field: keyof typeof values, value: string) {
     setValues((current) => ({ ...current, [field]: value }));
@@ -46,6 +50,7 @@ export function GuestRegisterPage() {
     event.preventDefault();
     register.mutate(
       {
+        description: values.description.trim() || null,
         email: values.email.trim(),
         password: values.password,
         phone_number: values.phone_number.trim(),
@@ -132,6 +137,19 @@ export function GuestRegisterPage() {
                   id="register-phone"
                   value={values.phone_number}
                   onChange={(event) => update("phone_number", event.target.value)}
+                />
+              </FormField>
+              <FormField
+                hint="选填。写一句你是谁、来做什么，实验室管理员会看到。"
+                htmlFor="register-description"
+                label="备注"
+              >
+                <textarea
+                  className="input"
+                  id="register-description"
+                  rows={2}
+                  value={values.description}
+                  onChange={(event) => update("description", event.target.value)}
                 />
               </FormField>
               <div className="entry-actions">

@@ -13,6 +13,8 @@ export const registrationCodeSchema = z.object({
 export type RegistrationCode = z.infer<typeof registrationCodeSchema>;
 
 export type GuestRegistration = {
+  /** Optional note to whoever reviews the account; blank is sent as null. */
+  description: string | null;
   email: string;
   password: string;
   phone_number: string;

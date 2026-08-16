@@ -1,5 +1,6 @@
 use crate::domain::LaboratoryId;
 use crate::domain::PhoneNumber;
+use crate::domain::UserDescription;
 use crate::domain::UserEmail;
 use crate::domain::UserName;
 use crate::domain::UserType;
@@ -57,15 +58,20 @@ pub struct UpdateUser {
     laboratory_id_changed: bool,
     pub email: NullableUpdate<UserEmail>,
     pub phone_number: NullableUpdate<PhoneNumber>,
+    pub description: NullableUpdate<UserDescription>,
 }
 
 impl UpdateUser {
+    // One parameter per updatable column plus the two current values the
+    // laboratory rule needs; grouping them would just move the list.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         username: Option<UserName>,
         user_type: Option<UserType>,
         laboratory_id: NullableUpdate<LaboratoryId>,
         email: NullableUpdate<UserEmail>,
         phone_number: NullableUpdate<PhoneNumber>,
+        description: NullableUpdate<UserDescription>,
         current_user_type: UserType,
         current_laboratory_id: Option<LaboratoryId>,
     ) -> Result<Self, String> {
@@ -86,6 +92,7 @@ impl UpdateUser {
             laboratory_id_changed,
             email,
             phone_number,
+            description,
         })
     }
 
@@ -114,6 +121,7 @@ mod tests {
                 NullableUpdate::Unchanged,
                 NullableUpdate::Unchanged,
                 NullableUpdate::Unchanged,
+                NullableUpdate::Unchanged,
                 UserType::Root,
                 None,
             ));
@@ -126,6 +134,7 @@ mod tests {
             None,
             None,
             NullableUpdate::Clear,
+            NullableUpdate::Unchanged,
             NullableUpdate::Unchanged,
             NullableUpdate::Unchanged,
             UserType::User,
@@ -142,6 +151,7 @@ mod tests {
                 NullableUpdate::Clear,
                 NullableUpdate::Unchanged,
                 NullableUpdate::Unchanged,
+                NullableUpdate::Unchanged,
                 UserType::User,
                 Some(laboratory_id()),
             ));
@@ -153,6 +163,7 @@ mod tests {
         assert_ok!(UpdateUser::new(
             None,
             None,
+            NullableUpdate::Unchanged,
             NullableUpdate::Unchanged,
             NullableUpdate::Unchanged,
             NullableUpdate::Unchanged,

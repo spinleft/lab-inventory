@@ -4,7 +4,9 @@ use crate::access_control::{Action, Actor, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
 use crate::authentication::hash_password;
 use crate::domain::UserRole;
-use crate::domain::{NewUser, PhoneNumber, UserEmail, UserName, UserPassword, UserType};
+use crate::domain::{
+    NewUser, PhoneNumber, UserDescription, UserEmail, UserName, UserPassword, UserType,
+};
 use crate::utils::error_chain_fmt;
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, ResponseError, web};
@@ -22,6 +24,7 @@ pub struct CreateUserJsonData {
     laboratory_id: Option<Uuid>,
     email: Option<String>,
     phone_number: Option<String>,
+    description: Option<String>,
 }
 
 impl TryFrom<CreateUserJsonData> for NewUser {
@@ -34,6 +37,11 @@ impl TryFrom<CreateUserJsonData> for NewUser {
         let laboratory_id = value.laboratory_id.map(Uuid::into);
         let email = value.email.map(UserEmail::parse).transpose()?;
         let phone_number = value.phone_number.map(PhoneNumber::parse).transpose()?;
+        let description = value
+            .description
+            .map(UserDescription::parse_optional)
+            .transpose()?
+            .flatten();
 
         NewUser::new(
             username,
@@ -42,6 +50,7 @@ impl TryFrom<CreateUserJsonData> for NewUser {
             laboratory_id,
             email,
             phone_number,
+            description,
         )
     }
 }
@@ -63,6 +72,7 @@ mod tests {
             laboratory_id: Some(Uuid::new_v4()),
             email: Some("testuser@example.com".into()),
             phone_number: Some("12345678901".into()),
+            description: None,
         };
 
         assert_ok!(NewUser::try_from(json_data));
@@ -78,6 +88,7 @@ mod tests {
             laboratory_id: None,
             email: Some("testuser@example.com".into()),
             phone_number: Some("12345678901".into()),
+            description: None,
         };
 
         assert_err!(NewUser::try_from(json_data));

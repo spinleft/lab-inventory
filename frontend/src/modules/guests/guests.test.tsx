@@ -105,12 +105,43 @@ describe("guest registration page", () => {
 
     expect(await screen.findByRole("heading", { name: "登录" })).toBeInTheDocument();
     expect(posted).toEqual({
+      // The note is optional, and an untouched field is sent as null rather
+      // than as an empty string the API would reject.
+      description: null,
       email: "visitor@example.com",
       password: "correct-horse-battery",
       phone_number: "13800000000",
       registration_code: CODE,
       username: "visitor",
     });
+  });
+
+  it("sends the note the visitor wrote about themselves", async () => {
+    let posted: { description?: unknown } | undefined;
+    server.use(
+      http.post("*/api/v1/auth/guest-registration", async ({ request }) => {
+        posted = (await request.json()) as { description?: unknown };
+        return HttpResponse.json({}, { status: 201 });
+      }),
+    );
+    configureBackend();
+    const { user } = renderRoute(["/register"]);
+
+    await fillForm(user);
+    await user.type(screen.getByLabelText(/备注/), "材料组李四，来借万用表");
+    await user.click(screen.getByRole("button", { name: "注册" }));
+
+    await screen.findByRole("heading", { name: "登录" });
+    expect(posted?.description).toBe("材料组李四，来借万用表");
+  });
+
+  it("does not make the note mandatory", async () => {
+    configureBackend();
+    const { user } = renderRoute(["/register"]);
+
+    await fillForm(user);
+
+    expect(screen.getByRole("button", { name: "注册" })).toBeEnabled();
   });
 
   it("takes the code from the query string", () => {

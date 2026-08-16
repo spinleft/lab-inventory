@@ -59,6 +59,7 @@ type LaboratoryOption = {
 };
 
 type UserForm = {
+  description: string;
   email: string;
   laboratory_id: string;
   password: string;
@@ -405,6 +406,7 @@ export function UsersPage() {
     { header: "用户名", key: "username", render: (item) => <strong>{item.username}</strong> },
     { header: "邮箱", key: "email", render: (item) => item.email ?? "未设置" },
     { header: "电话", key: "phone", render: (item) => item.phone_number ?? "未设置" },
+    { header: "备注", key: "description", render: (item) => item.description ?? "—" },
     {
       header: "角色",
       key: "role",
@@ -537,6 +539,7 @@ function UserEditor({
       return;
     }
     setValues({
+      description: user.description ?? "",
       email: user.email ?? "",
       laboratory_id: user.laboratory?.laboratory_id ?? laboratories[0]?.laboratory_id ?? "",
       password: "",
@@ -584,6 +587,7 @@ function UserEditor({
       }
       createUser.mutate(
         {
+          description: optionalText(values.description),
           email: optionalText(values.email),
           laboratory_id: laboratoryId,
           password: values.password,
@@ -607,6 +611,7 @@ function UserEditor({
       updateUser.mutate(
         {
           payload: {
+            description: optionalText(values.description),
             email: optionalText(values.email),
             phone_number: optionalText(values.phone_number),
             ...(isSelf
@@ -678,6 +683,15 @@ function UserEditor({
             />
           </FormField>
         </div>
+        <FormField hint="给管理员看的说明,比如这个账号属于谁、为什么开。" htmlFor="user-description" label="备注">
+          <textarea
+            className="input"
+            id="user-description"
+            rows={2}
+            value={values.description}
+            onChange={(event) => updateField("description", event.target.value)}
+          />
+        </FormField>
         {isNew ? (
           <FormField htmlFor="user-password" label="初始密码">
             <input
@@ -733,6 +747,7 @@ function emptyLaboratoryForm(): LaboratoryForm {
 
 function emptyUserForm(role: UserTypeName, laboratoryId = ""): UserForm {
   return {
+    description: "",
     email: "",
     laboratory_id: laboratoryId,
     password: "",
