@@ -82,6 +82,7 @@ pub async fn login(
     }
 }
 
+#[tracing::instrument(name = "Log out user", skip(session))]
 pub async fn logout(session: TypedSession) -> HttpResponse {
     session.log_out();
     HttpResponse::Ok().json(MessageResponse {
