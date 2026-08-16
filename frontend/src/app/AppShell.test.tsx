@@ -45,14 +45,15 @@ describe("AppShell navigation", () => {
     expect(sidebar().queryByRole("link", { name: "联邦实验室" })).not.toBeInTheDocument();
   });
 
-  it("shows federation and borrowing for a laboratory admin but hides units and audit", async () => {
+  it("shows federation, borrowing and units for a laboratory admin but hides audit", async () => {
     signIn(testLabAdminUser);
     renderRoute(["/dashboard"]);
     expect(await screen.findByRole("heading", { name: "概览" })).toBeInTheDocument();
 
     expect(sidebar().getByRole("link", { name: "联邦实验室" })).toBeInTheDocument();
     expect(sidebar().getByRole("link", { name: "借用管理" })).toBeInTheDocument();
-    expect(sidebar().queryByRole("link", { name: "单位" })).not.toBeInTheDocument();
+    // Units belong to the laboratory, so its admin maintains them.
+    expect(sidebar().getByRole("link", { name: "单位" })).toBeInTheDocument();
     expect(sidebar().queryByRole("link", { name: "审计日志" })).not.toBeInTheDocument();
   });
 

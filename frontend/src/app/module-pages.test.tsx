@@ -24,6 +24,10 @@ const PAGES: Array<{ as: CurrentUser; heading: string; path: string }> = [
   { as: testRootUser, heading: "资产参数", path: "/admin/asset-parameters" },
   { as: testRootUser, heading: "位置", path: "/admin/locations" },
   { as: testRootUser, heading: "单位", path: "/admin/units" },
+  // Units are laboratory data: a laboratory admin opens the same page through
+  // /local rather than /admin/laboratories/{id}, which is a different request
+  // path and so worth rendering on its own.
+  { as: testLabAdminUser, heading: "单位", path: "/admin/units" },
   { as: testRootUser, heading: "审计日志", path: "/audit-logs" },
   { as: testLabAdminUser, heading: "联邦实验室", path: "/admin/federation" },
   { as: testLabAdminUser, heading: "借用管理", path: "/borrow-requests" },

@@ -95,11 +95,14 @@ describe("permissions", () => {
     expect(canManageLocations(user("guest"))).toBe(false);
   });
 
-  it("limits unit management to server admins", () => {
+  // Units are laboratory data, and the API lets any non-guest member of the
+  // laboratory maintain them. The UI used to stop at server admins, which left
+  // a laboratory admin unable to add so much as a unit for their own assets.
+  it("lets every non-guest role manage units, as the API does", () => {
     expect(canManageUnits(user("root"))).toBe(true);
     expect(canManageUnits(user("super_admin"))).toBe(true);
-    expect(canManageUnits(user("lab_admin"))).toBe(false);
-    expect(canManageUnits(user("user"))).toBe(false);
+    expect(canManageUnits(user("lab_admin"))).toBe(true);
+    expect(canManageUnits(user("user"))).toBe(true);
     expect(canManageUnits(user("guest"))).toBe(false);
   });
 
