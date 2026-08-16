@@ -21,6 +21,7 @@ import {
   canManageLaboratories,
   canManageUser,
   getCreatableRoles,
+  isSystemAdmin,
   roleLabel,
   roleRequiresLaboratory,
   roleTone,
@@ -46,6 +47,12 @@ type LaboratoryForm = {
   address: string;
   contact: string;
   description: string;
+  name: string;
+};
+
+/** All the laboratory picker needs, and all a laboratory admin can supply. */
+type LaboratoryOption = {
+  laboratory_id: string;
   name: string;
 };
 
@@ -330,14 +337,23 @@ export function UsersPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const usersQuery = useUsers();
-  const laboratoriesQuery = useLaboratories();
+  // Listing laboratories lives under /admin, which is closed to a laboratory
+  // admin — asking anyway just fails and leaves the picker empty, which is what
+  // it did until this branch existed. They can only ever assign a user to their
+  // own laboratory, so that single entry is the whole option set.
+  const systemAdmin = isSystemAdmin(currentUser);
+  const laboratoriesQuery = useLaboratories({ enabled: systemAdmin });
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
   const deleteUser = useDeleteUser();
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<AdminUser | "new" | null>(null);
   const users = usersQuery.data ?? [];
-  const laboratories = laboratoriesQuery.data ?? [];
+  const laboratories: LaboratoryOption[] = systemAdmin
+    ? (laboratoriesQuery.data ?? [])
+    : currentUser.laboratory
+      ? [currentUser.laboratory]
+      : [];
   const filteredUsers = users.filter((user) =>
     [
       user.username,
@@ -480,7 +496,7 @@ function UserEditor({
   user,
 }: {
   createUser: ReturnType<typeof useCreateUser>;
-  laboratories: Laboratory[];
+  laboratories: LaboratoryOption[];
   onClose: () => void;
   onSaved: (targetUserId?: string) => void;
   open: boolean;
