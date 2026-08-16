@@ -6,8 +6,6 @@ import { createApiClient } from "../../shared/api/httpClient";
 import { isSystemAdmin } from "../auth/permissions";
 import { localLaboratoryPath } from "../federation/scope";
 
-export const attachmentVisibilitySchema = z.enum(["public", "internal"]);
-
 export const fileUploadSchema = z.object({
   created_at: z.string(),
   expires_at: z.string(),
@@ -44,12 +42,11 @@ export const attachmentSchema = z.object({
   laboratory_id: z.string().uuid(),
   target: attachmentTargetSchema,
   updated_at: z.string(),
-  visibility: attachmentVisibilitySchema,
+  is_public: z.boolean(),
 });
 
 const attachmentListSchema = z.array(attachmentSchema);
 
-export type AttachmentVisibility = z.infer<typeof attachmentVisibilitySchema>;
 export type FileUpload = z.infer<typeof fileUploadSchema>;
 export type Attachment = z.infer<typeof attachmentSchema>;
 
@@ -57,7 +54,7 @@ export type AttachmentClaim = {
   description?: string | null;
   display_name?: string | null;
   upload_id: string;
-  visibility: AttachmentVisibility;
+  is_public: boolean;
 };
 
 export const attachmentQueryKeys = {

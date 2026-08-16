@@ -18,7 +18,7 @@ describe("attachment pending claims", () => {
         ...pendingAttachment(),
         description: "  calibration certificate  ",
         displayName: "  Certificate.pdf  ",
-        visibility: "public",
+        isPublic: true,
       },
     ]);
 
@@ -28,7 +28,7 @@ describe("attachment pending claims", () => {
           description: "calibration certificate",
           display_name: "Certificate.pdf",
           upload_id: "00000000-0000-4000-8000-000000000101",
-          visibility: "public",
+          is_public: true,
         },
       ],
       ok: true,
@@ -48,7 +48,7 @@ describe("attachment pending claims", () => {
     });
 
     const result = attachmentClaimsFromPending([
-      { ...pending, displayName: "", visibility: "internal" },
+      { ...pending, displayName: "", isPublic: false },
     ]);
 
     expect(result).toEqual({
@@ -57,7 +57,7 @@ describe("attachment pending claims", () => {
           description: null,
           display_name: "manual.pdf",
           upload_id: "00000000-0000-4000-8000-000000000101",
-          visibility: "internal",
+          is_public: false,
         },
       ],
       ok: true,
@@ -73,6 +73,6 @@ function pendingAttachment(): PendingAttachment {
     mimeType: "application/pdf",
     originalFileName: "manual.pdf",
     uploadId: "00000000-0000-4000-8000-000000000101",
-    visibility: "",
+    isPublic: null,
   };
 }

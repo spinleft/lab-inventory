@@ -23,7 +23,6 @@ import {
   type Attachment,
   type AttachmentClaim,
   type FileUpload,
-  type AttachmentVisibility,
   deleteFileUploads,
   useAssetAttachments,
   useCreateAssetAttachment,
@@ -42,7 +41,7 @@ export type PendingAttachment = {
   mimeType: string | null;
   originalFileName: string;
   uploadId: string;
-  visibility: AttachmentVisibility | "";
+  isPublic: boolean | null;
 };
 
 type AttachmentTarget =
@@ -54,7 +53,7 @@ type ClaimsResult =
   | { message: string; ok: false };
 
 const VISIBILITY_OPTIONS = [
-  { label: "选择可见性", value: "none" },
+  { label: "选择可见性", value: "" },
   { label: "公开", value: "public" },
   { label: "内部", value: "internal" },
 ];
@@ -62,7 +61,7 @@ const VISIBILITY_OPTIONS = [
 export function attachmentClaimsFromPending(pendingAttachments: PendingAttachment[]): ClaimsResult {
   const claims: AttachmentClaim[] = [];
   for (const attachment of pendingAttachments) {
-    if (!attachment.visibility) {
+    if (attachment.isPublic === null) {
       return { message: "请选择每个附件的可见性。", ok: false };
     }
     const displayName = attachment.displayName.trim() || attachment.originalFileName;
@@ -71,7 +70,7 @@ export function attachmentClaimsFromPending(pendingAttachments: PendingAttachmen
       description: description || null,
       display_name: displayName,
       upload_id: attachment.uploadId,
-      visibility: attachment.visibility,
+      is_public: attachment.isPublic,
     });
   }
   return { claims, ok: true };
@@ -85,7 +84,7 @@ export function pendingAttachmentFromUpload(upload: FileUpload): PendingAttachme
     mimeType: upload.mime_type,
     originalFileName: upload.original_file_name,
     uploadId: upload.upload_id,
-    visibility: "",
+    isPublic: null,
   };
 }
 
@@ -226,11 +225,16 @@ export function PendingAttachmentUploader({
                     id={`attachment-visibility-${attachment.uploadId}`}
                     label="附件可见性"
                     options={VISIBILITY_OPTIONS}
-                    value={attachment.visibility || "none"}
+                    value={
+                      attachment.isPublic === null
+                        ? ""
+                        : attachment.isPublic
+                          ? "public"
+                          : "internal"
+                    }
                     onValueChange={(value) =>
                       updatePendingAttachment(attachment.uploadId, {
-                        visibility:
-                          value === "none" ? "" : (value as AttachmentVisibility),
+                        isPublic: value === "" ? null : value === "public",
                       })
                     }
                   />
@@ -365,8 +369,8 @@ export function AttachmentSection({
                   </div>
                 </div>
                 <div className="attachment-list-actions">
-                  <Badge tone={attachment.visibility === "public" ? "success" : "warning"}>
-                    {attachment.visibility === "public" ? "公开" : "内部"}
+                  <Badge tone={attachment.is_public ? "success" : "warning"}>
+                    {attachment.is_public ? "公开" : "内部"}
                   </Badge>
                   <Button
                     disabled={downloadAttachment.isPending}
