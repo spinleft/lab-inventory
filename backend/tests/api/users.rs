@@ -424,7 +424,10 @@ async fn user_description_is_stored_updated_and_cleared() {
     let user_id: Uuid = body["user_id"].as_str().unwrap().parse().unwrap();
 
     let response = app
-        .patch_user(user_id, &serde_json::json!({ "description": "已交接给张三" }))
+        .patch_user(
+            user_id,
+            &serde_json::json!({ "description": "已交接给张三" }),
+        )
         .await;
     assert_eq!(response.status().as_u16(), 200);
     let body: serde_json::Value = response.json().await.unwrap();
@@ -432,7 +435,10 @@ async fn user_description_is_stored_updated_and_cleared() {
 
     // Omitting the field leaves the note alone; sending null erases it.
     let response = app
-        .patch_user(user_id, &serde_json::json!({ "email": "moved@example.com" }))
+        .patch_user(
+            user_id,
+            &serde_json::json!({ "email": "moved@example.com" }),
+        )
         .await;
     let body: serde_json::Value = response.json().await.unwrap();
     assert_eq!(body["description"], "已交接给张三");
