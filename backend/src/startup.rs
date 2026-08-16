@@ -68,7 +68,10 @@ impl Application {
             configuration.application.host, configuration.application.port
         );
         let listener = TcpListener::bind(address)?;
-        let port = listener.local_addr().unwrap().port();
+        let port = listener
+            .local_addr()
+            .expect("the listener was just bound, so local_addr cannot fail")
+            .port();
         let server = run(
             listener,
             connection_pool,
