@@ -139,7 +139,8 @@ pub fn compute_password_hash(password: Secret<String>) -> Result<Secret<String>,
     let password_hash = Argon2::new(
         Algorithm::Argon2id,
         Version::V0x13,
-        argon2::Params::new(15000, 2, 1, None).unwrap(),
+        argon2::Params::new(15000, 2, 1, None)
+            .expect("Argon2 parameters are valid: m_cost=15000, t_cost=2, p_cost=1"),
     )
     .hash_password(password.expose_secret().as_bytes(), &salt)?
     .to_string();
