@@ -1,0 +1,33 @@
+# 在前面的 Compose 文件之上叠加一个 Caddy 容器,负责 80/443 端口的自动 HTTPS,
+# 并把请求转发给 frontend 容器。证书全自动申请、续期,存在 caddy-data 卷里。
+#
+#     docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d
+#
+# 用外部数据库时,把第一个 -f 换成 docker-compose.external.yml。
+#
+# 使用前在 .env 里设置 DOMAIN 和 ACME_EMAIL(见 .env.example 的 HTTPS 段),
+# 并确保 DOMAIN 已解析到本机公网 IP、80/443 端口能从公网访问。
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - frontend
+    environment:
+      # Caddyfile 里用 {$DOMAIN} / {$ACME_EMAIL} 读取。
+      DOMAIN: ${DOMAIN:?DOMAIN 必须设置}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL 必须设置}
+    ports:
+      # 自动 HTTPS 需要 80(HTTP-01 验证 + HTTP→HTTPS 跳转)与 443。
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # 证书存 /data,重启后复用;改 Caddyfile 后的配置存 /config。
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:

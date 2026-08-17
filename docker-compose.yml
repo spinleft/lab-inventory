@@ -2,6 +2,7 @@
 #
 # 用法见 docs/deployment.md。所有可调项都在 .env 里,复制 .env.example 后修改。
 # 若数据库/Redis 由外部提供,改用 docker-compose.external.yml。
+# 要开自动 HTTPS(证书自动签发),再叠加 docker-compose.caddy.yml,见 docs/deployment.md。
 
 name: lab-inventory
 

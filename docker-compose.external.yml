@@ -4,7 +4,7 @@
 #     docker compose -f docker-compose.external.yml up -d
 #
 # 需要在 .env 里额外配置 DATABASE_* 和 REDIS_URI,见 docs/deployment.md
-# "使用外部数据库" 一节。
+# "使用外部数据库" 一节。要开自动 HTTPS,再叠加 docker-compose.caddy.yml。
 
 name: lab-inventory
 

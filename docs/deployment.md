@@ -130,11 +130,43 @@ docker compose run --rm \
 
 ## 配置 HTTPS
 
-前端容器只监听 HTTP 的 80 端口,映射到宿主机的 `HTTP_PORT`(默认 8080)。HTTPS 由前面的反向代理负责。
+前端容器只监听 HTTP 的 80 端口,映射到宿主机的 `HTTP_PORT`(默认 8080)。HTTPS 由前面的反向代理负责。仓库提供两种接法:叠加一个 Caddy 容器(推荐,证书全自动),或在你已有的宿主机反向代理前加一段配置。
 
-### Caddy
+### 用 Caddy 容器自动签发证书(推荐)
 
-最省事,证书自动签发和续期:
+仓库根目录的 `Caddyfile` 和 `docker-compose.caddy.yml` 在前面任何一个 Compose 文件之上叠加一个 Caddy 容器,监听 80/443,自动向 Let's Encrypt / ZeroSSL 申请并续期证书,再把请求转发给 `frontend` 容器。
+
+1. 在 `.env` 里填好 `DOMAIN` 和 `ACME_EMAIL`,并确认 `PUBLIC_URL` 是 `https://<DOMAIN>`、`COOKIE_SECURE=true`:
+
+   ```dotenv
+   PUBLIC_URL=https://inventory.example.com
+   DOMAIN=inventory.example.com
+   ACME_EMAIL=you@example.com
+   ```
+
+2. 确保 `DOMAIN` 已解析到本机公网 IP,80/443 端口能从公网访问(防火墙/安全组放行),并且这两个端口没被别的进程占用。
+
+3. 叠加启动:
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d
+   ```
+
+   用外部数据库时,把第一个 `-f` 换成 `docker-compose.external.yml`。
+
+4. 首次启动 Caddy 自动完成证书申请。验证:
+
+   ```bash
+   curl https://inventory.example.com/api/v1/health_check
+   ```
+
+   证书存在 `caddy-data` 卷里,重启容器不会重新申请,Caddy 会在到期前自动续期。
+
+> **没有域名 / 只有内网 IP**:公网证书机构无法给内网地址签发证书,自动 HTTPS 用不了。要么继续纯 HTTP(记得 `COOKIE_SECURE=false`),要么在 `Caddyfile` 里把站点地址换成 `tls internal` 自签证书(浏览器会提示不受信任)。
+
+### 用宿主机上的 Caddy
+
+不想把 Caddy 放进 Compose,也可以在宿主机上装一个,指向前端映射出来的端口:
 
 ```caddy
 inventory.example.com {
@@ -142,7 +174,7 @@ inventory.example.com {
 }
 ```
 
-### Nginx
+### 用宿主机上的 Nginx
 
 ```nginx
 server {

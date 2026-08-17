@@ -1,0 +1,19 @@
+# Caddy 反向代理 + 自动 HTTPS。
+#
+# 证书由 Caddy 自动向 Let's Encrypt / ZeroSSL 申请并续期,前提是:
+#   1. DOMAIN 已解析到本机公网 IP;
+#   2. 宿主机的 80 与 443 端口能从公网访问(防火墙/安全组放行,且没被别的进程占用)。
+# 只有内网地址、没有域名时,公网证书机构无法签发,自动 HTTPS 用不了。
+#
+# DOMAIN 与 ACME_EMAIL 由 docker-compose.caddy.yml 从 .env 注入,
+# 用 {$...} 语法读取,不要在这里写死。
+{
+	# Let's Encrypt 账号邮箱,用于证书到期提醒等通知。
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	# 前端容器里的 nginx 负责静态页面 + 把 /api/ 转发给后端,
+	# 所以 Caddy 只需把请求原样透传给 frontend 容器的 80 端口。
+	reverse_proxy frontend:80
+}
