@@ -32,7 +32,7 @@ base64 = "0.22"
 chrono = { version = "0.4.22", default-features = false, features = ["clock", "serde"] }
 config = { version = "0.15", default-features = false, features = ["yaml"] }
 futures-util = "0.3"
-hmac = "0.12"
+hmac = "0.13"
 rand = { version = "0.8", features = ["std_rng"] }
 redis = { version = "0.32", features = ["connection-manager", "tokio-comp"] }
 reqwest = { version = "0.12", default-features = false, features = [
