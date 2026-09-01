@@ -172,7 +172,7 @@ jobs:
         component: [backend, frontend]
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: 构建 ${{ matrix.component }}
         # 只构建不推送:发布由 release.yml 负责。这一步是为了保证合到 main
         # 的每个提交都是能打出镜像的。
