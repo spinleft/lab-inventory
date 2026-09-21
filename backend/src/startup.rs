@@ -23,12 +23,12 @@ use crate::routes::{
     get_attachment, get_instance_identity, get_inventory_item, get_label_printer,
     get_label_printer_status, get_laboratory, get_location, get_unit, get_user, health_check,
     inbound_get, inbound_post, initialize_local_node, list_asset_attachments,
-    list_asset_categories, list_asset_parameters, list_assets, list_audit_logs,
-    list_borrow_requests, list_guest_links, list_inventory_item_attachments, list_inventory_items,
-    list_label_printers, list_laboratories, list_laboratory_attachments, list_locations,
-    list_my_borrow_requests, list_trusts, list_units, list_users, login, logout, me,
-    merge_guest_link, merge_inventory_items, print_labels, proxy_get, proxy_post, register_guest,
-    resolve_borrow_request, revoke_trust, split_inventory_item, update_asset,
+    list_asset_categories, list_asset_parameter_values, list_asset_parameters, list_assets,
+    list_audit_logs, list_borrow_requests, list_guest_links, list_inventory_item_attachments,
+    list_inventory_items, list_label_printers, list_laboratories, list_laboratory_attachments,
+    list_locations, list_my_borrow_requests, list_trusts, list_units, list_users, login, logout,
+    me, merge_guest_link, merge_inventory_items, print_labels, proxy_get, proxy_post,
+    register_guest, resolve_borrow_request, revoke_trust, split_inventory_item, update_asset,
     update_asset_category, update_asset_parameter, update_attachment, update_inventory_item,
     update_label_printer, update_laboratory, update_location, update_unit, update_user,
     upload_file,
@@ -400,6 +400,10 @@ fn laboratory_resource_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/asset-parameters/{parameter_id}",
             web::delete().to(delete_asset_parameter),
+        )
+        .route(
+            "/asset-parameters/{parameter_id}/values",
+            web::get().to(list_asset_parameter_values),
         )
         .route("/assets", web::get().to(list_assets))
         .route("/assets", web::post().to(create_asset))

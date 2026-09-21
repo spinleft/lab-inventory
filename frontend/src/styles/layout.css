@@ -108,15 +108,24 @@
 }
 
 .app-shell {
-  min-height: 100vh;
-  min-height: 100dvh;
+  /* Exactly the viewport, not "at least" it — the same reason the phone shell
+     fixes its height: with a min-height the row grows to fit the page, the shell
+     grows with it, and the sidebar scrolls out of view along with the content.
+     A fixed height keeps the sidebar in place and leaves scrolling to
+     .page-scroll. */
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   background: var(--bg);
 }
 
 .sidebar {
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   border-right: 0;
@@ -269,8 +278,9 @@
 
 .app-main {
   min-width: 0;
-  min-height: calc(100vh - 16px);
-  min-height: calc(100dvh - 16px);
+  /* The shell's row already gives it the viewport minus its own margins;
+     asking for a minimum height here would push the row past the viewport. */
+  min-height: 0;
   display: grid;
   grid-template-rows: var(--topbar-height) minmax(0, 1fr);
   overflow: hidden;
@@ -531,8 +541,7 @@
   }
 
   .app-main {
-    min-height: 100vh;
-    min-height: 100dvh;
+    min-height: 0;
     margin: 0;
     border: 0;
     border-radius: 0;
@@ -565,6 +574,10 @@
   }
 
   .parameter-option-row {
+    grid-template-columns: 1fr;
+  }
+
+  .parameter-value-migration-row {
     grid-template-columns: 1fr;
   }
 

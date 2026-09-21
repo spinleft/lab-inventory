@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assetCategorySchema,
   assetParameterSchema,
+  assetParameterValueSchema,
   locationSchema,
   optionalText,
   unitSchema,
@@ -74,6 +75,19 @@ describe("admin api schemas", () => {
         updated_at: "2026-06-17T00:00:00Z",
       }).data_type,
     ).toBe("range");
+  });
+
+  it("parses a stored asset parameter value together with its asset", () => {
+    expect(
+      assetParameterValueSchema.parse({
+        asset_id: "00000000-0000-4000-8000-0000000000c1",
+        asset_model: "TDS220",
+        asset_name: "示波器",
+        data_type: "number",
+        value: { number: 2.5, number_in_base: 0.0025, unit_id: null },
+        value_id: "00000000-0000-4000-8000-000000000071",
+      }).value.number,
+    ).toBe(2.5);
   });
 
   it("parses locations from the backend", () => {

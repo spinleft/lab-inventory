@@ -335,10 +335,11 @@ async fn range_asset_parameters_allow_units_and_enforce_value_bounds() {
 }
 
 #[tokio::test]
-async fn update_asset_parameter_replaces_options_and_delete_rejects_referenced_parameters() {
+async fn update_asset_parameter_replaces_options_and_delete_cascades_assignments_and_values() {
     let app = spawn_app().await;
     app.test_user.login(&app).await;
     let laboratory_id = app.create_laboratory("Asset Parameter Update Lab").await;
+    let unit_id = app.unit_id("pcs").await;
     let parameter = create_enum_parameter(&app, laboratory_id, "color").await;
     let parameter_id = parameter_id(&parameter);
     let solid_option_id = option_id(&parameter, "solid");
@@ -394,18 +395,594 @@ async fn update_asset_parameter_replaces_options_and_delete_rejects_referenced_p
     .await;
     assert_eq!(audit_details["rollback"]["operation"], "update");
     assert_eq!(audit_details["rollback"]["values"]["code"], "color");
+    assert!(
+        audit_details["rollback"]["values"]["parameter_values"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     insert_assignment(&app, laboratory_id, parameter_id, category_id(&category)).await;
-    let response = app.delete_asset_parameter(parameter_id).await;
-    assert_eq!(response.status().as_u16(), 409);
+    let (_, value_id) = create_asset_with_parameter_value(
+        &app,
+        laboratory_id,
+        unit_id,
+        parameter_id,
+        &serde_json::json!({ "option_id": solid_option_id.to_string() }),
+    )
+    .await;
 
-    sqlx::query("DELETE FROM asset_parameter_assignments WHERE parameter_type_id = $1")
-        .bind(parameter_id)
-        .execute(&app.db_pool)
-        .await
-        .unwrap();
     let response = app.delete_asset_parameter(parameter_id).await;
     assert_eq!(response.status().as_u16(), 204);
+
+    let assignment_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM asset_parameter_assignments WHERE parameter_type_id = $1",
+    )
+    .bind(parameter_id)
+    .fetch_one(&app.db_pool)
+    .await
+    .unwrap();
+    assert_eq!(assignment_count, 0);
+    let value_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM asset_parameter_values WHERE value_id = $1")
+            .bind(value_id)
+            .fetch_one(&app.db_pool)
+            .await
+            .unwrap();
+    assert_eq!(value_count, 0);
+
+    let audit_details = latest_audit_details(
+        &app,
+        app.test_user.user_id,
+        parameter_id,
+        "delete",
+        "asset_parameter",
+    )
+    .await;
+    assert_eq!(audit_details["rollback"]["operation"], "create");
+    assert_eq!(
+        audit_details["rollback"]["values"]["assignments"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        audit_details["rollback"]["values"]["parameter_values"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn changing_the_data_type_requires_a_migration_for_every_stored_value() {
+    let app = spawn_app().await;
+    app.test_user.login(&app).await;
+    let laboratory_id = app.create_laboratory("Asset Parameter Migration Lab").await;
+    let unit_id = app.unit_id("pcs").await;
+    let parameter = create_text_parameter(&app, laboratory_id, "serial_no").await;
+    let parameter_id = parameter_id(&parameter);
+    create_asset_with_parameter_value(
+        &app,
+        laboratory_id,
+        unit_id,
+        parameter_id,
+        &serde_json::json!({ "text": "AA-1" }),
+    )
+    .await;
+    create_asset_with_parameter_value(
+        &app,
+        laboratory_id,
+        unit_id,
+        parameter_id,
+        &serde_json::json!({ "text": "AA-2" }),
+    )
+    .await;
+    let stored_value_ids = stored_value_ids(&app, parameter_id).await;
+    assert_eq!(stored_value_ids.len(), 2);
+    let first_value_id = stored_value_ids[0];
+    let second_value_id = stored_value_ids[1];
+
+    // No migration at all.
+    let response = app
+        .patch_asset_parameter(parameter_id, &serde_json::json!({ "data_type": "number" }))
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+
+    // Only one of the two stored values.
+    let response = app
+        .patch_asset_parameter(
+            parameter_id,
+            &serde_json::json!({
+                "data_type": "number",
+                "value_migrations": [
+                    { "value_id": first_value_id, "value": { "number": 1.0 } }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+
+    // A value the parameter does not store.
+    let response = app
+        .patch_asset_parameter(
+            parameter_id,
+            &serde_json::json!({
+                "data_type": "number",
+                "value_migrations": [
+                    { "value_id": first_value_id, "value": { "number": 1.0 } },
+                    { "value_id": second_value_id, "value": { "number": 2.0 } },
+                    { "value_id": Uuid::new_v4(), "value": { "number": 3.0 } }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+
+    // The same value twice.
+    let response = app
+        .patch_asset_parameter(
+            parameter_id,
+            &serde_json::json!({
+                "data_type": "number",
+                "value_migrations": [
+                    { "value_id": first_value_id, "value": { "number": 1.0 } },
+                    { "value_id": first_value_id, "value": { "number": 2.0 } },
+                    { "value_id": second_value_id, "value": { "number": 3.0 } }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+
+    // A value the new type cannot read.
+    let response = app
+        .patch_asset_parameter(
+            parameter_id,
+            &serde_json::json!({
+                "data_type": "number",
+                "value_migrations": [
+                    { "value_id": first_value_id, "value": { "text": "AA-1" } },
+                    { "value_id": second_value_id, "value": { "number": 2.0 } }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+
+    // Migrations without a data type change.
+    let response = app
+        .patch_asset_parameter(
+            parameter_id,
+            &serde_json::json!({
+                "name": "Serial Number",
+                "value_migrations": [
+                    { "value_id": first_value_id, "value": { "text": "AA-1" } }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+
+    // Every rejected request left the parameter and its values alone.
+    let response = app.get_asset_parameter(parameter_id).await;
+    let parameter: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(parameter["data_type"], "text");
+    assert_eq!(parameter["name"], "Serial No");
+    for value_id in [first_value_id, second_value_id] {
+        let stored = stored_value(&app, value_id).await;
+        assert_eq!(stored.data_type, "text");
+        assert!(
+            stored
+                .value_text
+                .as_deref()
+                .is_some_and(|text| text.starts_with("AA-")),
+            "stored value changed to {:?}",
+            stored.value_text
+        );
+    }
+}
+
+#[tokio::test]
+async fn changing_the_data_type_rewrites_values_in_place_and_keeps_the_old_columns() {
+    let app = spawn_app().await;
+    app.test_user.login(&app).await;
+    let laboratory_id = app
+        .create_laboratory("Asset Parameter Value Migration Lab")
+        .await;
+    let unit_id = app.unit_id("pcs").await;
+    let nanometer_unit_id = insert_nanometer_unit(&app, laboratory_id).await;
+    let parameter = create_text_parameter(&app, laboratory_id, "thickness").await;
+    let parameter_id = parameter_id(&parameter);
+    let (asset_id, value_id) = create_asset_with_parameter_value(
+        &app,
+        laboratory_id,
+        unit_id,
+        parameter_id,
+        &serde_json::json!({ "text": "2.5" }),
+    )
+    .await;
+    let (other_asset_id, other_value_id) = create_asset_with_parameter_value(
+        &app,
+        laboratory_id,
+        unit_id,
+        parameter_id,
+        &serde_json::json!({ "text": "7" }),
+    )
+    .await;
+
+    let response = app
+        .patch_asset_parameter(
+            parameter_id,
+            &serde_json::json!({
+                "data_type": "number",
+                "default_unit_id": nanometer_unit_id,
+                "value_migrations": [
+                    {
+                        "value_id": value_id,
+                        "value": { "number": 2.5, "unit_id": nanometer_unit_id }
+                    },
+                    {
+                        "value_id": other_value_id,
+                        "value": { "number": 7.0, "unit_id": nanometer_unit_id }
+                    }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let updated: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(updated["data_type"], "number");
+    assert_eq!(updated["unit_dimension"], "length");
+
+    // The row keeps its identity and its old columns, and gains the new ones.
+    let stored = stored_value(&app, value_id).await;
+    assert_eq!(stored.value_id, value_id);
+    assert_eq!(stored.data_type, "number");
+    assert_eq!(stored.value_text.as_deref(), Some("2.5"));
+    assert_eq!(stored.value_number, Some(2.5));
+    assert_eq!(stored.unit_id, Some(nanometer_unit_id));
+    let value_in_base = stored.value_number_in_base.unwrap();
+    assert!((value_in_base - 0.0000000025).abs() < 1e-18);
+
+    let response = app
+        .get_asset_with_query(asset_id, "include=parameters")
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let asset: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(asset["parameters"][0]["data_type"], "number");
+    assert_eq!(asset["parameters"][0]["value"]["number"], 2.5);
+    assert_eq!(
+        asset["parameters"][0]["value"]["unit_id"],
+        nanometer_unit_id.to_string()
+    );
+
+    let response = app
+        .get_asset_with_query(other_asset_id, "include=parameters")
+        .await;
+    let other_asset: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(other_asset["parameters"][0]["value"]["number"], 7.0);
+
+    let audit_details = latest_audit_details(
+        &app,
+        app.test_user.user_id,
+        parameter_id,
+        "update",
+        "asset_parameter",
+    )
+    .await;
+    let pre_migration_values = audit_details["rollback"]["values"]["parameter_values"]
+        .as_array()
+        .unwrap();
+    assert_eq!(pre_migration_values.len(), 2);
+    assert!(
+        pre_migration_values
+            .iter()
+            .any(|value| value["value_text"] == "2.5" && value["data_type"] == "text")
+    );
+}
+
+#[tokio::test]
+async fn changing_the_data_type_away_from_enum_moves_values_off_the_options() {
+    let app = spawn_app().await;
+    app.test_user.login(&app).await;
+    let laboratory_id = app
+        .create_laboratory("Asset Parameter Enum Migration Lab")
+        .await;
+    let unit_id = app.unit_id("pcs").await;
+    let parameter = create_enum_parameter(&app, laboratory_id, "state").await;
+    let parameter_id = parameter_id(&parameter);
+    let solid_option_id = option_id(&parameter, "solid");
+    let (_, value_id) = create_asset_with_parameter_value(
+        &app,
+        laboratory_id,
+        unit_id,
+        parameter_id,
+        &serde_json::json!({ "option_id": solid_option_id.to_string() }),
+    )
+    .await;
+
+    let response = app
+        .patch_asset_parameter(
+            parameter_id,
+            &serde_json::json!({
+                "data_type": "text",
+                "value_migrations": [
+                    { "value_id": value_id, "value": { "text": "solid" } }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let updated: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(updated["data_type"], "text");
+    assert!(updated["options"].as_array().unwrap().is_empty());
+
+    let stored = stored_value(&app, value_id).await;
+    assert_eq!(stored.data_type, "text");
+    assert_eq!(stored.value_text.as_deref(), Some("solid"));
+    // The options are gone with the enum type, and a leftover option id would
+    // break the value-to-option foreign key.
+    assert_eq!(stored.value_option_id, None);
+    let option_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM asset_parameter_options WHERE parameter_type_id = $1",
+    )
+    .bind(parameter_id)
+    .fetch_one(&app.db_pool)
+    .await
+    .unwrap();
+    assert_eq!(option_count, 0);
+}
+
+#[tokio::test]
+async fn changing_the_data_type_to_enum_points_values_at_the_new_options() {
+    let app = spawn_app().await;
+    app.test_user.login(&app).await;
+    let laboratory_id = app
+        .create_laboratory("Asset Parameter Enum Target Lab")
+        .await;
+    let unit_id = app.unit_id("pcs").await;
+    let parameter = create_text_parameter(&app, laboratory_id, "material_state").await;
+    let parameter_id = parameter_id(&parameter);
+    let (asset_id, value_id) = create_asset_with_parameter_value(
+        &app,
+        laboratory_id,
+        unit_id,
+        parameter_id,
+        &serde_json::json!({ "text": "solid" }),
+    )
+    .await;
+
+    let response = app
+        .patch_asset_parameter(
+            parameter_id,
+            &serde_json::json!({
+                "data_type": "enum",
+                "options": [
+                    { "code": "solid", "label": "Solid", "sort_order": 1 },
+                    { "code": "liquid", "label": "Liquid", "sort_order": 2 }
+                ],
+                "value_migrations": [
+                    { "value_id": value_id, "value": { "option_code": "solid" } }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let updated: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(updated["data_type"], "enum");
+    let solid_option_id = option_id(&updated, "solid");
+
+    let stored = stored_value(&app, value_id).await;
+    assert_eq!(stored.value_option_id, Some(solid_option_id));
+    // The text the value had before the change stays in the same row.
+    assert_eq!(stored.value_text.as_deref(), Some("solid"));
+
+    let response = app
+        .get_asset_with_query(asset_id, "include=parameters")
+        .await;
+    let asset: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(asset["parameters"][0]["data_type"], "enum");
+    assert_eq!(asset["parameters"][0]["value"]["option_code"], "solid");
+}
+
+#[tokio::test]
+async fn changing_the_data_type_to_enum_creates_the_options_the_values_migrate_onto() {
+    let app = spawn_app().await;
+    app.test_user.login(&app).await;
+    let laboratory_id = app
+        .create_laboratory("Asset Parameter Enum Creation Lab")
+        .await;
+    let unit_id = app.unit_id("pcs").await;
+    let parameter = create_text_parameter(&app, laboratory_id, "material_state").await;
+    let parameter_id = parameter_id(&parameter);
+    let (_, solid_value_id) = create_asset_with_parameter_value(
+        &app,
+        laboratory_id,
+        unit_id,
+        parameter_id,
+        &serde_json::json!({ "text": "solid" }),
+    )
+    .await;
+    let (_, gas_value_id) = create_asset_with_parameter_value(
+        &app,
+        laboratory_id,
+        unit_id,
+        parameter_id,
+        &serde_json::json!({ "text": "gas" }),
+    )
+    .await;
+
+    // An enum still needs options from somewhere: neither the parameter nor the
+    // migrations bring any.
+    let response = app
+        .patch_asset_parameter(parameter_id, &serde_json::json!({ "data_type": "enum" }))
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+
+    // A code that could never be an option code is rejected, and nothing lands.
+    let response = app
+        .patch_asset_parameter(
+            parameter_id,
+            &serde_json::json!({
+                "data_type": "enum",
+                "value_migrations": [
+                    { "value_id": solid_value_id, "value": { "option_code": "Solid!" } },
+                    { "value_id": gas_value_id, "value": { "option_code": "gas" } }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+
+    let response = app
+        .patch_asset_parameter(
+            parameter_id,
+            &serde_json::json!({
+                "data_type": "enum",
+                "value_migrations": [
+                    {
+                        "value_id": solid_value_id,
+                        "value": { "option_code": "solid", "option_label": "Solid" }
+                    },
+                    { "value_id": gas_value_id, "value": { "option_code": "gas" } }
+                ]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let updated: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(updated["data_type"], "enum");
+    // The migrations named both options, so the parameter has both of them.
+    assert_eq!(updated["options"].as_array().unwrap().len(), 2);
+    assert_eq!(option_label(&updated, "solid"), "Solid");
+    assert_eq!(option_label(&updated, "gas"), "gas");
+
+    let stored = stored_value(&app, solid_value_id).await;
+    assert_eq!(stored.value_option_id, Some(option_id(&updated, "solid")));
+    assert_eq!(stored.value_text.as_deref(), Some("solid"));
+    let stored = stored_value(&app, gas_value_id).await;
+    assert_eq!(stored.value_option_id, Some(option_id(&updated, "gas")));
+}
+
+#[tokio::test]
+async fn changing_the_data_type_can_drop_a_stored_value() {
+    let app = spawn_app().await;
+    app.test_user.login(&app).await;
+    let laboratory_id = app
+        .create_laboratory("Asset Parameter Drop Value Lab")
+        .await;
+    let unit_id = app.unit_id("pcs").await;
+    let parameter = create_text_parameter(&app, laboratory_id, "note").await;
+    let parameter_id = parameter_id(&parameter);
+    let (_, value_id) = create_asset_with_parameter_value(
+        &app,
+        laboratory_id,
+        unit_id,
+        parameter_id,
+        &serde_json::json!({ "text": "keep me" }),
+    )
+    .await;
+
+    let response = app
+        .patch_asset_parameter(
+            parameter_id,
+            &serde_json::json!({
+                "data_type": "boolean",
+                "value_migrations": [{ "value_id": value_id, "value": null }]
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let updated: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(updated["data_type"], "boolean");
+    assert!(stored_value_ids(&app, parameter_id).await.is_empty());
+}
+
+#[tokio::test]
+async fn changing_the_data_type_without_stored_values_needs_no_migration() {
+    let app = spawn_app().await;
+    app.test_user.login(&app).await;
+    let laboratory_id = app
+        .create_laboratory("Asset Parameter Empty Migration Lab")
+        .await;
+    let parameter = create_text_parameter(&app, laboratory_id, "note").await;
+    let parameter_id = parameter_id(&parameter);
+
+    let response = app
+        .patch_asset_parameter(parameter_id, &serde_json::json!({ "data_type": "date" }))
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let updated: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(updated["data_type"], "date");
+
+    let response = app
+        .patch_asset_parameter(
+            parameter_id,
+            &serde_json::json!({ "data_type": "date", "value_migrations": [] }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 400);
+}
+
+#[tokio::test]
+async fn listing_asset_parameter_values_covers_the_parameters_stored_values() {
+    let app = spawn_app().await;
+    app.test_user.login(&app).await;
+    let laboratory_id = app.create_laboratory("Asset Parameter Values Lab").await;
+    let unit_id = app.unit_id("pcs").await;
+    let parameter = create_text_parameter(&app, laboratory_id, "serial_no").await;
+    let serial_no_parameter_id = parameter_id(&parameter);
+    let (asset_id, _) = create_asset_with_parameter_value(
+        &app,
+        laboratory_id,
+        unit_id,
+        serial_no_parameter_id,
+        &serde_json::json!({ "text": "AA-1" }),
+    )
+    .await;
+    create_asset_with_parameter_value(
+        &app,
+        laboratory_id,
+        unit_id,
+        serial_no_parameter_id,
+        &serde_json::json!({ "text": "AA-2" }),
+    )
+    .await;
+    let empty_parameter = create_text_parameter(&app, laboratory_id, "note").await;
+
+    let response = app.get_asset_parameter_values(serial_no_parameter_id).await;
+    assert_eq!(response.status().as_u16(), 200);
+    let values: serde_json::Value = response.json().await.unwrap();
+    let values = values.as_array().unwrap();
+    assert_eq!(values.len(), 2);
+    assert_eq!(values[0]["data_type"], "text");
+    assert_eq!(values[0]["asset_model"], serde_json::Value::Null);
+    assert!(
+        values
+            .iter()
+            .any(|value| value["asset_id"] == asset_id.to_string()
+                && value["value"]["text"] == "AA-1")
+    );
+    assert!(values.iter().any(|value| value["value"]["text"] == "AA-2"));
+
+    let response = app
+        .get_asset_parameter_values(parameter_id(&empty_parameter))
+        .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let values: serde_json::Value = response.json().await.unwrap();
+    assert!(values.as_array().unwrap().is_empty());
+
+    let response = app.get_asset_parameter_values(Uuid::new_v4()).await;
+    assert_eq!(response.status().as_u16(), 403);
+
+    let regular_user = TestUser::generate_with_user_type("user", Some(laboratory_id));
+    app.store_user(&regular_user).await;
+    regular_user.login(&app).await;
+    let response = app.get_asset_parameter_values(serial_no_parameter_id).await;
+    assert_eq!(response.status().as_u16(), 200);
 }
 
 async fn create_enum_parameter(
@@ -448,6 +1025,114 @@ async fn create_category(
         .await;
     assert_eq!(response.status().as_u16(), 201);
     response.json().await.unwrap()
+}
+
+async fn create_text_parameter(
+    app: &TestApp,
+    laboratory_id: Uuid,
+    code: &str,
+) -> serde_json::Value {
+    let response = app
+        .post_asset_parameter(
+            laboratory_id,
+            &serde_json::json!({
+                "code": code,
+                "name": title_case_code(code),
+                "data_type": "text"
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 201);
+    response.json().await.unwrap()
+}
+
+/// Records one value for the parameter on a new asset through the API, and
+/// returns the asset id together with the stored value id.
+async fn create_asset_with_parameter_value(
+    app: &TestApp,
+    laboratory_id: Uuid,
+    unit_id: Uuid,
+    parameter_id: Uuid,
+    value: &serde_json::Value,
+) -> (Uuid, Uuid) {
+    let response = app
+        .post_asset(
+            laboratory_id,
+            &serde_json::json!({
+                "inventory_unit_id": unit_id,
+                "name": format!("Parameterized Asset {}", Uuid::new_v4()),
+                "parameters": [{ "parameter_type_id": parameter_id, "value": value }],
+                "tracking_mode": "quantity"
+            }),
+        )
+        .await;
+    assert_eq!(response.status().as_u16(), 201);
+    let asset: serde_json::Value = response.json().await.unwrap();
+    let asset_id = asset["asset_id"].as_str().unwrap().parse().unwrap();
+    let value_id = sqlx::query_scalar(
+        r#"
+        SELECT value_id
+        FROM asset_parameter_values
+        WHERE asset_id = $1
+          AND parameter_type_id = $2
+        "#,
+    )
+    .bind(asset_id)
+    .bind(parameter_id)
+    .fetch_one(&app.db_pool)
+    .await
+    .unwrap();
+
+    (asset_id, value_id)
+}
+
+/// A stored value as it sits on disk, including the columns a data type change
+/// leaves behind.
+#[derive(sqlx::FromRow)]
+struct StoredValue {
+    value_id: Uuid,
+    data_type: String,
+    value_text: Option<String>,
+    value_number: Option<f64>,
+    value_number_in_base: Option<f64>,
+    unit_id: Option<Uuid>,
+    value_option_id: Option<Uuid>,
+}
+
+async fn stored_value(app: &TestApp, value_id: Uuid) -> StoredValue {
+    sqlx::query_as(
+        r#"
+        SELECT
+            value_id,
+            data_type::text AS data_type,
+            value_text,
+            value_number,
+            value_number_in_base,
+            unit_id,
+            value_option_id
+        FROM asset_parameter_values
+        WHERE value_id = $1
+        "#,
+    )
+    .bind(value_id)
+    .fetch_one(&app.db_pool)
+    .await
+    .unwrap()
+}
+
+async fn stored_value_ids(app: &TestApp, parameter_id: Uuid) -> Vec<Uuid> {
+    sqlx::query_scalar(
+        r#"
+        SELECT value_id
+        FROM asset_parameter_values
+        WHERE parameter_type_id = $1
+        ORDER BY value_id
+        "#,
+    )
+    .bind(parameter_id)
+    .fetch_all(&app.db_pool)
+    .await
+    .unwrap()
 }
 
 async fn insert_assignment(

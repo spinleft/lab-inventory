@@ -40,7 +40,7 @@ export function Select({
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>
         <SelectPrimitive.Content className="select-content" position="popper">
-          <SelectPrimitive.Viewport>
+          <SelectPrimitive.Viewport className="select-viewport">
             {options.map((option) => (
               <SelectPrimitive.Item
                 className="select-item"

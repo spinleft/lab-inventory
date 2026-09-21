@@ -1,7 +1,8 @@
 use super::model::delete_asset_parameter_rollback_details;
 use super::queries::{
     AssetParameterDatabaseError, delete_asset_parameter_from_database,
-    fetch_asset_parameter_for_update, fetch_asset_parameter_options_for_update,
+    fetch_asset_parameter_assignments_for_update, fetch_asset_parameter_for_update,
+    fetch_asset_parameter_options_for_update, fetch_asset_parameter_values_for_update,
 };
 use crate::access_control::{Action, LaboratoryContext, ResourceType, validate_permission};
 use crate::audit::{AuditAction, AuditResource, record_audit};
@@ -91,6 +92,14 @@ pub async fn delete_asset_parameter(
     let options =
         fetch_asset_parameter_options_for_update(&mut transaction, existing.parameter_type_id)
             .await?;
+    // The foreign keys take the assignments and the stored values with the
+    // parameter; reading them first is what lets the rollback details carry them.
+    let assignments =
+        fetch_asset_parameter_assignments_for_update(&mut transaction, existing.parameter_type_id)
+            .await?;
+    let parameter_values =
+        fetch_asset_parameter_values_for_update(&mut transaction, existing.parameter_type_id)
+            .await?;
     delete_asset_parameter_from_database(&mut transaction, existing.parameter_type_id).await?;
     record_audit(
         &mut transaction,
@@ -98,7 +107,12 @@ pub async fn delete_asset_parameter(
         AuditAction::Delete,
         AuditResource::AssetParameter,
         Some(existing.parameter_type_id),
-        delete_asset_parameter_rollback_details(&existing, &options),
+        delete_asset_parameter_rollback_details(
+            &existing,
+            &options,
+            &assignments,
+            &parameter_values,
+        ),
     )
     .await?;
     transaction

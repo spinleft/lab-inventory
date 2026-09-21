@@ -142,11 +142,46 @@ curl -b cookies.txt http://localhost:8080/api/v1/auth/me
 | GET/POST | `/{scope}/asset-categories` | 资产分类树 |
 | GET/PATCH/DELETE | `/{scope}/asset-categories/{id}` | |
 | GET/POST | `/{scope}/asset-parameters` | 自定义参数定义 |
-| GET/PATCH/DELETE | `/{scope}/asset-parameters/{id}` | |
+| GET/PATCH/DELETE | `/{scope}/asset-parameters/{id}` | 改 `data_type` 时必须带上 `value_migrations`(见下) |
+| GET | `/{scope}/asset-parameters/{id}/values` | 列出这个参数在各资产上已录入的值 |
 | GET/POST | `/{scope}/locations` | 位置树 |
 | GET/PATCH/DELETE | `/{scope}/locations/{id}` | |
 | GET/POST | `/{scope}/units` | 计量单位 |
 | GET/PATCH/DELETE | `/{scope}/units/{id}` | |
+
+#### 修改资产参数的数据类型
+
+`data_type` 可以改,但参数已经录过值时,**每一条值都要给出迁移后的值**,否则请求被拒(400):
+每条值的取法是一条 `(parameter_type_id, data_type)` 外键,不可能只改一半。
+
+`PATCH /{scope}/asset-parameters/{id}` 增加一个可选字段 `value_migrations`:
+
+```bash
+# 先看这个参数被哪些资产录了值,以及现在读出来是什么
+curl -b cookies.txt http://localhost:8080/api/v1/local/asset-parameters/$PARAMETER_ID/values
+
+# 把 text 参数改成 number,逐条给出迁移后的值
+curl -b cookies.txt -X PATCH http://localhost:8080/api/v1/local/asset-parameters/$PARAMETER_ID \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "data_type": "number",
+        "default_unit_id": "'$UNIT_ID'",
+        "value_migrations": [
+          {"value_id": "'$VALUE_ID'", "value": {"number": 12.5, "unit_id": "'$UNIT_ID'"}}
+        ]
+      }'
+```
+
+- `value_migrations` 必须与该参数现存的每一条值一一对应;多带、少带、重复或不属于该参数的
+  `value_id` 都返回 400,数据不会落库。
+- `"value": null` 表示删除这条值(界面上是"留空")。
+- 迁移是**行内原地写入**:`value_id`/`asset_id` 不变,新类型的列写入新值,旧类型的列保持原样,
+  所以迁移前后的值同时留在 `asset_parameter_values` 的同一条记录里。
+  例外:枚举转成别的类型时 `value_option_id` 会被清空——这一次变更会删掉那些选项行,留着会违反外键。
+- 目标类型是枚举时,`value` 用 `{"option_code": "solid", "option_label": "Solid"}` 指向目标选项:
+  参数里已经有这个代码就用现成的,没有就在这次请求里新建(`option_label` 省略时用代码当显示名,
+  代码不符合参数代码规则会被拒)。所以改成枚举时可以完全不写 `options` 字段 —— 选项直接由迁移条目产生;
+  写了 `options` 就相当于先声明一批,迁移里出现的其他代码再补充新建。
 
 ### 附件
 

@@ -706,6 +706,22 @@ impl TestApp {
             .expect("Failed to execute request.")
     }
 
+    pub async fn get_asset_parameter_values(&self, parameter_id: Uuid) -> reqwest::Response {
+        let path = self
+            .resource_api_path(
+                "asset_parameter_types",
+                "parameter_type_id",
+                parameter_id,
+                &format!("asset-parameters/{parameter_id}/values"),
+            )
+            .await;
+        self.api_client
+            .get(format!("{}{}", self.address, path))
+            .send()
+            .await
+            .expect("Failed to execute request.")
+    }
+
     pub async fn patch_asset_parameter<Body>(
         &self,
         parameter_id: Uuid,

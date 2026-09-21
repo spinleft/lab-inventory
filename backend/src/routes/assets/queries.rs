@@ -5,11 +5,9 @@
 //!   anything that chains several statements belongs in `service.rs`
 //! - functions never return a handler error type, only [`AssetDatabaseError`],
 //!   so any handler can reuse them
-use super::model::{
-    AssetInventoryItemRow, AssetParameterDefinitionRow, AssetParameterValueRow, AssetRow,
-    DeletedAttachmentRow, ResolvedAssetParameterValue, UnitRow,
-};
+use super::model::{AssetInventoryItemRow, AssetParameterValueRow, AssetRow, DeletedAttachmentRow};
 use crate::domain::{AssetTrackingMode, LaboratoryId, NewAsset, NewInventoryItem};
+use crate::routes::shared::parameter_values::{ParameterValueDefinition, ResolvedParameterValue};
 use crate::utils::error_chain_fmt;
 use anyhow::Context;
 use sqlx::{PgPool, Postgres, Transaction};
@@ -666,13 +664,13 @@ pub(super) async fn fetch_parameter_definitions(
     transaction: &mut Transaction<'_, Postgres>,
     laboratory_id: LaboratoryId,
     parameter_type_ids: &[Uuid],
-) -> Result<HashMap<Uuid, AssetParameterDefinitionRow>, AssetDatabaseError> {
+) -> Result<HashMap<Uuid, ParameterValueDefinition>, AssetDatabaseError> {
     if parameter_type_ids.is_empty() {
         return Ok(HashMap::new());
     }
 
     let rows = sqlx::query_as!(
-        AssetParameterDefinitionRow,
+        ParameterValueDefinition,
         r#"
         SELECT
             parameter_type_id,
@@ -701,7 +699,7 @@ pub(super) async fn upsert_asset_parameter_value(
     transaction: &mut Transaction<'_, Postgres>,
     laboratory_id: LaboratoryId,
     asset_id: Uuid,
-    value: &ResolvedAssetParameterValue,
+    value: &ResolvedParameterValue,
 ) -> Result<(), AssetDatabaseError> {
     sqlx::query!(
         r#"
@@ -904,55 +902,6 @@ pub(super) async fn validate_location(
             "Inventory item location does not belong to this laboratory".into(),
         ))
     }
-}
-
-pub(super) async fn validate_option(
-    transaction: &mut Transaction<'_, Postgres>,
-    parameter_type_id: Uuid,
-    option_id: Uuid,
-) -> Result<(), AssetDatabaseError> {
-    let found = sqlx::query_scalar!(
-        r#"
-        SELECT option_id
-        FROM asset_parameter_options
-        WHERE parameter_type_id = $1
-          AND option_id = $2
-        FOR UPDATE
-        "#,
-        parameter_type_id,
-        option_id,
-    )
-    .fetch_optional(transaction.as_mut())
-    .await
-    .context("Failed to fetch asset parameter option")?;
-
-    if found.is_some() {
-        Ok(())
-    } else {
-        Err(AssetDatabaseError::Validation(
-            "Asset parameter option not found".into(),
-        ))
-    }
-}
-
-pub(super) async fn fetch_unit(
-    transaction: &mut Transaction<'_, Postgres>,
-    unit_id: Uuid,
-) -> Result<UnitRow, AssetDatabaseError> {
-    sqlx::query_as!(
-        UnitRow,
-        r#"
-        SELECT unit_id, dimension, scale_to_base
-        FROM units
-        WHERE unit_id = $1
-        FOR UPDATE
-        "#,
-        unit_id,
-    )
-    .fetch_optional(transaction.as_mut())
-    .await
-    .context("Failed to fetch unit")?
-    .ok_or(AssetDatabaseError::Validation("Unit not found".into()))
 }
 
 // ---------------------------------------------------------------------------

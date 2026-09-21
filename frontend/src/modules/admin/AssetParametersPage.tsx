@@ -22,8 +22,12 @@ import {
   type AssetParameter,
   type AssetParameterOptionPayload,
   type AssetParameterPayload,
+  type AssetParameterValue,
+  type AssetParameterValueInput,
+  type AssetParameterValueMigrationPayload,
   type Unit,
   optionalText,
+  useAssetParameterValues,
   useAssetParameters,
   useCreateAssetParameter,
   useDeleteAssetParameter,
@@ -53,6 +57,18 @@ type ParameterOptionForm = {
   sort_order: string;
 };
 
+/** One stored value's target while the data type changes, per input widget. */
+type MigrationValueInput = {
+  boolean: string;
+  date: string;
+  number: string;
+  option_code: string;
+  range_end: string;
+  range_start: string;
+  text: string;
+  unit_id: string;
+};
+
 type AssetParameterDimensionGroup = {
   dimension: string | null;
   label: string;
@@ -74,6 +90,7 @@ const UNIT_DIMENSION_SELECT_OPTIONS = [
   ...UNIT_DIMENSION_OPTIONS,
 ];
 const EMPTY_PARAMETERS: AssetParameter[] = [];
+const EMPTY_STORED_VALUES: AssetParameterValue[] = [];
 const EMPTY_UNITS: Unit[] = [];
 
 export function AssetParametersPage() {
@@ -174,7 +191,7 @@ export function AssetParametersPage() {
           </Button>
           <ConfirmDialog
             confirmLabel="删除"
-            description={`确认删除资产参数“${item.name}”？已经被资产记录引用的参数不能删除。`}
+            description={`确认删除资产参数“${item.name}”？引用该参数的资产类别/资产项分配，以及各资产已录入的参数值都会一起删除。`}
             disabled={!canManage || deleteParameter.isPending}
             title="删除资产参数"
             trigger={
@@ -377,6 +394,21 @@ function AssetParameterEditor({
         : units,
     [units, values.unit_dimension],
   );
+  const unitsById = useMemo(() => buildUnitIndex(units), [units]);
+  // Changing the data type has to account for every value already stored on an
+  // asset, so the editor reads them and asks for one target per value.
+  const migrationPending =
+    editingParameter !== null && values.data_type !== editingParameter.data_type;
+  const valuesQuery = useAssetParameterValues({
+    enabled: migrationPending,
+    laboratoryId,
+    parameterId: editingParameter?.parameter_type_id ?? "",
+  });
+  const storedValues = valuesQuery.data ?? EMPTY_STORED_VALUES;
+  const migrationBlocked = migrationPending && (valuesQuery.isLoading || valuesQuery.isError);
+  // Keyed by value id and read with a fallback, so a row that just arrived from
+  // the query needs no state of its own.
+  const [migrationInputs, setMigrationInputs] = useState<Record<string, MigrationValueInput>>({});
 
   useEffect(() => {
     if (!parameter || parameter === "new") {
@@ -408,6 +440,13 @@ function AssetParameterEditor({
     value: ParameterForm[K],
   ) {
     setValues((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateMigrationInput(valueId: string, patch: Partial<MigrationValueInput>) {
+    setMigrationInputs((current) => ({
+      ...current,
+      [valueId]: { ...(current[valueId] ?? emptyMigrationValueInput()), ...patch },
+    }));
   }
 
   function updateDataType(value: string) {
@@ -499,6 +538,22 @@ function AssetParameterEditor({
       return;
     }
 
+    // A data type change only goes through when every stored value has a target,
+    // so the migration is built and checked before the request leaves.
+    let valueMigrations: AssetParameterValueMigrationPayload[] | undefined;
+    if (migrationPending) {
+      if (valuesQuery.isError) {
+        toast.error({ title: "读取现有参数值失败，无法迁移" });
+        return;
+      }
+      const migrationResult = serializeValueMigrations(values, storedValues, migrationInputs);
+      if (!migrationResult.ok) {
+        toast.error({ title: migrationResult.message });
+        return;
+      }
+      valueMigrations = migrationResult.migrations;
+    }
+
     const payload: AssetParameterPayload = {
       code: values.code.trim(),
       data_type: values.data_type,
@@ -511,6 +566,7 @@ function AssetParameterEditor({
       unit_dimension: dataTypeSupportsUnits(values.data_type)
         ? optionalText(values.unit_dimension)
         : null,
+      value_migrations: valueMigrations,
     };
 
     if (!payload.name || !payload.code) {
@@ -562,7 +618,12 @@ function AssetParameterEditor({
           <Button disabled={isSaving} onClick={onClose}>
             取消
           </Button>
-          <Button disabled={isSaving} form="asset-parameter-form" type="submit" variant="primary">
+          <Button
+            disabled={isSaving || migrationBlocked}
+            form="asset-parameter-form"
+            type="submit"
+            variant="primary"
+          >
             保存
           </Button>
         </>
@@ -633,6 +694,54 @@ function AssetParameterEditor({
             onRemove={removeOption}
             onUpdate={updateOption}
           />
+        ) : null}
+        {migrationPending ? (
+          <div className="parameter-value-migration">
+            <div className="parameter-options-header">
+              <div>
+                <h3>参数值迁移</h3>
+                <p>每条已录入的值都要给出迁移后的值；留空表示删除该资产上的这条参数值。</p>
+              </div>
+              <Badge tone="warning">{storedValues.length} 条待迁移</Badge>
+            </div>
+            {valuesQuery.isError ? (
+              <p className="parameter-value-migration-note">
+                读取现有参数值失败：{toErrorMessage(valuesQuery.error)}
+              </p>
+            ) : valuesQuery.isLoading ? (
+              <p className="parameter-value-migration-note">正在读取现有参数值…</p>
+            ) : storedValues.length === 0 ? (
+              <p className="parameter-value-migration-note">
+                该参数还没有资产录入值，直接保存即可。
+              </p>
+            ) : (
+              <div className="parameter-value-migration-list">
+                {storedValues.map((stored) => (
+                  <div className="parameter-value-migration-row" key={stored.value_id}>
+                    <div className="parameter-value-migration-asset">
+                      <strong>{stored.asset_name}</strong>
+                      <span>{stored.asset_model ?? "无型号"}</span>
+                    </div>
+                    <div className="parameter-value-migration-before">
+                      <span>迁移前的值</span>
+                      <strong>{formatStoredValue(stored, unitsById)}</strong>
+                    </div>
+                    <div className="parameter-value-migration-target">
+                      <MigrationValueField
+                        dataType={values.data_type}
+                        input={migrationInputs[stored.value_id] ?? emptyMigrationValueInput()}
+                        label={`${stored.asset_name}迁移后的值`}
+                        options={values.options}
+                        unitDimension={values.unit_dimension}
+                        units={units}
+                        onChange={(patch) => updateMigrationInput(stored.value_id, patch)}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         ) : null}
         <FormField htmlFor="asset-parameter-description" label="描述">
           <textarea
@@ -713,6 +822,278 @@ function ParameterOptionsEditor({
       </div>
     </div>
   );
+}
+
+function MigrationValueField({
+  dataType,
+  input,
+  label,
+  onChange,
+  options,
+  unitDimension,
+  units,
+}: {
+  dataType: AssetParameter["data_type"];
+  input: MigrationValueInput;
+  label: string;
+  onChange: (patch: Partial<MigrationValueInput>) => void;
+  options: ParameterOptionForm[];
+  unitDimension: string;
+  units: Unit[];
+}) {
+  const unitOptions = units
+    .filter((unit) => !unitDimension || unit.dimension === unitDimension)
+    .map((unit) => ({ label: `${unit.name}（${unit.symbol}）`, value: unit.unit_id }));
+  const unitSelect = (
+    <select
+      aria-label={`${label}单位`}
+      className="input"
+      value={input.unit_id}
+      onChange={(event) => onChange({ unit_id: event.target.value })}
+    >
+      <option value="">默认单位</option>
+      {unitOptions.map((unit) => (
+        <option key={unit.value} value={unit.value}>
+          {unit.label}
+        </option>
+      ))}
+    </select>
+  );
+
+  if (dataType === "text") {
+    return (
+      <input
+        aria-label={label}
+        className="input"
+        placeholder="迁移后的值"
+        value={input.text}
+        onChange={(event) => onChange({ text: event.target.value })}
+      />
+    );
+  }
+
+  if (dataType === "number") {
+    return (
+      <div className="parameter-value-migration-inputs">
+        <input
+          aria-label={label}
+          className="input"
+          placeholder="迁移后的值"
+          type="number"
+          value={input.number}
+          onChange={(event) => onChange({ number: event.target.value })}
+        />
+        {unitOptions.length > 0 ? unitSelect : null}
+      </div>
+    );
+  }
+
+  if (dataType === "range") {
+    return (
+      <div className="parameter-value-migration-inputs">
+        <input
+          aria-label={`${label}起点`}
+          className="input"
+          placeholder="起始"
+          type="number"
+          value={input.range_start}
+          onChange={(event) => onChange({ range_start: event.target.value })}
+        />
+        <input
+          aria-label={`${label}终点`}
+          className="input"
+          placeholder="结束"
+          type="number"
+          value={input.range_end}
+          onChange={(event) => onChange({ range_end: event.target.value })}
+        />
+        {unitOptions.length > 0 ? unitSelect : null}
+      </div>
+    );
+  }
+
+  if (dataType === "boolean") {
+    return (
+      <select
+        aria-label={label}
+        className="input"
+        value={input.boolean}
+        onChange={(event) => onChange({ boolean: event.target.value })}
+      >
+        <option value="">留空删除</option>
+        <option value="true">是</option>
+        <option value="false">否</option>
+      </select>
+    );
+  }
+
+  if (dataType === "date") {
+    return (
+      <input
+        aria-label={label}
+        className="input"
+        type="date"
+        value={input.date}
+        onChange={(event) => onChange({ date: event.target.value })}
+      />
+    );
+  }
+
+  if (dataType === "enum") {
+    return (
+      <select
+        aria-label={label}
+        className="input"
+        value={input.option_code}
+        onChange={(event) => onChange({ option_code: event.target.value })}
+      >
+        <option value="">留空删除</option>
+        {options
+          .filter((option) => option.code.trim())
+          .map((option, index) => (
+            <option key={option.option_id ?? index} value={option.code.trim()}>
+              {option.label.trim() || option.code.trim()}
+            </option>
+          ))}
+      </select>
+    );
+  }
+
+  return null;
+}
+
+function emptyMigrationValueInput(): MigrationValueInput {
+  return {
+    boolean: "",
+    date: "",
+    number: "",
+    option_code: "",
+    range_end: "",
+    range_start: "",
+    text: "",
+    unit_id: "",
+  };
+}
+
+function serializeValueMigrations(
+  values: ParameterForm,
+  storedValues: AssetParameterValue[],
+  inputs: Record<string, MigrationValueInput>,
+):
+  | { ok: true; migrations: AssetParameterValueMigrationPayload[] }
+  | { ok: false; message: string } {
+  const options = normalizeOptions(values);
+  if (!options.ok) {
+    return { ok: false, message: options.message };
+  }
+
+  const migrations: AssetParameterValueMigrationPayload[] = [];
+  for (const stored of storedValues) {
+    const serialized = serializeMigrationValue(
+      values.data_type,
+      inputs[stored.value_id] ?? emptyMigrationValueInput(),
+      stored.asset_name,
+    );
+    if (!serialized.ok) {
+      return serialized;
+    }
+    if (
+      serialized.value !== null &&
+      typeof serialized.value === "object" &&
+      serialized.value.option_code
+    ) {
+      const optionCode = serialized.value.option_code;
+      if (!options.options.some((option) => option.code === optionCode)) {
+        return { ok: false, message: `${stored.asset_name} 的迁移目标选项不存在` };
+      }
+    }
+    migrations.push({ value_id: stored.value_id, value: serialized.value });
+  }
+
+  return { ok: true, migrations };
+}
+
+function serializeMigrationValue(
+  dataType: AssetParameter["data_type"],
+  input: MigrationValueInput,
+  assetName: string,
+): { ok: true; value: AssetParameterValueInput } | { ok: false; message: string } {
+  if (dataType === "text") {
+    const text = input.text.trim();
+    return { ok: true, value: text ? { text } : null };
+  }
+  if (dataType === "number") {
+    if (!input.number.trim()) return { ok: true, value: null };
+    const number = Number(input.number);
+    if (!Number.isFinite(number)) {
+      return { ok: false, message: `${assetName} 的迁移值必须是有效数字` };
+    }
+    return { ok: true, value: { number, unit_id: input.unit_id || undefined } };
+  }
+  if (dataType === "range") {
+    if (!input.range_start.trim() && !input.range_end.trim()) {
+      return { ok: true, value: null };
+    }
+    const rangeStart = Number(input.range_start);
+    const rangeEnd = Number(input.range_end);
+    if (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd)) {
+      return { ok: false, message: `${assetName} 的迁移值必须填写有效范围` };
+    }
+    if (rangeStart > rangeEnd) {
+      return { ok: false, message: `${assetName} 的迁移范围起点不能大于终点` };
+    }
+    return {
+      ok: true,
+      value: {
+        range_end: rangeEnd,
+        range_start: rangeStart,
+        unit_id: input.unit_id || undefined,
+      },
+    };
+  }
+  if (dataType === "boolean") {
+    if (!input.boolean) return { ok: true, value: null };
+    return { ok: true, value: { boolean: input.boolean === "true" } };
+  }
+  if (dataType === "date") {
+    return { ok: true, value: input.date ? { date: input.date } : null };
+  }
+  if (dataType === "enum") {
+    const optionCode = input.option_code.trim();
+    return { ok: true, value: optionCode ? { option_code: optionCode } : null };
+  }
+  return { ok: true, value: null };
+}
+
+/** The value the parameter stores on that asset right now, read through the type
+ * it has today — the migration is what changes that reading. */
+function formatStoredValue(value: AssetParameterValue, unitsById: Map<string, Unit>) {
+  const runtime = value.value;
+  const unit = runtime.unit_id ? unitsById.get(runtime.unit_id) : null;
+  const unitSuffix = unit ? ` ${unit.symbol}` : "";
+
+  if (value.data_type === "text") {
+    return runtime.text ?? "—";
+  }
+  if (value.data_type === "number") {
+    return runtime.number === null || runtime.number === undefined
+      ? "—"
+      : `${runtime.number}${unitSuffix}`;
+  }
+  if (value.data_type === "range") {
+    return `${runtime.range_start ?? "—"} ~ ${runtime.range_end ?? "—"}${unitSuffix}`;
+  }
+  if (value.data_type === "boolean") {
+    if (runtime.boolean === null || runtime.boolean === undefined) return "—";
+    return runtime.boolean ? "是" : "否";
+  }
+  if (value.data_type === "date") {
+    return runtime.date ?? "—";
+  }
+  if (value.data_type === "enum") {
+    return runtime.option_label ?? runtime.option_code ?? "—";
+  }
+  return "—";
 }
 
 function emptyParameterForm(): ParameterForm {

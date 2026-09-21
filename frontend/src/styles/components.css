@@ -250,6 +250,14 @@
   z-index: 50;
 }
 
+/* Scrolling belongs to the viewport: Radix reports how much room is left below
+   the trigger through this variable, and without a cap a long option list runs
+   off the bottom of the screen, leaving its last entries unreachable. */
+.select-viewport {
+  max-height: min(320px, var(--radix-select-content-available-height, 320px));
+  overflow-y: auto;
+}
+
 .select-item,
 .dropdown-item,
 .command-item {
@@ -892,6 +900,58 @@
 .parameter-option-delete {
   align-self: end;
 }
+
+.parameter-value-migration {
+  display: grid;
+  gap: 10px;
+}
+
+.parameter-value-migration-note {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: 12px;
+}
+
+.parameter-value-migration-list {
+  display: grid;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.parameter-value-migration-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.parameter-value-migration-asset,
+.parameter-value-migration-before {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.parameter-value-migration-asset strong,
+.parameter-value-migration-before strong {
+  overflow-wrap: anywhere;
+}
+
+.parameter-value-migration-asset span,
+.parameter-value-migration-before span {
+  color: var(--text-subtle);
+  font-size: 12px;
+}
+
+.parameter-value-migration-inputs {
+  display: grid;
+  gap: 6px;
+}
+
 
 .category-tree-table {
   min-width: 940px;

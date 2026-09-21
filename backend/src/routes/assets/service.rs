@@ -3,22 +3,28 @@
 //! Anything here orchestrates `queries.rs` and enforces rules that span more
 //! than one row or table. Single-statement work belongs in `queries.rs`; HTTP
 //! concerns belong in the handler modules.
-use super::model::{
-    AssetInventoryItemRow, AssetParameterDefinitionRow, AssetParameterValueInput,
-    ResolvedAssetParameterValue,
-};
+use super::model::{AssetInventoryItemRow, AssetParameterValueInput};
 use super::queries::{
     self, AssetDatabaseError, delete_asset_parameter_value, fetch_parameter_definitions,
-    fetch_required_parameters, fetch_unit, insert_inventory_item, rescale_inventory_quantities,
-    upsert_asset_parameter_value, validate_location, validate_option,
+    fetch_required_parameters, insert_inventory_item, rescale_inventory_quantities,
+    upsert_asset_parameter_value, validate_location,
 };
-use crate::domain::{
-    AssetParameterDataType, AssetParameterValue, AssetTrackingMode, LaboratoryId, NewInventoryItem,
+use crate::domain::{AssetTrackingMode, LaboratoryId, NewInventoryItem};
+use crate::routes::shared::parameter_values::{
+    ParameterValueError, fetch_unit, resolve_parameter_value,
 };
-use serde_json::Value;
 use sqlx::{Postgres, Transaction};
 use std::collections::HashSet;
 use uuid::Uuid;
+
+impl From<ParameterValueError> for AssetDatabaseError {
+    fn from(error: ParameterValueError) -> Self {
+        match error {
+            ParameterValueError::Validation(message) => Self::Validation(message),
+            ParameterValueError::Unexpected(error) => Self::Unexpected(error),
+        }
+    }
+}
 
 /// Inserts one inventory item of a new asset, checking that its location belongs
 /// to the same laboratory.
@@ -121,92 +127,6 @@ fn validate_unique_parameter_inputs(
     }
 
     Ok(())
-}
-
-async fn resolve_parameter_value(
-    transaction: &mut Transaction<'_, Postgres>,
-    definition: &AssetParameterDefinitionRow,
-    value: &Value,
-) -> Result<ResolvedAssetParameterValue, AssetDatabaseError> {
-    let data_type = AssetParameterDataType::parse(&definition.data_type)
-        .map_err(|_| AssetDatabaseError::Validation("Invalid asset parameter data type".into()))?;
-    let value =
-        AssetParameterValue::parse(data_type, value).map_err(AssetDatabaseError::Validation)?;
-    let mut resolved = ResolvedAssetParameterValue {
-        parameter_type_id: definition.parameter_type_id,
-        data_type: definition.data_type.clone(),
-        value_text: None,
-        value_number: None,
-        value_number_in_base: None,
-        value_range_start: None,
-        value_range_end: None,
-        value_range_start_in_base: None,
-        value_range_end_in_base: None,
-        unit_id: None,
-        value_boolean: None,
-        value_date: None,
-        value_option_id: None,
-    };
-
-    match value {
-        AssetParameterValue::Text(text) => resolved.value_text = Some(text),
-        AssetParameterValue::Number { number, unit_id } => {
-            let (unit_id, number_base) =
-                normalize_unit_value(transaction, definition, unit_id.map(Uuid::from), number)
-                    .await?;
-            resolved.value_number = Some(number);
-            resolved.value_number_in_base = number_base;
-            resolved.unit_id = unit_id;
-        }
-        AssetParameterValue::Range {
-            start,
-            end,
-            unit_id,
-        } => {
-            let (unit_id, start_base) =
-                normalize_unit_value(transaction, definition, unit_id.map(Uuid::from), start)
-                    .await?;
-            let (_, end_base) = normalize_unit_value(transaction, definition, unit_id, end).await?;
-            resolved.value_range_start = Some(start);
-            resolved.value_range_end = Some(end);
-            resolved.value_range_start_in_base = start_base;
-            resolved.value_range_end_in_base = end_base;
-            resolved.unit_id = unit_id;
-        }
-        AssetParameterValue::Boolean(boolean) => resolved.value_boolean = Some(boolean),
-        AssetParameterValue::Date(date) => resolved.value_date = Some(date),
-        AssetParameterValue::Enum(option_id) => {
-            validate_option(transaction, definition.parameter_type_id, option_id).await?;
-            resolved.value_option_id = Some(option_id);
-        }
-    }
-
-    Ok(resolved)
-}
-
-async fn normalize_unit_value(
-    transaction: &mut Transaction<'_, Postgres>,
-    definition: &AssetParameterDefinitionRow,
-    unit_id: Option<Uuid>,
-    value: f64,
-) -> Result<(Option<Uuid>, Option<f64>), AssetDatabaseError> {
-    let unit_id = unit_id.or(definition.default_unit_id);
-    let Some(unit_id) = unit_id else {
-        return Ok((None, None));
-    };
-    let unit = fetch_unit(transaction, unit_id).await?;
-
-    match definition.unit_dimension.as_deref() {
-        Some(unit_dimension) if unit_dimension == unit.dimension => {
-            Ok((Some(unit.unit_id), Some(value * unit.scale_to_base)))
-        }
-        Some(_) => Err(AssetDatabaseError::Validation(
-            "Parameter value unit dimension does not match parameter definition".into(),
-        )),
-        None => Err(AssetDatabaseError::Validation(
-            "Parameter value unit is not allowed for this parameter".into(),
-        )),
-    }
 }
 
 /// Every parameter the asset's category marks as required must have a value.

@@ -57,12 +57,21 @@ export const assetParameterOptionSchema = z.object({
   sort_order: z.number(),
 });
 
+export const assetParameterDataTypeSchema = z.enum([
+  "text",
+  "number",
+  "range",
+  "boolean",
+  "date",
+  "enum",
+]);
+
 export const assetParameterSchema = z.object({
   parameter_type_id: z.string().uuid(),
   laboratory_id: z.string().uuid(),
   code: z.string(),
   name: z.string(),
-  data_type: z.enum(["text", "number", "range", "boolean", "date", "enum"]),
+  data_type: assetParameterDataTypeSchema,
   unit_dimension: z.string().nullable(),
   default_unit_id: z.string().uuid().nullable(),
   description: z.string().nullable(),
@@ -72,6 +81,37 @@ export const assetParameterSchema = z.object({
 });
 
 const assetParametersSchema = z.array(assetParameterSchema);
+
+/** How the backend renders a stored value: one key per data type. */
+const assetParameterRuntimeValueSchema = z
+  .object({
+    boolean: z.boolean().nullable().optional(),
+    date: z.string().nullable().optional(),
+    number: z.number().nullable().optional(),
+    number_in_base: z.number().nullable().optional(),
+    option_code: z.string().nullable().optional(),
+    option_id: z.string().uuid().nullable().optional(),
+    option_label: z.string().nullable().optional(),
+    range_end: z.number().nullable().optional(),
+    range_end_in_base: z.number().nullable().optional(),
+    range_start: z.number().nullable().optional(),
+    range_start_in_base: z.number().nullable().optional(),
+    text: z.string().nullable().optional(),
+    unit_id: z.string().uuid().nullable().optional(),
+  })
+  .catchall(z.unknown());
+
+/** One asset's stored value of a parameter. */
+export const assetParameterValueSchema = z.object({
+  asset_id: z.string().uuid(),
+  asset_model: z.string().nullable(),
+  asset_name: z.string(),
+  data_type: assetParameterDataTypeSchema,
+  value: assetParameterRuntimeValueSchema,
+  value_id: z.string().uuid(),
+});
+
+const assetParameterValuesSchema = z.array(assetParameterValueSchema);
 
 export const locationSchema = z.object({
   location_id: z.string().uuid(),
@@ -129,6 +169,7 @@ export type AssetCategoryParameterAssignment = z.infer<
   typeof assetCategoryParameterAssignmentSchema
 >;
 export type AssetParameter = z.infer<typeof assetParameterSchema>;
+export type AssetParameterValue = z.infer<typeof assetParameterValueSchema>;
 export type AssetParameterOption = z.infer<typeof assetParameterOptionSchema>;
 export type Location = z.infer<typeof locationSchema>;
 export type Unit = z.infer<typeof unitSchema>;
@@ -163,6 +204,34 @@ export type AssetParameterOptionPayload = {
   sort_order: number;
 };
 
+/** A value the caller wants stored, in the shape the asset routes accept. */
+export type AssetParameterValueInput =
+  | string
+  | number
+  | boolean
+  | {
+      boolean?: boolean;
+      date?: string;
+      number?: number;
+      option_code?: string;
+      option_id?: string;
+      range_end?: number;
+      range_start?: number;
+      text?: string;
+      unit_id?: string | null;
+    }
+  | null;
+
+/**
+ * Where one stored value ends up when the data type changes. `null` removes the
+ * stored value instead of converting it, and an enum target may name its option
+ * by code — the options a new enum gets are created by this same request.
+ */
+export type AssetParameterValueMigrationPayload = {
+  value_id: string;
+  value: AssetParameterValueInput;
+};
+
 export type AssetParameterPayload = {
   code: string;
   name: string;
@@ -171,6 +240,7 @@ export type AssetParameterPayload = {
   default_unit_id: string | null;
   description: string | null;
   options: AssetParameterOptionPayload[];
+  value_migrations?: AssetParameterValueMigrationPayload[];
 };
 
 export type LocationPayload = {
@@ -213,6 +283,8 @@ export const adminQueryKeys = {
     ["admin", "asset-categories", apiBaseUrl, laboratoryId] as const,
   assetParameters: (apiBaseUrl: string, laboratoryId: string) =>
     ["admin", "asset-parameters", apiBaseUrl, laboratoryId] as const,
+  assetParameterValues: (apiBaseUrl: string, parameterId: string) =>
+    ["admin", "asset-parameter-values", apiBaseUrl, parameterId] as const,
   laboratories: (apiBaseUrl: string) => ["admin", "laboratories", apiBaseUrl] as const,
   ownLaboratory: (apiBaseUrl: string) => ["admin", "laboratory", "own", apiBaseUrl] as const,
   locations: (apiBaseUrl: string, laboratoryId: string) =>
@@ -320,6 +392,39 @@ export function useAssetParameters({
       return assetParametersSchema.parse(
         await client.get(
           laboratoryCollectionPath(dataScope, "asset-parameters", isSystemAdmin(currentUser)),
+        ),
+      );
+    },
+  });
+}
+
+/**
+ * The values a parameter is stored on, which is exactly what a data type change
+ * has to migrate.
+ */
+export function useAssetParameterValues({
+  enabled = true,
+  laboratoryId,
+  parameterId,
+  scope,
+}: {
+  enabled?: boolean;
+  laboratoryId: string;
+  parameterId: string;
+  scope?: LaboratoryDataScope;
+}) {
+  const { apiBaseUrl } = useBackendConfig();
+  const { currentUser } = useAuth();
+  const dataScope = scope ?? localLaboratoryScope(laboratoryId);
+
+  return useQuery({
+    enabled: enabled && Boolean(laboratoryId) && Boolean(parameterId),
+    queryKey: adminQueryKeys.assetParameterValues(apiBaseUrl, parameterId),
+    queryFn: async () => {
+      const client = createApiClient(apiBaseUrl);
+      return assetParameterValuesSchema.parse(
+        await client.get(
+          `${laboratoryCollectionPath(dataScope, "asset-parameters", isSystemAdmin(currentUser))}/${parameterId}/values`,
         ),
       );
     },

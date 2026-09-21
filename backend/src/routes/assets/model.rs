@@ -75,21 +75,6 @@ pub(super) struct AssetParameterValueRow {
     pub(super) updated_at: DateTime<Utc>,
 }
 
-#[derive(Clone, sqlx::FromRow)]
-pub(super) struct AssetParameterDefinitionRow {
-    pub(super) parameter_type_id: Uuid,
-    pub(super) data_type: String,
-    pub(super) unit_dimension: Option<String>,
-    pub(super) default_unit_id: Option<Uuid>,
-}
-
-#[derive(Clone, sqlx::FromRow)]
-pub(super) struct UnitRow {
-    pub(super) unit_id: Uuid,
-    pub(super) dimension: String,
-    pub(super) scale_to_base: f64,
-}
-
 #[derive(Serialize)]
 pub(super) struct AssetInventorySummary {
     item_count: i64,
@@ -157,24 +142,6 @@ pub(super) struct AssetParameterValueResponse {
 pub(super) struct AssetParameterValueInput {
     pub(super) parameter_type_id: Uuid,
     pub(super) value: Option<Value>,
-}
-
-/// A parameter value that has been validated and expanded into the column layout
-/// of `asset_parameter_values`, ready to be written by the query layer.
-pub(super) struct ResolvedAssetParameterValue {
-    pub(super) parameter_type_id: Uuid,
-    pub(super) data_type: String,
-    pub(super) value_text: Option<String>,
-    pub(super) value_number: Option<f64>,
-    pub(super) value_number_in_base: Option<f64>,
-    pub(super) value_range_start: Option<f64>,
-    pub(super) value_range_end: Option<f64>,
-    pub(super) value_range_start_in_base: Option<f64>,
-    pub(super) value_range_end_in_base: Option<f64>,
-    pub(super) unit_id: Option<Uuid>,
-    pub(super) value_boolean: Option<bool>,
-    pub(super) value_date: Option<NaiveDate>,
-    pub(super) value_option_id: Option<Uuid>,
 }
 
 impl AssetResponse {

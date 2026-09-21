@@ -93,6 +93,72 @@ test("login, navigate, theme, audit, and logout", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "登录" })).toBeVisible();
 });
 
+/**
+ * The desktop shell is a fixed-height grid for the same reason the phone shell
+ * is (see mobile-shell.spec.ts): with a `min-height` the row grows to fit the
+ * page, the shell grows with it, and the sidebar scrolls out of view along with
+ * the content. Scrolling belongs to .page-scroll.
+ */
+test("keeps the sidebar in place while a long page scrolls", async ({ page }) => {
+  const auditLogs = Array.from({ length: 40 }, (_, index) => ({
+    action: "create",
+    actor_user_id: currentUser.user_id,
+    actor_username: "root",
+    audit_log_id: `00000000-0000-4000-8000-00000000${String(index).padStart(4, "0")}`,
+    created_at: "2026-06-17T00:00:00Z",
+    details: { rollback: { operation: "delete" } },
+    resource_id: "00000000-0000-4000-8000-000000000011",
+    resource_type: "laboratory",
+  }));
+
+  await page.route("**/api/v1/health_check", (route) => route.fulfill({ status: 200, body: "OK" }));
+  await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: currentUser }));
+  await page.route("**/api/v1/admin/laboratories", async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          address: "A1",
+          contact: null,
+          created_at: "2026-06-17T00:00:00Z",
+          description: null,
+          laboratory_id: "00000000-0000-4000-8000-000000000011",
+          name: "Main Lab",
+          updated_at: "2026-06-17T00:00:00Z",
+        },
+      ],
+    });
+  });
+  await page.route("**/api/v1/audit-logs**", (route) =>
+    route.fulfill({
+      json: { items: auditLogs, limit: 50, offset: 0, total: auditLogs.length },
+    }),
+  );
+  await page.addInitScript((url) => {
+    window.localStorage.setItem("labInventory.apiBaseUrl", url);
+  }, apiBaseUrl);
+
+  await page.goto("/audit-logs");
+  await expect(page.getByRole("heading", { exact: true, name: "审计日志" })).toBeVisible();
+
+  const sidebar = page.locator(".sidebar");
+  test.skip(!(await sidebar.isVisible()), "只有宽屏外壳才有常驻侧边栏");
+
+  const before = await sidebar.boundingBox();
+  expect(before).not.toBeNull();
+
+  // The page itself must not scroll; the content area does.
+  const documentScrolls = await page.evaluate(() => {
+    const root = document.scrollingElement ?? document.documentElement;
+    return root.scrollHeight > root.clientHeight + 1;
+  });
+  expect(documentScrolls).toBe(false);
+
+  await page.locator(".page-scroll").evaluate((node) => node.scrollTo(0, 100_000));
+  const after = await sidebar.boundingBox();
+  expect(Math.round(after!.y)).toBe(Math.round(before!.y));
+  expect(Math.round(after!.height)).toBe(Math.round(before!.height));
+});
+
 async function expectNoHorizontalOverflow(page: Page) {
   await expect
     .poll(() =>

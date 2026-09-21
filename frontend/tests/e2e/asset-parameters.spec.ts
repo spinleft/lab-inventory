@@ -159,6 +159,131 @@ test("manage asset parameters grouped by unit dimension", async ({ page }) => {
   await expectNoHorizontalOverflow(page);
 });
 
+test("changing a parameter's data type migrates the values it stores", async ({ page }) => {
+  const parameterId = "20000000-0000-4000-8000-000000000202";
+  const textParameter = {
+    code: "serial_no",
+    created_at: "2026-06-23T09:05:00Z",
+    data_type: "text",
+    default_unit_id: null,
+    description: null,
+    laboratory_id: laboratoryId,
+    name: "序列号",
+    options: [],
+    parameter_type_id: parameterId,
+    unit_dimension: null,
+    updated_at: "2026-06-23T09:05:00Z",
+  };
+  const storedValues = [
+    {
+      asset_id: "20000000-0000-4000-8000-000000000401",
+      asset_model: "TDS220",
+      asset_name: "示波器",
+      data_type: "text",
+      value: { text: "SN-1" },
+      value_id: "20000000-0000-4000-8000-000000000301",
+    },
+    {
+      asset_id: "20000000-0000-4000-8000-000000000402",
+      asset_model: null,
+      asset_name: "万用表",
+      data_type: "text",
+      value: { text: "SN-2" },
+      value_id: "20000000-0000-4000-8000-000000000302",
+    },
+  ];
+  let patchedParameter: Record<string, unknown> | null = null;
+
+  await page.route("**/api/v1/auth/me", async (route) => {
+    await route.fulfill({ json: currentUser });
+  });
+  await page.route("**/api/v1/admin/laboratories", async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          address: "Building A",
+          contact: null,
+          created_at: "2026-06-23T08:00:00Z",
+          description: null,
+          laboratory_id: laboratoryId,
+          name: "中心实验室",
+          updated_at: "2026-06-23T08:00:00Z",
+        },
+      ],
+    });
+  });
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/units`, async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          allow_decimal: true,
+          code: "mm",
+          created_at: "2026-06-23T08:00:00Z",
+          dimension: "length",
+          name: "毫米",
+          scale_to_base: 0.001,
+          symbol: "mm",
+          unit_id: millimeterUnitId,
+        },
+      ],
+    });
+  });
+  await page.route(
+    `**/api/v1/admin/laboratories/${laboratoryId}/asset-parameters/${parameterId}/values`,
+    async (route) => {
+      await route.fulfill({ json: storedValues });
+    },
+  );
+  await page.route(
+    `**/api/v1/admin/laboratories/${laboratoryId}/asset-parameters/${parameterId}`,
+    async (route) => {
+      if (route.request().method() === "PATCH") {
+        patchedParameter = route.request().postDataJSON() as Record<string, unknown>;
+        await route.fulfill({
+          json: {
+            ...textParameter,
+            ...patchedParameter,
+            updated_at: "2026-06-23T11:00:00Z",
+          },
+        });
+        return;
+      }
+
+      await route.fulfill({ json: textParameter });
+    },
+  );
+  await page.route(`**/api/v1/admin/laboratories/${laboratoryId}/asset-parameters`, async (route) => {
+    await route.fulfill({ json: [textParameter] });
+  });
+  await page.addInitScript((url) => {
+    window.localStorage.setItem("labInventory.apiBaseUrl", url);
+  }, apiBaseUrl);
+
+  await page.goto(appUrl);
+  const row = page.locator("tbody tr", { hasText: "序列号" });
+  await row.getByRole("button", { name: "编辑" }).click();
+  await page.getByLabel("数据类型").click();
+  await page.getByRole("option", { name: "数字" }).click();
+
+  await expect(page.getByRole("heading", { name: "参数值迁移" })).toBeVisible();
+  await expect(page.getByText("2 条待迁移")).toBeVisible();
+  await expect(page.getByText("SN-1")).toBeVisible();
+  // Exact: the unit picker next to it is labelled "示波器迁移后的值单位".
+  await page.getByLabel("示波器迁移后的值", { exact: true }).fill("2.5");
+  await page.getByRole("button", { name: "保存" }).click();
+
+  await expect.poll(() => patchedParameter).toMatchObject({
+    data_type: "number",
+    value_migrations: [
+      {
+        value_id: "20000000-0000-4000-8000-000000000301",
+        value: { number: 2.5 },
+      },
+      { value_id: "20000000-0000-4000-8000-000000000302", value: null },
+    ],
+  });
+});
+
 async function expectAlignedParameterRows(page: Page) {
   const columnLefts = await page.locator(".asset-parameter-groups-table").evaluate((table) =>
     Array.from(table.querySelectorAll("tbody tr:not(.unit-dimension-row)")).map((row) =>

@@ -3,17 +3,34 @@
 //! Anything here orchestrates `queries.rs` and enforces rules that span more
 //! than one row or table. Single-statement work belongs in `queries.rs`; HTTP
 //! concerns belong in the handler modules.
-use super::model::AssetParameterOptionRow;
+use super::model::{AssetParameterOptionRow, AssetParameterValueRow};
 use super::queries::{
     AssetParameterDatabaseError, delete_asset_parameter_options,
-    delete_removed_asset_parameter_options, fetch_asset_parameter_options_for_update,
+    delete_asset_parameter_value_from_database, delete_removed_asset_parameter_options,
+    fetch_asset_parameter_option_id_by_code, fetch_asset_parameter_options_for_update,
     fetch_unit_dimension_for_update, insert_asset_parameter_option,
-    insert_new_asset_parameter_option, update_asset_parameter_option,
+    insert_migrated_asset_parameter_option, insert_new_asset_parameter_option,
+    migrate_asset_parameter_value_in_database, update_asset_parameter_option,
 };
-use crate::domain::{AssetParameterDataType, NewAssetParameterOption, UpdateAssetParameterOption};
+use crate::domain::{
+    AssetParameterCode, AssetParameterDataType, AssetParameterOptionLabel, NewAssetParameterOption,
+    UpdateAssetParameterOption, UpdateAssetParameterValueMigration,
+};
+use crate::routes::shared::parameter_values::{
+    ParameterValueDefinition, ParameterValueError, resolve_parameter_value,
+};
 use sqlx::{Postgres, Transaction};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
+
+impl From<ParameterValueError> for AssetParameterDatabaseError {
+    fn from(error: ParameterValueError) -> Self {
+        match error {
+            ParameterValueError::Validation(message) => Self::Validation(message),
+            ParameterValueError::Unexpected(error) => Self::Unexpected(error),
+        }
+    }
+}
 
 /// Options only mean something for an enum parameter, and an enum parameter
 /// without options could never be given a value.
@@ -255,4 +272,112 @@ pub(super) async fn apply_option_updates(
         }
         None => Ok(existing_options.to_vec()),
     }
+}
+
+/// Rewrites the parameter's stored values for a data type change.
+///
+/// The rows keep their identity: the migration rewrites the columns of the new
+/// type in place and leaves the columns of the type they had before as they
+/// were, so both readings live in the same row. A migration with no value
+/// removes the row instead.
+pub(super) async fn migrate_parameter_values(
+    transaction: &mut Transaction<'_, Postgres>,
+    parameter_id: Uuid,
+    data_type: AssetParameterDataType,
+    unit_dimension: Option<&str>,
+    default_unit_id: Option<Uuid>,
+    values: &[AssetParameterValueRow],
+    migrations: &[UpdateAssetParameterValueMigration],
+) -> Result<(), AssetParameterDatabaseError> {
+    let definition = ParameterValueDefinition {
+        parameter_type_id: parameter_id,
+        data_type: data_type.as_str().to_string(),
+        unit_dimension: unit_dimension.map(ToOwned::to_owned),
+        default_unit_id,
+    };
+    let migrations_by_value_id: HashMap<Uuid, &UpdateAssetParameterValueMigration> = migrations
+        .iter()
+        .map(|migration| (migration.value_id, migration))
+        .collect();
+
+    /// A migration that lands on an enum option names it by code, because there
+    /// is no id to name yet: the option either comes with the same request or is
+    /// created here, with `option_label` as its label and the code as the
+    /// fallback. Every other case is passed through untouched.
+    async fn resolve_migration_target(
+        transaction: &mut Transaction<'_, Postgres>,
+        parameter_id: Uuid,
+        data_type: AssetParameterDataType,
+        value: &serde_json::Value,
+    ) -> Result<serde_json::Value, AssetParameterDatabaseError> {
+        if data_type != AssetParameterDataType::Enum
+            || value.get("option_id").is_some()
+            || value.get("option_code").is_none()
+        {
+            return Ok(value.clone());
+        }
+
+        let code = value
+            .get("option_code")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(AssetParameterDatabaseError::Validation(
+                "Asset parameter option code must be a string".into(),
+            ))?;
+        if let Some(option_id) =
+            fetch_asset_parameter_option_id_by_code(transaction, parameter_id, code).await?
+        {
+            return Ok(serde_json::json!({ "option_id": option_id }));
+        }
+
+        let label = match value.get("option_label") {
+            Some(label) => label
+                .as_str()
+                .ok_or(AssetParameterDatabaseError::Validation(
+                    "Asset parameter option label must be a string".into(),
+                ))?,
+            None => code,
+        };
+        let code = AssetParameterCode::parse(code.to_string())
+            .map_err(AssetParameterDatabaseError::Validation)?;
+        let label = AssetParameterOptionLabel::parse(label.to_string())
+            .map_err(AssetParameterDatabaseError::Validation)?;
+        let option_id = insert_migrated_asset_parameter_option(
+            transaction,
+            parameter_id,
+            code.as_ref(),
+            label.as_ref(),
+        )
+        .await?;
+
+        Ok(serde_json::json!({ "option_id": option_id }))
+    }
+
+    for value in values {
+        let Some(migration) = migrations_by_value_id.get(&value.value_id) else {
+            return Err(AssetParameterDatabaseError::Validation(
+                "All stored values must be migrated when the asset parameter data type changes"
+                    .into(),
+            ));
+        };
+
+        match migration.value.as_ref() {
+            Some(target) => {
+                let target =
+                    resolve_migration_target(transaction, parameter_id, data_type, target).await?;
+                let resolved = resolve_parameter_value(transaction, &definition, &target).await?;
+                migrate_asset_parameter_value_in_database(
+                    transaction,
+                    value.value_id,
+                    data_type,
+                    &resolved,
+                )
+                .await?;
+            }
+            None => {
+                delete_asset_parameter_value_from_database(transaction, value.value_id).await?;
+            }
+        }
+    }
+
+    Ok(())
 }
