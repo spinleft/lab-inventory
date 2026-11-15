@@ -6,7 +6,11 @@
 [advisories]
 # 未修复的漏洞一律失败;确实无法处理的,在这里逐条豁免并写清原因。
 yanked = "deny"
-ignore = []
+ignore = [
+    # actix-http (latest compatible line) still depends on h2 0.3.x.
+    # Follow-up required once actix-http switches to h2 >= 0.4.16.
+    "RUSTSEC-2026-0258",
+]
 
 [licenses]
 # 项目本身是 MIT。允许的都是宽松许可,不会传染到使用方。
