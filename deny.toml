@@ -10,6 +10,11 @@ ignore = [
     # actix-http (latest compatible line) still depends on h2 0.3.x.
     # Follow-up required once actix-http switches to h2 >= 0.4.16.
     "RUSTSEC-2026-0258",
+    # chrono 已无人维护，所有版本受影响，上游没有给出安全升级（RUSTSEC-2026-0543）。
+    # 它是纯时间格式化依赖，不参与鉴权、网络或 SQL。chrono 出现在 backend/src
+    # 下约 28 个文件（asset parameters、审计日志、联邦、文件上传等），迁移到
+    # jiff/time 属于独立的一次改造，先按此豁免跟进。
+    "RUSTSEC-2026-0543",
 ]
 
 [licenses]
