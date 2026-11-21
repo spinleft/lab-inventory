@@ -10,6 +10,10 @@ ignore = [
     # actix-http (latest compatible line) still depends on h2 0.3.x.
     # Follow-up required once actix-http switches to h2 >= 0.4.16.
     "RUSTSEC-2026-0258",
+    # chrono 0.4.45 已被上游标记为无人维护(RUSTSEC-2026-0543),没有任何安全升级版本;
+    # 替代方案是 time / jiff。backend 里 chrono 的 DateTime/NaiveDate/Duration 用得很广,
+    # 换 crate 得单独做一次改动,换掉之后把这条删掉。
+    "RUSTSEC-2026-0543",
 ]
 
 [licenses]
