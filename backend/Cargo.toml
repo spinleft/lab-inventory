@@ -25,7 +25,7 @@ name = "lab-inventory-admin"
 actix-cors = "0.7"
 actix-multipart = "0.7"
 actix-session = { version = "0.11", features = ["redis-session-rustls"] }
-actix-web = "4"
+actix-web = "4.20"
 anyhow = "1"
 argon2 = { version = "0.5", features = ["std"] }
 base64 = "0.22"
